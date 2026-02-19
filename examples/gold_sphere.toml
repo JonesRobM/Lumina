@@ -1,0 +1,22 @@
+# LuminaCDA Example: Gold Nanosphere
+#
+# This is the primary validation case. The CDA result for a 20 nm gold
+# sphere should match the analytical Mie theory extinction cross-section.
+
+[simulation]
+wavelengths = { range = [400.0, 900.0], points = 100 }
+environment_n = 1.0  # Vacuum
+
+[[geometry.object]]
+name = "Au_Sphere_20nm"
+type = "sphere"
+centre = [0.0, 0.0, 0.0]
+radius = 20.0
+material = "Au_JC"
+dipole_spacing = 2.0  # nm
+
+[output]
+directory = "./output/gold_sphere"
+save_spectra = true
+save_near_field = true
+save_dipoles = false
