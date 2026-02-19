@@ -1,0 +1,24 @@
+[package]
+name = "lumina-core"
+description = "Core physics engine for the LuminaCDA coupled dipole approximation framework"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+ndarray = { workspace = true }
+num-complex = { workspace = true }
+faer = { workspace = true }
+nalgebra = { workspace = true }
+rayon = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }
+serde = { workspace = true }
+
+lumina-compute = { workspace = true }
+lumina-geometry = { workspace = true }
+lumina-materials = { workspace = true }
+
+[dev-dependencies]
+approx = { workspace = true }

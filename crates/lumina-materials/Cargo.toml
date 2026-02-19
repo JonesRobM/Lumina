@@ -1,0 +1,14 @@
+[package]
+name = "lumina-materials"
+description = "Material property providers and interpolation for LuminaCDA"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+num-complex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }

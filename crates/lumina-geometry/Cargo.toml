@@ -1,0 +1,13 @@
+[package]
+name = "lumina-geometry"
+description = "Geometry primitives, file parsers, and dipole lattice discretisation for LuminaCDA"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }
+nalgebra = { workspace = true }

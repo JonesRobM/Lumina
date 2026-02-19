@@ -1,0 +1,14 @@
+[book]
+title = "Lumina Documentation"
+authors = ["Lumina Contributors"]
+description = "Comprehensive documentation for the Lumina coupled dipole approximation framework."
+language = "en"
+src = "src"
+
+[build]
+build-dir = "../target/book"
+
+[output.html]
+default-theme = "navy"
+preferred-dark-theme = "navy"
+git-repository-url = "https://github.com/YOUR_USERNAME/Lumina"

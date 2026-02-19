@@ -1,0 +1,34 @@
+# LuminaCDA Example: Chiral Dimer
+#
+# A pair of gold nanorods arranged in a twisted (chiral) configuration.
+# Demonstrates multi-object geometry and chiroptical response.
+
+[simulation]
+wavelengths = { range = [400.0, 900.0], points = 100 }
+environment_n = 1.33  # Water/Buffer
+
+[[geometry.object]]
+name = "Rod_Bottom"
+type = "cylinder"
+base_centre = [0.0, 0.0, -15.0]
+axis = [1.0, 0.0, 0.0]
+length = 60.0
+radius = 10.0
+material = "Au_JC"
+dipole_spacing = 2.0
+
+[[geometry.object]]
+name = "Rod_Top"
+type = "cylinder"
+base_centre = [0.0, 0.0, 15.0]
+axis = [0.707, 0.707, 0.0]  # Rotated 45 degrees
+length = 60.0
+radius = 10.0
+material = "Au_JC"
+dipole_spacing = 2.0
+
+[output]
+directory = "./output/chiral_dimer"
+save_spectra = true
+save_near_field = true
+save_dipoles = true
