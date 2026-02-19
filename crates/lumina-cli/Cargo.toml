@@ -1,6 +1,6 @@
 [package]
 name = "lumina-cli"
-description = "Command-line interface for headless LuminaCDA simulation runs"
+description = "Command-line interface for headless Lumina simulation runs"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

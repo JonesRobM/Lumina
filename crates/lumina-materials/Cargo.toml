@@ -1,6 +1,6 @@
 [package]
 name = "lumina-materials"
-description = "Material property providers and interpolation for LuminaCDA"
+description = "Material property providers and interpolation for Lumina"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

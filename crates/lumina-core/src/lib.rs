@@ -1,6 +1,6 @@
-//! # LuminaCDA Core
+//! # Lumina Core
 //!
-//! The numerical backbone of the LuminaCDA framework. This crate implements
+//! The numerical backbone of the Lumina framework. This crate implements
 //! optical solvers for computing the electromagnetic response of nanostructured
 //! materials.
 //!

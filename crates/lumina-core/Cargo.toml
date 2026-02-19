@@ -1,6 +1,6 @@
 [package]
 name = "lumina-core"
-description = "Core physics engine for the LuminaCDA coupled dipole approximation framework"
+description = "Core physics engine for the Lumina coupled dipole approximation framework"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

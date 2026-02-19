@@ -1,6 +1,6 @@
-//! # LuminaCDA Geometry
+//! # Lumina Geometry
 //!
-//! Geometry handling for the LuminaCDA framework. This crate provides:
+//! Geometry handling for the Lumina framework. This crate provides:
 //!
 //! - **Parametric primitives** ([`primitives`]) — Spheres, cylinders, cuboids,
 //!   helices, and ellipsoids defined by simple parameters.

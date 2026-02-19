@@ -1,6 +1,6 @@
 [package]
 name = "lumina-geometry"
-description = "Geometry primitives, file parsers, and dipole lattice discretisation for LuminaCDA"
+description = "Geometry primitives, file parsers, and dipole lattice discretisation for Lumina"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

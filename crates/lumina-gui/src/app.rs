@@ -4,7 +4,7 @@ use eframe::egui;
 
 use crate::panels;
 
-/// The main LuminaCDA application.
+/// The main Lumina application.
 pub struct LuminaApp {
     /// Which panel is currently selected in the sidebar.
     active_panel: Panel,
@@ -46,7 +46,7 @@ impl eframe::App for LuminaApp {
             .resizable(false)
             .default_width(160.0)
             .show(ctx, |ui| {
-                ui.heading("LuminaCDA");
+                ui.heading("Lumina");
                 ui.separator();
 
                 ui.selectable_value(&mut self.active_panel, Panel::Geometry, "Geometry");

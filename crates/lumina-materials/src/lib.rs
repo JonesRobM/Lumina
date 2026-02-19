@@ -1,6 +1,6 @@
-//! # LuminaCDA Materials
+//! # Lumina Materials
 //!
-//! Material property providers for the LuminaCDA framework. All materials
+//! Material property providers for the Lumina framework. All materials
 //! implement the [`MaterialProvider`](provider::MaterialProvider) trait,
 //! which provides frequency-dependent complex dielectric functions.
 //!

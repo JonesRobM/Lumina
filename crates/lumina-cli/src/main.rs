@@ -1,4 +1,4 @@
-//! LuminaCDA command-line interface.
+//! Lumina command-line interface.
 //!
 //! Run simulations from TOML configuration files:
 //! ```sh
@@ -13,7 +13,7 @@ use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(name = "lumina-cli")]
-#[command(about = "LuminaCDA: Coupled Dipole Approximation Framework")]
+#[command(about = "Lumina: Coupled Dipole Approximation Framework")]
 #[command(version)]
 struct Cli {
     #[command(subcommand)]

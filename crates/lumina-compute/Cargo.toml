@@ -1,6 +1,6 @@
 [package]
 name = "lumina-compute"
-description = "Compute backend abstraction for LuminaCDA (CPU, GPU, distributed)"
+description = "Compute backend abstraction for Lumina (CPU, GPU, distributed)"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

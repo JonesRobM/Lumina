@@ -1,4 +1,4 @@
-//! GUI panels for the LuminaCDA dashboard.
+//! GUI panels for the Lumina dashboard.
 
 pub mod geometry;
 pub mod materials;

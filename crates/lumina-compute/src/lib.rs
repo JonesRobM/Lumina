@@ -1,6 +1,6 @@
-//! # LuminaCDA Compute
+//! # Lumina Compute
 //!
-//! Compute backend abstraction for the LuminaCDA framework. This crate
+//! Compute backend abstraction for the Lumina framework. This crate
 //! provides a [`ComputeBackend`](backend::ComputeBackend) trait that isolates
 //! the physics code from device-specific execution details.
 //!

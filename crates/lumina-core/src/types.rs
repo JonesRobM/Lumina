@@ -1,4 +1,4 @@
-//! Core types shared across the LuminaCDA framework.
+//! Core types shared across the Lumina framework.
 //!
 //! This module defines the fundamental data structures used throughout the
 //! simulation pipeline: dipoles, simulation parameters, and result containers.

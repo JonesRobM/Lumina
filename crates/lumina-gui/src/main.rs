@@ -1,4 +1,4 @@
-//! LuminaCDA GUI application entry point.
+//! Lumina GUI application entry point.
 
 mod app;
 mod panels;
@@ -14,7 +14,7 @@ fn main() -> eframe::Result {
     };
 
     eframe::run_native(
-        "LuminaCDA",
+        "Lumina",
         options,
         Box::new(|_cc| Ok(Box::new(app::LuminaApp::default()))),
     )

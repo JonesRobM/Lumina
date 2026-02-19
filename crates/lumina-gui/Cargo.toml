@@ -1,6 +1,6 @@
 [package]
 name = "lumina-gui"
-description = "Interactive GUI dashboard for the LuminaCDA framework"
+description = "Interactive GUI dashboard for the Lumina framework"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
