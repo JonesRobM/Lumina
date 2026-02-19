@@ -17,6 +17,62 @@ pub struct Dipole {
     pub polarisability: [Complex64; 9],
 }
 
+impl Dipole {
+    /// Create a dipole with isotropic (scalar) polarisability.
+    pub fn isotropic(position: [f64; 3], alpha: Complex64) -> Self {
+        let zero = Complex64::new(0.0, 0.0);
+        Self {
+            position,
+            polarisability: [
+                alpha, zero, zero,
+                zero, alpha, zero,
+                zero, zero, alpha,
+            ],
+        }
+    }
+}
+
+/// Incident plane wave specification.
+#[derive(Debug, Clone)]
+pub struct IncidentField {
+    /// Propagation direction (unit vector).
+    pub direction: [f64; 3],
+    /// Polarisation vector (unit vector, perpendicular to direction).
+    pub polarisation: [f64; 3],
+    /// Amplitude (V/m). Typically set to 1.0 for cross-section calculations.
+    pub amplitude: f64,
+}
+
+impl Default for IncidentField {
+    fn default() -> Self {
+        Self {
+            direction: [0.0, 0.0, 1.0],    // propagating along z
+            polarisation: [1.0, 0.0, 0.0],  // x-polarised
+            amplitude: 1.0,
+        }
+    }
+}
+
+impl IncidentField {
+    /// Evaluate the incident field at a given position.
+    ///
+    /// $\mathbf{E}_{\text{inc}}(\mathbf{r}) = E_0 \hat{\mathbf{e}} \exp(i \mathbf{k} \cdot \mathbf{r})$
+    pub fn at_position(&self, position: &[f64; 3], k: f64) -> [Complex64; 3] {
+        let kdotr = k * (
+            self.direction[0] * position[0]
+            + self.direction[1] * position[1]
+            + self.direction[2] * position[2]
+        );
+        let phase = Complex64::new(0.0, kdotr).exp();
+        let e0 = Complex64::from(self.amplitude);
+        [
+            e0 * self.polarisation[0] * phase,
+            e0 * self.polarisation[1] * phase,
+            e0 * self.polarisation[2] * phase,
+        ]
+    }
+}
+
 /// Parameters defining a simulation run.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SimulationParams {
@@ -92,4 +148,33 @@ pub struct SimulationResult {
     pub dipole_responses: Option<Vec<DipoleResponse>>,
     /// Near-field maps (optional).
     pub near_field_maps: Option<Vec<NearFieldMap>>,
+}
+
+/// Compute the Clausius-Mossotti polarisability for a small volume element.
+///
+/// $\alpha_{\text{CM}} = 3 V \epsilon_0 \frac{\epsilon - \epsilon_m}{\epsilon + 2\epsilon_m}$
+///
+/// Note: we work in Gaussian-like units where $\epsilon_0$ is absorbed, so the
+/// returned polarisability has units of volume (nm^3).
+///
+/// # Arguments
+/// * `volume_nm3` - Volume of the dipole element in nm^3 (typically $d^3$).
+/// * `epsilon` - Complex dielectric function of the material.
+/// * `epsilon_m` - Dielectric constant of the surrounding medium ($n_m^2$).
+pub fn clausius_mossotti(volume_nm3: f64, epsilon: Complex64, epsilon_m: f64) -> Complex64 {
+    let eps_m = Complex64::from(epsilon_m);
+    3.0 * volume_nm3 * (epsilon - eps_m) / (epsilon + 2.0 * eps_m)
+}
+
+/// Apply the Draine radiative correction to the Clausius-Mossotti polarisability.
+///
+/// This ensures optical theorem consistency (energy conservation):
+/// $\alpha_{\text{rad}} = \frac{\alpha_{\text{CM}}}{1 - \frac{i k^3}{6\pi} \alpha_{\text{CM}}}$
+///
+/// # Arguments
+/// * `alpha_cm` - Clausius-Mossotti polarisability.
+/// * `k` - Wavenumber in the medium (nm^{-1}).
+pub fn radiative_correction(alpha_cm: Complex64, k: f64) -> Complex64 {
+    let correction = Complex64::new(0.0, k.powi(3) / (6.0 * std::f64::consts::PI));
+    alpha_cm / (Complex64::from(1.0) - correction * alpha_cm)
 }

@@ -17,20 +17,25 @@ pub mod direct;
 pub mod greens;
 pub mod iterative;
 
+use ndarray::Array2;
+use num_complex::Complex64;
+
 use super::{NearFieldPlane, OpticalSolver, SolverError};
-use crate::types::{CrossSections, Dipole, DipoleResponse, NearFieldMap};
-use crate::types::SimulationParams;
+use crate::types::{CrossSections, Dipole, DipoleResponse, IncidentField, NearFieldMap, SimulationParams};
 
 /// The CDA solver, holding configuration for the numerical method.
 pub struct CdaSolver {
     /// Threshold number of dipoles above which the iterative solver is used.
     pub iterative_threshold: usize,
+    /// Incident field specification.
+    pub incident_field: IncidentField,
 }
 
 impl Default for CdaSolver {
     fn default() -> Self {
         Self {
             iterative_threshold: 1000,
+            incident_field: IncidentField::default(),
         }
     }
 }
@@ -39,40 +44,144 @@ impl CdaSolver {
     pub fn new(iterative_threshold: usize) -> Self {
         Self {
             iterative_threshold,
+            incident_field: IncidentField::default(),
         }
+    }
+
+    /// Compute the wavenumber in the medium from wavelength and refractive index.
+    fn wavenumber(wavelength_nm: f64, n_medium: f64) -> f64 {
+        2.0 * std::f64::consts::PI * n_medium / wavelength_nm
     }
 }
 
 impl OpticalSolver for CdaSolver {
     fn compute_cross_sections(
         &self,
-        _dipoles: &[Dipole],
-        _wavelength_nm: f64,
-        _params: &SimulationParams,
+        dipoles: &[Dipole],
+        wavelength_nm: f64,
+        params: &SimulationParams,
     ) -> Result<CrossSections, SolverError> {
-        // TODO: Implement — assemble interaction matrix, solve, compute
-        // extinction/absorption/scattering from dipole moments.
-        todo!("CDA cross-section computation")
+        let response = self.solve_dipoles(dipoles, wavelength_nm, params)?;
+        let k = Self::wavenumber(wavelength_nm, params.environment_n);
+        let e0_sq = self.incident_field.amplitude * self.incident_field.amplitude;
+
+        let n = dipoles.len();
+
+        // Extinction: C_ext = (4*pi*k / |E0|^2) * Sum_i Im(E_inc,i* . p_i)
+        let mut c_ext = 0.0;
+        for i in 0..n {
+            let e_inc = self.incident_field.at_position(&dipoles[i].position, k);
+            for c in 0..3 {
+                c_ext += (e_inc[c].conj() * response.moments[[i, c]]).im;
+            }
+        }
+        c_ext *= 4.0 * std::f64::consts::PI * k / e0_sq;
+
+        // Absorption: C_abs = (4*pi*k / |E0|^2) * Sum_i [ Im(p_i . (alpha_i^{-1})* . p_i*) - (2/3)k^3 |p_i|^2 ]
+        let mut c_abs = 0.0;
+        let k3 = k.powi(3);
+        for i in 0..n {
+            // Get inverse polarisability (alpha^{-1}) for this dipole
+            let inv_alpha = assembly::invert_3x3_pub(&dipoles[i].polarisability);
+
+            // Compute p_i . (alpha_i^{-1})* . p_i*
+            // This is sum_{a,b} p_a * conj(inv_alpha_{ab}) * conj(p_b)
+            let mut pa_inv_alpha_conj_p = Complex64::from(0.0);
+            for a in 0..3 {
+                for b in 0..3 {
+                    pa_inv_alpha_conj_p += response.moments[[i, a]]
+                        * inv_alpha[3 * a + b].conj()
+                        * response.moments[[i, b]].conj();
+                }
+            }
+
+            // |p_i|^2
+            let p_sq: f64 = (0..3)
+                .map(|c| response.moments[[i, c]].norm_sqr())
+                .sum();
+
+            c_abs += pa_inv_alpha_conj_p.im - (2.0 / 3.0) * k3 * p_sq;
+        }
+        c_abs *= 4.0 * std::f64::consts::PI * k / e0_sq;
+
+        let c_sca = c_ext - c_abs;
+
+        Ok(CrossSections {
+            wavelength_nm,
+            extinction: c_ext,
+            absorption: c_abs,
+            scattering: c_sca.max(0.0), // Numerical noise can make this slightly negative
+        })
     }
 
     fn solve_dipoles(
         &self,
-        _dipoles: &[Dipole],
-        _wavelength_nm: f64,
-        _params: &SimulationParams,
+        dipoles: &[Dipole],
+        wavelength_nm: f64,
+        params: &SimulationParams,
     ) -> Result<DipoleResponse, SolverError> {
-        // TODO: Implement — core CDA linear system solve.
-        todo!("CDA dipole solve")
+        if dipoles.is_empty() {
+            return Err(SolverError::InvalidGeometry("No dipoles provided".into()));
+        }
+
+        let k = Self::wavenumber(wavelength_nm, params.environment_n);
+        let n = dipoles.len();
+
+        // Assemble the interaction matrix
+        let matrix = assembly::assemble_interaction_matrix(dipoles, k);
+
+        // Build the RHS (incident field at each dipole)
+        let rhs = assembly::build_incident_field_vector(dipoles, &self.incident_field, k);
+
+        // Solve: use direct for small systems, GMRES for large
+        let solution = if n <= self.iterative_threshold {
+            direct::solve_direct(&matrix, &rhs)
+                .map_err(|e| SolverError::LinAlgError(e.to_string()))?
+        } else {
+            // TODO: Fall back to GMRES for large systems
+            direct::solve_direct(&matrix, &rhs)
+                .map_err(|e| SolverError::LinAlgError(e.to_string()))?
+        };
+
+        // Reshape the solution into (N, 3) dipole moments
+        let mut moments = Array2::<Complex64>::zeros((n, 3));
+        let mut local_fields = Array2::<Complex64>::zeros((n, 3));
+
+        for i in 0..n {
+            for c in 0..3 {
+                moments[[i, c]] = solution[3 * i + c];
+            }
+            // Local field = E_inc + sum_j G_ij . p_j  (which equals alpha^{-1} . p_i)
+            // More simply: E_loc,i = alpha_i^{-1} . p_i
+            let inv_alpha = assembly::invert_3x3_pub(&dipoles[i].polarisability);
+            for a in 0..3 {
+                let mut e_loc = Complex64::from(0.0);
+                for b in 0..3 {
+                    e_loc += inv_alpha[3 * a + b] * moments[[i, b]];
+                }
+                local_fields[[i, a]] = e_loc;
+            }
+        }
+
+        Ok(DipoleResponse {
+            wavelength_nm,
+            moments,
+            local_fields,
+        })
     }
 
     fn compute_near_field(
         &self,
-        _dipoles: &[Dipole],
-        _response: &DipoleResponse,
-        _plane: &NearFieldPlane,
+        dipoles: &[Dipole],
+        response: &DipoleResponse,
+        plane: &NearFieldPlane,
     ) -> Result<NearFieldMap, SolverError> {
-        // TODO: Implement — sum dipole field contributions on observation grid.
-        todo!("CDA near-field computation")
+        let k = Self::wavenumber(
+            response.wavelength_nm,
+            1.0, // TODO: pass params through
+        );
+
+        crate::fields::compute_near_field_map(dipoles, response, plane, k, &self.incident_field)
     }
 
     fn method_name(&self) -> &str {

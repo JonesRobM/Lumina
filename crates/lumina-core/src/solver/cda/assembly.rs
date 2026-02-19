@@ -9,10 +9,10 @@
 //! The self-consistent dipole moments $\mathbf{p}$ satisfy:
 //! $$\mathbf{A} \mathbf{p} = \mathbf{E}_{\text{inc}}$$
 
-use ndarray::Array2;
+use ndarray::{Array1, Array2};
 use num_complex::Complex64;
 
-use crate::types::Dipole;
+use crate::types::{Dipole, IncidentField};
 
 /// Assemble the full $3N \times 3N$ interaction matrix.
 ///
@@ -28,21 +28,24 @@ pub fn assemble_interaction_matrix(dipoles: &[Dipole], k: f64) -> Array2<Complex
     let mut matrix = Array2::<Complex64>::zeros((dim, dim));
 
     for i in 0..n {
-        // Diagonal block: inverse polarisability
-        // The polarisability is stored as a flat 3x3 in row-major order
+        // Diagonal block: inverse polarisability (3x3)
+        let inv_alpha = invert_3x3(&dipoles[i].polarisability);
         for row in 0..3 {
             for col in 0..3 {
-                matrix[[3 * i + row, 3 * i + col]] = dipoles[i].polarisability[3 * row + col];
+                matrix[[3 * i + row, 3 * i + col]] = inv_alpha[3 * row + col];
             }
         }
-        // TODO: invert the 3x3 polarisability block on the diagonal
 
         // Off-diagonal blocks: -G(r_i, r_j)
         for j in 0..n {
             if i == j {
                 continue;
             }
-            let g = super::greens::dyadic_greens_tensor(&dipoles[i].position, &dipoles[j].position, k);
+            let g = super::greens::dyadic_greens_tensor(
+                &dipoles[i].position,
+                &dipoles[j].position,
+                k,
+            );
             for row in 0..3 {
                 for col in 0..3 {
                     matrix[[3 * i + row, 3 * j + col]] = -g[[row, col]];
@@ -52,4 +55,89 @@ pub fn assemble_interaction_matrix(dipoles: &[Dipole], k: f64) -> Array2<Complex
     }
 
     matrix
+}
+
+/// Construct the incident field vector (length 3N) for all dipoles.
+pub fn build_incident_field_vector(
+    dipoles: &[Dipole],
+    incident: &IncidentField,
+    k: f64,
+) -> Array1<Complex64> {
+    let n = dipoles.len();
+    let mut rhs = Array1::<Complex64>::zeros(3 * n);
+
+    for (i, dipole) in dipoles.iter().enumerate() {
+        let e = incident.at_position(&dipole.position, k);
+        rhs[3 * i] = e[0];
+        rhs[3 * i + 1] = e[1];
+        rhs[3 * i + 2] = e[2];
+    }
+
+    rhs
+}
+
+/// Public wrapper for 3x3 inversion, used by cross-section computation.
+pub fn invert_3x3_pub(m: &[Complex64; 9]) -> [Complex64; 9] {
+    invert_3x3(m)
+}
+
+/// Invert a 3x3 complex matrix stored as a flat [9] array (row-major).
+fn invert_3x3(m: &[Complex64; 9]) -> [Complex64; 9] {
+    // For an isotropic polarisability (diagonal), this simplifies to 1/alpha on the diagonal.
+    // General case: compute cofactor matrix and determinant.
+    let a = m[0]; let b = m[1]; let c = m[2];
+    let d = m[3]; let e = m[4]; let f = m[5];
+    let g = m[6]; let h = m[7]; let k = m[8];
+
+    let det = a * (e * k - f * h) - b * (d * k - f * g) + c * (d * h - e * g);
+
+    assert!(
+        det.norm() > 1e-30,
+        "Singular polarisability tensor (det = {:.2e})",
+        det.norm()
+    );
+
+    let inv_det = Complex64::from(1.0) / det;
+
+    [
+        inv_det * (e * k - f * h),
+        inv_det * (c * h - b * k),
+        inv_det * (b * f - c * e),
+        inv_det * (f * g - d * k),
+        inv_det * (a * k - c * g),
+        inv_det * (c * d - a * f),
+        inv_det * (d * h - e * g),
+        inv_det * (b * g - a * h),
+        inv_det * (a * e - b * d),
+    ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_invert_3x3_identity() {
+        let one = Complex64::from(1.0);
+        let zero = Complex64::from(0.0);
+        let id = [one, zero, zero, zero, one, zero, zero, zero, one];
+        let inv = invert_3x3(&id);
+        for i in 0..9 {
+            let expected = if i % 4 == 0 { 1.0 } else { 0.0 };
+            assert!((inv[i].re - expected).abs() < 1e-12);
+            assert!(inv[i].im.abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn test_invert_3x3_isotropic() {
+        let alpha = Complex64::new(2.0, 0.5);
+        let zero = Complex64::from(0.0);
+        let m = [alpha, zero, zero, zero, alpha, zero, zero, zero, alpha];
+        let inv = invert_3x3(&m);
+        let expected = Complex64::from(1.0) / alpha;
+        assert!((inv[0] - expected).norm() < 1e-12);
+        assert!((inv[4] - expected).norm() < 1e-12);
+        assert!((inv[8] - expected).norm() < 1e-12);
+    }
 }
