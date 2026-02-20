@@ -29,21 +29,28 @@ pub fn discretise_primitive(primitive: &Primitive, spacing: f64) -> Vec<LatticeP
     let (min, max) = primitive.bounding_box();
     let mut points = Vec::new();
 
-    let mut x = min[0];
-    while x <= max[0] {
-        let mut y = min[1];
-        while y <= max[1] {
-            let mut z = min[2];
-            while z <= max[2] {
+    // Centre the lattice on the midpoint of the bounding box so that the
+    // grid is symmetric about the shape centre.
+    let cx = 0.5 * (min[0] + max[0]);
+    let cy = 0.5 * (min[1] + max[1]);
+    let cz = 0.5 * (min[2] + max[2]);
+
+    let nx = ((max[0] - cx) / spacing).floor() as i32;
+    let ny = ((max[1] - cy) / spacing).floor() as i32;
+    let nz = ((max[2] - cz) / spacing).floor() as i32;
+
+    for ix in -nx..=nx {
+        let x = cx + ix as f64 * spacing;
+        for iy in -ny..=ny {
+            let y = cy + iy as f64 * spacing;
+            for iz in -nz..=nz {
+                let z = cz + iz as f64 * spacing;
                 let p = [x, y, z];
                 if primitive.contains(&p) {
                     points.push(LatticePoint { position: p });
                 }
-                z += spacing;
             }
-            y += spacing;
         }
-        x += spacing;
     }
 
     points

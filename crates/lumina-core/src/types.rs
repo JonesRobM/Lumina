@@ -178,3 +178,62 @@ pub fn radiative_correction(alpha_cm: Complex64, k: f64) -> Complex64 {
     let correction = Complex64::new(0.0, k.powi(3) / (6.0 * std::f64::consts::PI));
     alpha_cm / (Complex64::from(1.0) - correction * alpha_cm)
 }
+
+/// Apply the Lattice Dispersion Relation (LDR) correction to the polarisability.
+///
+/// The LDR correction (Draine & Goodman, *Astrophys. J.* **405**, 685, 1993)
+/// modifies the Clausius-Mossotti polarisability so that a cubic lattice of
+/// point dipoles correctly reproduces the bulk dielectric dispersion relation.
+/// This is critical for metallic particles where the standard CM prescription
+/// gives poor convergence.
+///
+/// The corrected inverse polarisability is:
+/// $$\alpha_{\text{LDR}}^{-1} = \alpha_{\text{CM}}^{-1}
+///   - \frac{ik^3}{6\pi}
+///   - \frac{k^2}{d}\bigl(b_1 + b_2 \epsilon + b_3 \epsilon S\bigr)$$
+///
+/// where $S$ depends on the propagation and polarisation directions.
+///
+/// # Arguments
+/// * `alpha_cm` - Clausius-Mossotti polarisability (nm^3).
+/// * `k` - Wavenumber in the medium (nm^{-1}).
+/// * `d` - Lattice spacing (nm).
+/// * `epsilon` - Complex dielectric function of the particle material.
+/// * `propagation` - Propagation direction (unit vector).
+/// * `polarisation` - Polarisation direction (unit vector).
+pub fn ldr_correction(
+    alpha_cm: Complex64,
+    k: f64,
+    d: f64,
+    epsilon: Complex64,
+    propagation: &[f64; 3],
+    polarisation: &[f64; 3],
+) -> Complex64 {
+    // Draine & Goodman (1993) LDR coefficients
+    let b1 = Complex64::new(-1.891_531_6, 0.0);
+    let b2 = Complex64::new(0.164_846_9, 0.0);
+    let b3 = Complex64::new(-1.770_000_4, 0.0);
+
+    // S = sum_i (a_i * k_hat_i)^2 where a = polarisation, k_hat = propagation
+    // For x-polarised, z-propagating: S = 0 (since a_x*k_x = 1*0 = 0, etc.)
+    let s: f64 = (0..3).map(|i| {
+        let ak = polarisation[i] * propagation[i];
+        ak * ak
+    }).sum();
+    let s = Complex64::from(s);
+
+    // Radiative reaction: ik^3/(6π) in our convention (already includes 1/(4π))
+    let rad_reaction = Complex64::new(0.0, k.powi(3) / (6.0 * std::f64::consts::PI));
+
+    // LDR lattice correction (Draine & Goodman 1993).
+    // The D&G coefficients are for the α_DG convention where α_DG = α_our/(4π),
+    // so the correction must be divided by 4π to convert to our convention.
+    let lattice_term = (k * k / d) * (b1 + b2 * epsilon + b3 * epsilon * s)
+        / (4.0 * std::f64::consts::PI);
+
+    // α_LDR⁻¹ = α_CM⁻¹ − ik³/(6π) − (k²/d)(b₁ + b₂ε + b₃εS)/(4π)
+    let inv_alpha_cm = Complex64::from(1.0) / alpha_cm;
+    let inv_alpha_ldr = inv_alpha_cm - rad_reaction - lattice_term;
+
+    Complex64::from(1.0) / inv_alpha_ldr
+}
