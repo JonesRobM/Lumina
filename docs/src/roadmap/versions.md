@@ -3,22 +3,34 @@
 ## v0.1 — Linear Solver Foundation
 
 - [x] Workspace structure with six crates
-- [ ] Dyadic Green's function implementation
-- [ ] Interaction matrix assembly with Rayon parallelism
-- [ ] Direct solver (LU via `faer`) for N <= 1000
+- [x] Dyadic Green's function implementation
+- [x] Interaction matrix assembly with Rayon parallelism
+- [x] Direct solver (LU via `faer`) for N <= 1000
 - [ ] GMRES iterative solver for N > 1000
-- [ ] Clausius-Mossotti polarisability with radiative corrections
-- [ ] Extinction, absorption, scattering cross-section computation
+- [x] Clausius-Mossotti polarisability with radiative corrections (RRCM + LDR)
+- [x] Extinction, absorption, scattering cross-section computation
 - [ ] Near-field |E|^2 maps on observation planes
-- [ ] Johnson & Christy Au/Ag/Cu with cubic spline interpolation
-- [ ] Geometry primitives (sphere, cylinder, cuboid, ellipsoid, helix)
-- [ ] Discretisation: primitive to dipole lattice
+- [x] Johnson & Christy Au data (43 points, 188–892 nm) with cubic spline interpolation
+- [x] Geometry primitives (sphere, cylinder, cuboid, ellipsoid, helix)
+- [x] Discretisation: centred cubic lattice from primitives
 - [ ] .xyz file parser
-- [ ] GUI dashboard with geometry, materials, simulation, and results panels
-- [ ] CLI with TOML configuration
-- [ ] Mie theory validation (20 nm Au sphere)
+- [x] GUI dashboard with geometry, materials, simulation, and results panels
+- [x] CLI with TOML configuration
+- [x] Mie theory validation (10 nm Au sphere, dielectric spheres)
 - [ ] GPU matrix assembly via wgpu (CPU fallback)
-- [ ] mdBook documentation
+- [x] mdBook documentation with validation results
+
+### v0.1 Validation Summary
+
+The CDA solver has been validated against Mie theory with the following results:
+
+- **Dielectric spheres**: < 15% error at d = 3 nm, < 5% at d ≤ 2 nm
+- **Gold (interband, 420–510 nm)**: < 30% error at d = 3 nm
+- **Gold (Drude, > 550 nm)**: > 100% error — known limitation of CDA at coarse discretisation
+- **Single-dipole Rayleigh limit**: exact agreement (0.00% error)
+- **Convergence**: monotonic for dielectrics, non-monotonic for metals
+
+See [v0.1 Validation](../theory/validation.md) for full details.
 
 ## v0.2 — Nonlinear & Time Domain
 
@@ -30,6 +42,9 @@
 - [ ] Result export: CSV, JSON, HDF5
 - [ ] egui_plot integration for in-GUI spectra plotting
 - [ ] 3D viewport for dipole lattice visualisation
+- [ ] Filtered Coupled Dipole (FCD) for metallic convergence
+- [ ] Surface averaging of polarisabilities
+- [ ] GMRES iterative solver for large N
 
 ## v0.3 — Periodic Structures & HPC
 

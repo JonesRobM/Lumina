@@ -9,6 +9,7 @@
 - [Mie Theory](./theory/mie-theory.md)
 - [Nonlinear Optics (SHG/THG)](./theory/nonlinear.md)
 - [Periodic Structures & Ewald Summation](./theory/periodic.md)
+- [v0.1 Validation](./theory/validation.md)
 
 # User Guide
 

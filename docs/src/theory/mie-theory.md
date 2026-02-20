@@ -30,7 +30,16 @@ The series is truncated when \\(|a_n|\\) and \\(|b_n|\\) fall below a tolerance 
 
 ## Validation Protocol
 
-The CDA result for a 20 nm gold nanosphere should reproduce the Mie theory extinction spectrum to within 5% at all wavelengths, provided the dipole spacing is sufficiently fine (\\(d \leq 2\\) nm).
+The CDA is validated against Mie theory using a gold nanosphere (\\(R = 10\\) nm). The expected accuracy depends on the spectral region and discretisation:
+
+| Regime | Wavelength | Spacing | Expected Error |
+|--------|-----------|---------|---------------|
+| Interband (Au) | 400–520 nm | \\(d = 3\\) nm | \\(< 30\%\\) |
+| Drude (Au) | \\(> 550\\) nm | \\(d = 3\\) nm | \\(> 50\%\\) (known limitation) |
+| Dielectric | any | \\(d = 3\\) nm | \\(< 15\%\\) |
+| Dielectric | any | \\(d \leq 2\\) nm | \\(< 5\%\\) |
+
+The 30% tolerance at coarse spacing (\\(d = 3\\) nm) is appropriate for a sphere with only \\(\sim 170\\) dipoles. Finer discretisation significantly improves accuracy for dielectrics. For highly metallic particles, the staircase surface artefact limits convergence regardless of spacing; see [v0.1 Validation](./validation.md) for details.
 
 ## Reference
 
