@@ -19,10 +19,19 @@ use crate::types::{Dipole, IncidentField};
 /// # Arguments
 /// * `dipoles` - Slice of dipoles with positions and polarisabilities.
 /// * `k` - Wavenumber in the medium (nm^{-1}).
+/// * `use_fcd` - If true, use the Filtered Coupled Dipole (volume-averaged)
+///   Green's function for near-field interactions. Requires `cell_size`.
+/// * `cell_size` - Dipole lattice spacing (nm). Used by FCD for the
+///   integration volume. Ignored if `use_fcd` is false.
 ///
 /// # Returns
 /// The interaction matrix $\mathbf{A}$ such that $\mathbf{A}\mathbf{p} = \mathbf{E}_{\text{inc}}$.
-pub fn assemble_interaction_matrix(dipoles: &[Dipole], k: f64) -> Array2<Complex64> {
+pub fn assemble_interaction_matrix(
+    dipoles: &[Dipole],
+    k: f64,
+    use_fcd: bool,
+    cell_size: f64,
+) -> Array2<Complex64> {
     let n = dipoles.len();
     let dim = 3 * n;
     let mut matrix = Array2::<Complex64>::zeros((dim, dim));
@@ -41,11 +50,20 @@ pub fn assemble_interaction_matrix(dipoles: &[Dipole], k: f64) -> Array2<Complex
             if i == j {
                 continue;
             }
-            let g = super::greens::dyadic_greens_tensor(
-                &dipoles[i].position,
-                &dipoles[j].position,
-                k,
-            );
+            let g = if use_fcd {
+                super::greens::dyadic_greens_tensor_filtered(
+                    &dipoles[i].position,
+                    &dipoles[j].position,
+                    k,
+                    cell_size,
+                )
+            } else {
+                super::greens::dyadic_greens_tensor(
+                    &dipoles[i].position,
+                    &dipoles[j].position,
+                    k,
+                )
+            };
             for row in 0..3 {
                 for col in 0..3 {
                     matrix[[3 * i + row, 3 * j + col]] = -g[[row, col]];

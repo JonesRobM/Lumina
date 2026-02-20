@@ -91,6 +91,45 @@ For a dielectric sphere (\\(\epsilon = 4.0 + 0.5i\\), \\(R = 8\\) nm, \\(\lambda
 
 For metallic particles (\\(\epsilon = -10 + 1.5i\\)), convergence is non-monotonic and the errors remain large (\\(> 50\%\\)) even at \\(d = 1.5\\) nm with \\(N \approx 600\\) dipoles. This is characteristic of the staircase surface artefact described below.
 
+## v0.1.1 Results: Filtered Coupled Dipole (FCD)
+
+### FCD Method
+
+The v0.1.1 release introduces the Filtered Coupled Dipole (FCD) method, also known as the Integrated Green's Tensor (IGT) approach (Yurkin & Hoekstra, JQSRT 2007). For near-field interactions (\\(|r_i - r_j| \leq 2d\\)), the point-dipole Green's function is replaced by its volume average over the source cell using 3D Gauss-Legendre quadrature (\\(3^3 = 27\\) evaluation points per cell):
+
+\\[
+G_{\text{FCD}}(\mathbf{r}_i, \mathbf{r}_j) = \frac{1}{V_j} \int_{V_j} G(\mathbf{r}_i, \mathbf{r}') \, d\mathbf{r}'
+\\]
+
+This smooths the \\(1/R^3\\) near-field singularity that amplifies surface staircase artefacts for metallic particles.
+
+### GMRES Iterative Solver
+
+v0.1.1 also adds a restarted GMRES(m) solver for systems with \\(N > 1000\\) dipoles, enabling finer discretisation. GMRES agrees with the direct LU solver to machine precision (\\(\sim 10^{-13}\\) relative error) and is activated automatically when \\(N\\) exceeds the iterative threshold (default 1000).
+
+### FCD Results — Gold Sphere
+
+The FCD method with \\(d = 2\\) nm (\\(N \approx 515\\) dipoles) shows improved accuracy in the interband region compared to the standard point-dipole CDA:
+
+| \\(\lambda\\) (nm) | \\(\epsilon_1\\) | \\(\epsilon_2\\) | \\(|\epsilon_1|/\epsilon_2\\) | Point CDA Error | FCD Error |
+|---------------------|-----------------|-----------------|-------------------------------|-----------------|-----------|
+| 420 | \\(-1.70\\) | \\(5.71\\) | 0.3 | \\(\sim 25\%\\) | \\(\sim 16\%\\) |
+| 480 | \\(-1.78\\) | \\(4.55\\) | 0.4 | \\(\sim 22\%\\) | \\(\sim 13\%\\) |
+| 510 | \\(-3.15\\) | \\(3.06\\) | 1.0 | \\(\sim 28\%\\) | \\(\sim 24\%\\) |
+| 550 | \\(-5.93\\) | \\(2.10\\) | 2.8 | \\(\sim 50\%\\) | \\(\sim 81\%\\) |
+| 600 | \\(-9.42\\) | \\(1.50\\) | 6.3 | \\(> 100\%\\) | \\(\sim 112\%\\) |
+
+The FCD provides a meaningful improvement (\\(5\text{–}10\\) percentage points) in the interband region (\\(|\epsilon_1|/\epsilon_2 < 3\\)). However, in the Drude region (\\(|\epsilon_1|/\epsilon_2 > 5\\)), the errors remain large. This confirms that the staircase artefact is not fully resolved by volume-averaging alone — future releases will investigate surface averaging and smooth boundary representations.
+
+### Geometry Completions
+
+v0.1.1 adds containment and bounding-box implementations for:
+
+- **Cylinder**: Defined by base centre, axis direction, length, and radius. Containment tests via axis projection and perpendicular distance.
+- **Helix**: Defined by base centre, axis, helix radius, pitch, turns, and wire radius. Containment tests via nearest-point search on the helical centreline.
+
+Both shapes produce correct dipole lattices via the existing centred cubic discretisation.
+
 ## Known Limitations
 
 ### Surface Staircase Artefacts

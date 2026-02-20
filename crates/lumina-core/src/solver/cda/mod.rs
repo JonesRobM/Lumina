@@ -29,6 +29,13 @@ pub struct CdaSolver {
     pub iterative_threshold: usize,
     /// Incident field specification.
     pub incident_field: IncidentField,
+    /// Whether to use the Filtered Coupled Dipole (FCD) Green's function.
+    /// FCD volume-averages the Green's tensor over each source cell, smoothing
+    /// the 1/R³ near-field singularity that causes staircase artefacts for
+    /// metallic particles.
+    pub use_fcd: bool,
+    /// Dipole lattice spacing (nm). Required for FCD integration volume.
+    pub cell_size: f64,
 }
 
 impl Default for CdaSolver {
@@ -36,6 +43,8 @@ impl Default for CdaSolver {
         Self {
             iterative_threshold: 1000,
             incident_field: IncidentField::default(),
+            use_fcd: true,
+            cell_size: 3.0,
         }
     }
 }
@@ -45,6 +54,18 @@ impl CdaSolver {
         Self {
             iterative_threshold,
             incident_field: IncidentField::default(),
+            use_fcd: true,
+            cell_size: 3.0,
+        }
+    }
+
+    /// Create a CDA solver with explicit FCD configuration.
+    pub fn with_fcd(iterative_threshold: usize, use_fcd: bool, cell_size: f64) -> Self {
+        Self {
+            iterative_threshold,
+            incident_field: IncidentField::default(),
+            use_fcd,
+            cell_size,
         }
     }
 
@@ -131,7 +152,7 @@ impl OpticalSolver for CdaSolver {
         let n = dipoles.len();
 
         // Assemble the interaction matrix
-        let matrix = assembly::assemble_interaction_matrix(dipoles, k);
+        let matrix = assembly::assemble_interaction_matrix(dipoles, k, self.use_fcd, self.cell_size);
 
         // Build the RHS (incident field at each dipole)
         let rhs = assembly::build_incident_field_vector(dipoles, &self.incident_field, k);
@@ -141,9 +162,12 @@ impl OpticalSolver for CdaSolver {
             direct::solve_direct(&matrix, &rhs)
                 .map_err(|e| SolverError::LinAlgError(e.to_string()))?
         } else {
-            // TODO: Fall back to GMRES for large systems
-            direct::solve_direct(&matrix, &rhs)
-                .map_err(|e| SolverError::LinAlgError(e.to_string()))?
+            iterative::solve_gmres(
+                &matrix,
+                &rhs,
+                params.solver_tolerance,
+                params.max_iterations,
+            )?
         };
 
         // Reshape the solution into (N, 3) dipole moments

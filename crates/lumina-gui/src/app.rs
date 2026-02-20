@@ -3,7 +3,7 @@
 use std::sync::mpsc;
 use eframe::egui;
 
-use lumina_core::types::CrossSections;
+use lumina_core::types::{CrossSections, NearFieldMap};
 
 use crate::panels;
 
@@ -27,7 +27,10 @@ pub struct LuminaApp {
 /// Messages sent from the simulation background thread.
 pub enum SimulationMessage {
     Progress { done: usize, total: usize },
-    Complete(Vec<CrossSections>),
+    Complete {
+        spectra: Vec<CrossSections>,
+        near_field: Option<NearFieldMap>,
+    },
     Error(String),
 }
 
@@ -70,7 +73,7 @@ impl LuminaApp {
 
         std::thread::spawn(move || {
             use lumina_core::solver::cda::CdaSolver;
-            use lumina_core::solver::OpticalSolver;
+            use lumina_core::solver::{NearFieldPlane, OpticalSolver};
             use lumina_core::types::{
                 clausius_mossotti, radiative_correction, Dipole, SimulationParams,
             };
@@ -87,7 +90,7 @@ impl LuminaApp {
             let positions: Vec<[f64; 3]> = lattice.iter().map(|p| p.position).collect();
 
             let gold = JohnsonChristyMaterial::gold();
-            let solver = CdaSolver::default();
+            let solver = CdaSolver::with_fcd(1000, true, spacing);
             let params = SimulationParams {
                 wavelength_range: [wl_start, wl_end],
                 num_wavelengths: num_wl,
@@ -101,6 +104,11 @@ impl LuminaApp {
 
             let mut spectra = Vec::new();
             let epsilon_m = env_n * env_n;
+
+            // Track the response at the peak wavelength for near-field computation
+            let mut peak_wl_idx = 0;
+            let mut peak_ext = 0.0_f64;
+            let mut all_dipoles_at_peak = Vec::new();
 
             for (wi, &wl) in wavelengths.iter().enumerate() {
                 let k = 2.0 * std::f64::consts::PI * env_n / wl;
@@ -126,7 +134,14 @@ impl LuminaApp {
                     .collect();
 
                 match solver.compute_cross_sections(&dipoles, wl, &params) {
-                    Ok(cs) => spectra.push(cs),
+                    Ok(cs) => {
+                        if cs.extinction > peak_ext {
+                            peak_ext = cs.extinction;
+                            peak_wl_idx = wi;
+                            all_dipoles_at_peak = dipoles.clone();
+                        }
+                        spectra.push(cs);
+                    }
                     Err(e) => {
                         let _ = tx.send(SimulationMessage::Error(format!(
                             "Solver error at {:.1} nm: {}",
@@ -142,7 +157,30 @@ impl LuminaApp {
                 });
             }
 
-            let _ = tx.send(SimulationMessage::Complete(spectra));
+            // Compute near-field map at the peak wavelength
+            let mut near_field = None;
+            if !all_dipoles_at_peak.is_empty() && !spectra.is_empty() {
+                let peak_wl = wavelengths[peak_wl_idx];
+                if let Ok(response) = solver.solve_dipoles(&all_dipoles_at_peak, peak_wl, &params) {
+                    let plane = NearFieldPlane {
+                        centre: [0.0, 0.0, 0.0],
+                        normal: [0.0, 0.0, 1.0], // xy plane
+                        half_width: radius * 2.0,
+                        half_height: radius * 2.0,
+                        nx: 40,
+                        ny: 40,
+                    };
+                    if let Ok(nf_map) = solver.compute_near_field(
+                        &all_dipoles_at_peak,
+                        &response,
+                        &plane,
+                    ) {
+                        near_field = Some(nf_map);
+                    }
+                }
+            }
+
+            let _ = tx.send(SimulationMessage::Complete { spectra, near_field });
         });
     }
 }
@@ -157,8 +195,9 @@ impl eframe::App for LuminaApp {
                         self.simulation_state.progress = done as f32 / total as f32;
                         ctx.request_repaint();
                     }
-                    SimulationMessage::Complete(spectra) => {
+                    SimulationMessage::Complete { spectra, near_field } => {
                         self.results_state.spectra = Some(spectra);
+                        self.results_state.near_field = near_field;
                         self.results_state.has_results = true;
                         self.simulation_state.is_running = false;
                         self.simulation_state.progress = 1.0;

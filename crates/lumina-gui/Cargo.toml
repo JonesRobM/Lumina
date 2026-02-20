@@ -9,6 +9,7 @@ license.workspace = true
 [dependencies]
 eframe = { workspace = true }
 egui = { workspace = true }
+egui_plot = "0.29"
 log = { workspace = true }
 env_logger = { workspace = true }
 
