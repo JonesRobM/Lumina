@@ -1,4 +1,9 @@
-# Lumina
+
+<p align="center">
+  <img src="docs/images/Logo.png" alt="PhysBound" width="400">
+</p>
+
+<h1 align="center">Lumina</h1>
 
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
