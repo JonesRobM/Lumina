@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 400">
+  <!-- Background -->
+  <rect width="800" height="400" fill="#ffffff"/>
+
+  <!-- Title -->
+  <text x="400" y="30" font-family="Arial, sans-serif" font-size="18" font-weight="bold" text-anchor="middle" fill="#333">
+    Gold Nanosphere (R=10nm) — Optical Cross-Sections
+  </text>
+
+  <!-- Plot area -->
+  <rect x="80" y="60" width="640" height="280" fill="#f9f9f9" stroke="#ddd" stroke-width="1"/>
+
+  <!-- Grid lines -->
+  <g stroke="#e0e0e0" stroke-width="0.5">
+    <line x1="80" y1="120" x2="720" y2="120"/>
+    <line x1="80" y1="180" x2="720" y2="180"/>
+    <line x1="80" y1="240" x2="720" y2="240"/>
+    <line x1="80" y1="300" x2="720" y2="300"/>
+
+    <line x1="210" y1="60" x2="210" y2="340"/>
+    <line x1="340" y1="60" x2="340" y2="340"/>
+    <line x1="470" y1="60" x2="470" y2="340"/>
+    <line x1="600" y1="60" x2="600" y2="340"/>
+  </g>
+
+  <!-- Axes -->
+  <line x1="80" y1="340" x2="720" y2="340" stroke="#333" stroke-width="2"/>
+  <line x1="80" y1="60" x2="80" y2="340" stroke="#333" stroke-width="2"/>
+
+  <!-- Extinction curve (red) -->
+  <path d="M 80,280 Q 150,260 210,200 T 340,140 Q 400,100 470,110 Q 540,120 600,160 L 720,220"
+        fill="none" stroke="#dc3232" stroke-width="2.5"/>
+
+  <!-- Absorption curve (blue) -->
+  <path d="M 80,300 Q 150,285 210,240 T 340,180 Q 400,145 470,155 Q 540,165 600,200 L 720,250"
+        fill="none" stroke="#3278dc" stroke-width="2.5"/>
+
+  <!-- Scattering curve (green) -->
+  <path d="M 80,320 Q 150,315 210,300 T 340,270 Q 400,250 470,245 Q 540,240 600,235 L 720,230"
+        fill="none" stroke="#32b464" stroke-width="2.5"/>
+
+  <!-- X-axis labels -->
+  <text x="80" y="360" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" fill="#666">400</text>
+  <text x="210" y="360" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" fill="#666">500</text>
+  <text x="340" y="360" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" fill="#666">600</text>
+  <text x="470" y="360" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" fill="#666">700</text>
+  <text x="600" y="360" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" fill="#666">800</text>
+
+  <!-- Y-axis labels -->
+  <text x="65" y="65" font-family="Arial, sans-serif" font-size="12" text-anchor="end" fill="#666">200</text>
+  <text x="65" y="125" font-family="Arial, sans-serif" font-size="12" text-anchor="end" fill="#666">150</text>
+  <text x="65" y="185" font-family="Arial, sans-serif" font-size="12" text-anchor="end" fill="#666">100</text>
+  <text x="65" y="245" font-family="Arial, sans-serif" font-size="12" text-anchor="end" fill="#666">50</text>
+  <text x="65" y="345" font-family="Arial, sans-serif" font-size="12" text-anchor="end" fill="#666">0</text>
+
+  <!-- Axis titles -->
+  <text x="400" y="385" font-family="Arial, sans-serif" font-size="14" text-anchor="middle" fill="#333">
+    Wavelength (nm)
+  </text>
+  <text x="30" y="200" font-family="Arial, sans-serif" font-size="14" text-anchor="middle" fill="#333"
+        transform="rotate(-90 30 200)">
+    Cross-Section (nm²)
+  </text>
+
+  <!-- Legend -->
+  <g transform="translate(580, 75)">
+    <rect x="0" y="0" width="120" height="70" fill="white" stroke="#ddd" stroke-width="1" rx="4"/>
+
+    <line x1="10" y1="20" x2="35" y2="20" stroke="#dc3232" stroke-width="2.5"/>
+    <text x="40" y="24" font-family="Arial, sans-serif" font-size="12" fill="#333">Extinction</text>
+
+    <line x1="10" y1="40" x2="35" y2="40" stroke="#3278dc" stroke-width="2.5"/>
+    <text x="40" y="44" font-family="Arial, sans-serif" font-size="12" fill="#333">Absorption</text>
+
+    <line x1="10" y1="60" x2="35" y2="60" stroke="#32b464" stroke-width="2.5"/>
+    <text x="40" y="64" font-family="Arial, sans-serif" font-size="12" fill="#333">Scattering</text>
+  </g>
+</svg>
