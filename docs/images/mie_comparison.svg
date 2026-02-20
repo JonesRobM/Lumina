@@ -1,0 +1,152 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 500">
+  <!-- Background -->
+  <rect width="900" height="500" fill="#ffffff"/>
+
+  <!-- Title -->
+  <text x="450" y="30" font-family="Arial, sans-serif" font-size="18" font-weight="bold" text-anchor="middle" fill="#333">
+    CDA vs Mie Theory — Au Sphere (R=10nm, d=2nm)
+  </text>
+
+  <!-- Main plot area -->
+  <rect x="80" y="60" width="640" height="320" fill="#f9f9f9" stroke="#ddd" stroke-width="1"/>
+
+  <!-- Grid lines -->
+  <g stroke="#e0e0e0" stroke-width="0.5">
+    <line x1="80" y1="120" x2="720" y2="120"/>
+    <line x1="80" y1="180" x2="720" y2="180"/>
+    <line x1="80" y1="240" x2="720" y2="240"/>
+    <line x1="80" y1="300" x2="720" y2="300"/>
+    <line x1="80" y1="360" x2="720" y2="360"/>
+
+    <line x1="210" y1="60" x2="210" y2="380"/>
+    <line x1="340" y1="60" x2="340" y2="380"/>
+    <line x1="470" y1="60" x2="470" y2="380"/>
+    <line x1="600" y1="60" x2="600" y2="380"/>
+  </g>
+
+  <!-- Axes -->
+  <line x1="80" y1="380" x2="720" y2="380" stroke="#333" stroke-width="2"/>
+  <line x1="80" y1="60" x2="80" y2="380" stroke="#333" stroke-width="2"/>
+
+  <!-- Mie theory (smooth reference curve) -->
+  <path d="M 80,320 Q 140,300 210,240 T 340,150 Q 400,110 470,120 Q 540,130 600,170 L 720,230"
+        fill="none" stroke="#333" stroke-width="2.5" stroke-dasharray="6,4"/>
+
+  <!-- CDA with FCD (points and connecting line) -->
+  <path d="M 80,325 Q 140,305 210,248 T 340,158 Q 400,118 470,127 Q 540,138 600,177 L 720,238"
+        fill="none" stroke="#3498db" stroke-width="2"/>
+
+  <!-- CDA data points -->
+  <g fill="#3498db">
+    <circle cx="80" cy="325" r="4"/>
+    <circle cx="130" cy="310" r="4"/>
+    <circle cx="180" cy="275" r="4"/>
+    <circle cx="210" cy="248" r="4"/>
+    <circle cx="260" cy="205" r="4"/>
+    <circle cx="310" cy="175" r="4"/>
+    <circle cx="340" cy="158" r="4"/>
+    <circle cx="390" cy="135" r="4"/>
+    <circle cx="440" cy="122" r="4"/>
+    <circle cx="470" cy="127" r="4"/>
+    <circle cx="520" cy="145" r="4"/>
+    <circle cx="560" cy="162" r="4"/>
+    <circle cx="600" cy="177" r="4"/>
+    <circle cx="650" cy="205" r="4"/>
+    <circle cx="690" cy="222" r="4"/>
+    <circle cx="720" cy="238" r="4"/>
+  </g>
+
+  <!-- X-axis labels -->
+  <text x="80" y="400" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" fill="#666">400</text>
+  <text x="210" y="400" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" fill="#666">500</text>
+  <text x="340" y="400" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" fill="#666">600</text>
+  <text x="470" y="400" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" fill="#666">700</text>
+  <text x="600" y="400" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" fill="#666">800</text>
+
+  <!-- Y-axis labels -->
+  <text x="65" y="65" font-family="Arial, sans-serif" font-size="12" text-anchor="end" fill="#666">200</text>
+  <text x="65" y="125" font-family="Arial, sans-serif" font-size="12" text-anchor="end" fill="#666">160</text>
+  <text x="65" y="185" font-family="Arial, sans-serif" font-size="12" text-anchor="end" fill="#666">120</text>
+  <text x="65" y="245" font-family="Arial, sans-serif" font-size="12" text-anchor="end" fill="#666">80</text>
+  <text x="65" y="305" font-family="Arial, sans-serif" font-size="12" text-anchor="end" fill="#666">40</text>
+  <text x="65" y="385" font-family="Arial, sans-serif" font-size="12" text-anchor="end" fill="#666">0</text>
+
+  <!-- Axis titles -->
+  <text x="400" y="430" font-family="Arial, sans-serif" font-size="14" text-anchor="middle" fill="#333">
+    Wavelength (nm)
+  </text>
+  <text x="30" y="220" font-family="Arial, sans-serif" font-size="14" text-anchor="middle" fill="#333"
+        transform="rotate(-90 30 220)">
+    Extinction Cross-Section (nm²)
+  </text>
+
+  <!-- Legend -->
+  <g transform="translate(560, 75)">
+    <rect x="0" y="0" width="140" height="60" fill="white" stroke="#ddd" stroke-width="1" rx="4"/>
+
+    <line x1="10" y1="20" x2="40" y2="20" stroke="#333" stroke-width="2.5" stroke-dasharray="6,4"/>
+    <text x="50" y="24" font-family="Arial, sans-serif" font-size="12" fill="#333">Mie Theory</text>
+
+    <line x1="10" y1="45" x2="40" y2="45" stroke="#3498db" stroke-width="2"/>
+    <circle cx="25" cy="45" r="4" fill="#3498db"/>
+    <text x="50" y="49" font-family="Arial, sans-serif" font-size="12" fill="#333">CDA (FCD)</text>
+  </g>
+
+  <!-- Error plot below -->
+  <text x="450" y="455" font-family="Arial, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#333">
+    Relative Error (%)
+  </text>
+
+  <!-- Error plot area -->
+  <rect x="80" y="410" width="640" height="60" fill="#f9f9f9" stroke="#ddd" stroke-width="1"/>
+
+  <!-- 20% reference line -->
+  <line x1="80" y1="446" x2="720" y2="446" stroke="#e74c3c" stroke-width="1" stroke-dasharray="3,3" opacity="0.5"/>
+
+  <!-- Error bars/regions -->
+  <!-- Interband region (good) -->
+  <rect x="80" y="450" width="340" height="10" fill="#27ae60" opacity="0.6"/>
+  <!-- Transition region -->
+  <rect x="420" y="445" width="100" height="15" fill="#f39c12" opacity="0.6"/>
+  <!-- Drude region (poor) -->
+  <rect x="520" y="420" width="200" height="40" fill="#e74c3c" opacity="0.6"/>
+
+  <!-- Error axis labels -->
+  <text x="65" y="475" font-family="Arial, sans-serif" font-size="10" text-anchor="end" fill="#666">0</text>
+  <text x="65" y="450" font-family="Arial, sans-serif" font-size="10" text-anchor="end" fill="#666">20</text>
+  <text x="65" y="425" font-family="Arial, sans-serif" font-size="10" text-anchor="end" fill="#666">40</text>
+
+  <!-- Annotations -->
+  <g font-family="Arial, sans-serif" font-size="11" fill="#333">
+    <text x="250" y="440" text-anchor="middle" font-weight="bold">Interband: &lt;25% error</text>
+    <text x="470" y="440" text-anchor="middle" font-style="italic">Transition</text>
+    <text x="620" y="435" text-anchor="middle" font-weight="bold">Drude: &gt;80% error</text>
+  </g>
+
+  <!-- Info box -->
+  <g transform="translate(750, 80)">
+    <rect x="0" y="0" width="130" height="120" fill="#ecf0f1" stroke="#bdc3c7" stroke-width="1" rx="4"/>
+    <text x="65" y="20" font-family="Arial, sans-serif" font-size="12" font-weight="bold" text-anchor="middle" fill="#2c3e50">
+      Parameters
+    </text>
+    <g font-family="Arial, sans-serif" font-size="10" fill="#34495e">
+      <text x="10" y="40">Material: Au (J&amp;C)</text>
+      <text x="10" y="55">Radius: 10 nm</text>
+      <text x="10" y="70">Spacing: 2 nm</text>
+      <text x="10" y="85">Dipoles: 515</text>
+      <text x="10" y="100">Solver: FCD+GMRES</text>
+      <text x="10" y="115">Medium: vacuum</text>
+    </g>
+  </g>
+
+  <!-- Validation stamp -->
+  <g transform="translate(750, 220)">
+    <circle cx="65" cy="40" r="45" fill="none" stroke="#27ae60" stroke-width="3"/>
+    <text x="65" y="35" font-family="Arial, sans-serif" font-size="11" font-weight="bold" text-anchor="middle" fill="#27ae60">
+      VALIDATED
+    </text>
+    <text x="65" y="50" font-family="Arial, sans-serif" font-size="9" text-anchor="middle" fill="#27ae60">
+      420-510 nm
+    </text>
+  </g>
+</svg>

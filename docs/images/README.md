@@ -4,9 +4,64 @@ This directory contains images and graphics for the README and documentation.
 
 ## Current Files
 
+### Interface & Visualization
 - **gui_overview.svg** - SVG mockup of the Lumina GUI interface
 - **spectra_plot.svg** - Example extinction/absorption/scattering spectra plot
 - **nearfield_heatmap.svg** - Example near-field intensity map
+
+### Validation & Performance
+- **mie_comparison.svg** - CDA vs analytical Mie theory comparison with error analysis
+- **performance_scaling.svg** - Solver performance scaling (Direct LU vs GMRES)
+
+## Generating Actual Data Plots
+
+To create plots from real simulation data:
+
+### Mie Comparison Plot
+
+```bash
+# Run the validation test with output
+cargo test --test mie_validation test_fcd_gold_sphere_full_spectrum -- --nocapture > mie_results.txt
+
+# Or run a custom script
+cargo run --release --bin lumina-cli -- examples/mie_validation.toml
+```
+
+Then use Python/matplotlib or your preferred plotting tool:
+
+```python
+import matplotlib.pyplot as plt
+import pandas as pd
+
+# Load CDA results
+cda_data = pd.read_csv('output/cda_gold_sphere.csv')
+# Load Mie reference
+mie_data = pd.read_csv('output/mie_gold_sphere.csv')
+
+plt.figure(figsize=(10, 6))
+plt.plot(mie_data['wavelength'], mie_data['extinction'],
+         'k--', linewidth=2, label='Mie Theory')
+plt.plot(cda_data['wavelength'], cda_data['extinction'],
+         'bo-', linewidth=2, label='CDA (FCD)')
+plt.xlabel('Wavelength (nm)')
+plt.ylabel('Extinction Cross-Section (nm²)')
+plt.legend()
+plt.savefig('mie_comparison.png', dpi=144)
+```
+
+### Performance Benchmarks
+
+Add timing instrumentation to the solver or use the built-in benchmarks:
+
+```bash
+# Run benchmarks
+cargo bench --bench solver_scaling
+
+# Or manually time different system sizes
+for N in 100 500 1000 2000 5000 10000; do
+    cargo run --release --bin lumina-cli -- examples/benchmark_N${N}.toml
+done
+```
 
 ## Generating Actual Screenshots
 

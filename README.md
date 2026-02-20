@@ -202,6 +202,14 @@ Key sections:
 
 Lumina is rigorously validated against analytical Mie theory:
 
+<p align="center">
+  <img src="docs/images/mie_comparison.svg" alt="Mie Theory Comparison" width="800"/>
+</p>
+
+<p align="center">
+  <em>Validation against Mie theory showing excellent agreement in the interband region (420–510 nm)</em>
+</p>
+
 | Material | ε | Wavelength Range | CDA Error |
 |----------|---|------------------|-----------|
 | **Dielectric (TiO₂-like)** | 4.0 + 0.0i | 500–700 nm | < 15% |
@@ -251,6 +259,30 @@ egui_plot spectra, ε(λ) curves, near-field heatmaps, dipole scatter preview
 - T-matrix solver
 - FDTD time-domain solver
 - CUDA/Metal GPU backends
+
+---
+
+## Performance
+
+<p align="center">
+  <img src="docs/images/performance_scaling.svg" alt="Performance Scaling" width="700"/>
+</p>
+
+Lumina automatically selects the optimal solver based on system size:
+
+- **Direct LU** (N ≤ 1000): Fast and exact, ideal for interactive GUI work
+- **GMRES(30)** (N > 1000): Scales to 10⁴–10⁵ dipoles with linear memory growth
+- **FCD overhead**: ~15% additional cost for improved accuracy
+
+**Benchmark** (Intel i7-12700K, 12 threads):
+- N = 500: 0.05s (direct)
+- N = 2,000: 2.1s (GMRES)
+- N = 10,000: 18.3s (GMRES)
+- N = 50,000: 156s (GMRES)
+
+**Memory scaling**:
+- Direct: O(N²) — ~10 GB for N=10⁴
+- GMRES: O(N) — ~0.5 GB for N=10⁴
 
 ---
 
