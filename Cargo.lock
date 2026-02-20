@@ -2229,6 +2229,7 @@ dependencies = [
  "lumina-core",
  "lumina-geometry",
  "lumina-materials",
+ "num-complex",
  "serde",
  "toml",
 ]

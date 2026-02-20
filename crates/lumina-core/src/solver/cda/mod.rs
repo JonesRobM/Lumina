@@ -67,7 +67,9 @@ impl OpticalSolver for CdaSolver {
 
         let n = dipoles.len();
 
-        // Extinction: C_ext = (4*pi*k / |E0|^2) * Sum_i Im(E_inc,i* . p_i)
+        // Extinction: C_ext = (k / |E0|^2) * Sum_i Im(E_inc,i* . p_i)
+        // Note: the 4π is already absorbed into the Green's function prefactor,
+        // so the cross-section formula uses k/|E₀|² rather than 4πk/|E₀|².
         let mut c_ext = 0.0;
         for i in 0..n {
             let e_inc = self.incident_field.at_position(&dipoles[i].position, k);
@@ -75,9 +77,10 @@ impl OpticalSolver for CdaSolver {
                 c_ext += (e_inc[c].conj() * response.moments[[i, c]]).im;
             }
         }
-        c_ext *= 4.0 * std::f64::consts::PI * k / e0_sq;
+        c_ext *= k / e0_sq;
 
-        // Absorption: C_abs = (4*pi*k / |E0|^2) * Sum_i [ Im(p_i . (alpha_i^{-1})* . p_i*) - (2/3)k^3 |p_i|^2 ]
+        // Absorption: C_abs = (k / |E0|^2) * Sum_i [ Im(p_i . (alpha_i^{-1})* . p_i*) - (2/3)k^3 |p_i|^2 ]
+        // Same 4π convention as extinction (absorbed into Green's function).
         let mut c_abs = 0.0;
         let k3 = k.powi(3);
         for i in 0..n {
@@ -102,7 +105,7 @@ impl OpticalSolver for CdaSolver {
 
             c_abs += pa_inv_alpha_conj_p.im - (2.0 / 3.0) * k3 * p_sq;
         }
-        c_abs *= 4.0 * std::f64::consts::PI * k / e0_sq;
+        c_abs *= k / e0_sq;
 
         let c_sca = c_ext - c_abs;
 

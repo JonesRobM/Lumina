@@ -68,8 +68,6 @@ fn mie_coefficients(
     n_max: usize,
 ) -> (Vec<Complex64>, Vec<Complex64>) {
     let mx = m * x;
-    let cx = Complex64::from(x);
-
     // Compute Riccati-Bessel functions via downward recurrence for psi(mx)
     // and upward recurrence for psi(x) and xi(x).
     let psi_mx = riccati_bessel_psi_complex(mx, n_max);

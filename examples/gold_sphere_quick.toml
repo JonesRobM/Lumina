@@ -1,0 +1,20 @@
+# Lumina Quick Test: Small Gold Sphere
+#
+# Uses coarser dipole spacing for fast verification.
+# Not physically accurate, but validates the full pipeline.
+
+[simulation]
+wavelengths = { range = [400.0, 800.0], points = 9 }
+environment_n = 1.0
+
+[[geometry.object]]
+name = "Au_Sphere_Small"
+type = "sphere"
+centre = [0.0, 0.0, 0.0]
+radius = 10.0
+material = "Au_JC"
+dipole_spacing = 4.0
+
+[output]
+directory = "./output/quick_test"
+save_spectra = true

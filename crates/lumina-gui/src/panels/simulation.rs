@@ -17,17 +17,23 @@ pub struct SimulationPanel {
     pub is_running: bool,
     /// Progress (0.0 to 1.0).
     pub progress: f32,
+    /// Set to true by UI when the user clicks "Run".
+    pub launch_requested: bool,
+    /// Error message from the last run, if any.
+    pub error_message: Option<String>,
 }
 
 impl Default for SimulationPanel {
     fn default() -> Self {
         Self {
             wavelength_start: 400.0,
-            wavelength_end: 900.0,
-            num_wavelengths: 100,
+            wavelength_end: 800.0,
+            num_wavelengths: 20,
             environment_n: 1.0,
             is_running: false,
             progress: 0.0,
+            launch_requested: false,
+            error_message: None,
         }
     }
 }
@@ -47,7 +53,7 @@ impl SimulationPanel {
         );
 
         let mut num_wl = self.num_wavelengths as f64;
-        ui.add(egui::Slider::new(&mut num_wl, 10.0..=500.0).text("Wavelength points"));
+        ui.add(egui::Slider::new(&mut num_wl, 5.0..=200.0).text("Wavelength points"));
         self.num_wavelengths = num_wl as usize;
 
         ui.add_space(8.0);
@@ -59,15 +65,19 @@ impl SimulationPanel {
         ui.add_space(16.0);
         ui.separator();
 
+        if let Some(err) = &self.error_message {
+            ui.colored_label(egui::Color32::RED, format!("Error: {}", err));
+            ui.add_space(4.0);
+        }
+
         if self.is_running {
-            ui.add(egui::ProgressBar::new(self.progress).text("Running..."));
-            if ui.button("Cancel").clicked() {
-                self.is_running = false;
-            }
+            ui.add(egui::ProgressBar::new(self.progress).text(format!(
+                "Running... {:.0}%",
+                self.progress * 100.0
+            )));
         } else if ui.button("Run Simulation").clicked() {
-            // TODO: Launch simulation on a background thread.
-            self.is_running = true;
-            self.progress = 0.0;
+            self.error_message = None;
+            self.launch_requested = true;
         }
     }
 }
