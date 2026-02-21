@@ -36,11 +36,13 @@
 
 ## v0.1.2 — Plotting & Visualisation
 
-- [ ] egui_plot integration for interactive spectra plots (C_ext, C_abs, C_sca vs λ)
-- [ ] ε(λ) dielectric function plots in the materials panel
-- [ ] Near-field |E|² heatmap in the results panel
-- [ ] 2D dipole lattice scatter preview (xy/xz/yz projection)
-- [ ] Shape parameter UI for all primitives (cylinder, cuboid, ellipsoid)
+- [x] egui_plot integration for interactive spectra plots (C_ext, C_abs, C_sca vs λ)
+- [x] ε(λ) dielectric function plots in the materials panel (Au, Ag, Cu with correct data)
+- [x] Near-field |E|² heatmap in the results panel
+- [x] 2D dipole lattice scatter preview (xy/xz/yz projection)
+- [x] Shape parameter UI for all primitives (sphere, cylinder, cuboid, ellipsoid, helix)
+- [x] Helix added to GUI geometry panel (v0.1.1 primitive now exposed in GUI)
+- [x] Simulation wired to actual material and geometry panel selections (not hardcoded)
 
 ## v0.1.3 — I/O & Export
 

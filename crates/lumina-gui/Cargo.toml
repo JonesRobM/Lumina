@@ -10,6 +10,7 @@ license.workspace = true
 eframe = { workspace = true }
 egui = { workspace = true }
 egui_plot = "0.29"
+num-complex = { workspace = true }
 log = { workspace = true }
 env_logger = { workspace = true }
 

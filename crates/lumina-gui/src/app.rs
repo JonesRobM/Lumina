@@ -2,10 +2,13 @@
 
 use std::sync::mpsc;
 use eframe::egui;
+use num_complex::Complex64;
 
 use lumina_core::types::{CrossSections, NearFieldMap};
 
 use crate::panels;
+use crate::panels::geometry::ShapeType;
+use crate::panels::materials::MaterialChoice;
 
 /// The main Lumina application.
 pub struct LuminaApp {
@@ -57,39 +60,116 @@ impl Default for LuminaApp {
 }
 
 impl LuminaApp {
-    /// Launch a simulation on a background thread.
+    /// Launch a simulation on a background thread using the current panel state.
     fn launch_simulation(&mut self) {
         let (tx, rx) = mpsc::channel();
         self.result_rx = Some(rx);
         self.simulation_state.is_running = true;
         self.simulation_state.progress = 0.0;
 
-        let radius = self.geometry_state.sphere_radius;
-        let spacing = self.geometry_state.dipole_spacing;
-        let wl_start = self.simulation_state.wavelength_start;
-        let wl_end = self.simulation_state.wavelength_end;
-        let num_wl = self.simulation_state.num_wavelengths;
-        let env_n = self.simulation_state.environment_n;
+        // --- Capture geometry parameters ---
+        let shape       = self.geometry_state.selected_shape;
+        let spacing     = self.geometry_state.dipole_spacing;
+
+        let sphere_radius   = self.geometry_state.sphere_radius;
+        let cyl_radius      = self.geometry_state.cylinder_radius;
+        let cyl_length      = self.geometry_state.cylinder_length;
+        let cub_hx          = self.geometry_state.cuboid_hx;
+        let cub_hy          = self.geometry_state.cuboid_hy;
+        let cub_hz          = self.geometry_state.cuboid_hz;
+        let ell_a           = self.geometry_state.ellipsoid_a;
+        let ell_b           = self.geometry_state.ellipsoid_b;
+        let ell_c           = self.geometry_state.ellipsoid_c;
+        let helix_r         = self.geometry_state.helix_radius;
+        let helix_wr        = self.geometry_state.helix_wire_radius;
+        let helix_pitch     = self.geometry_state.helix_pitch;
+        let helix_turns     = self.geometry_state.helix_turns;
+
+        // Estimate bounding half-extent for the near-field observation plane
+        let shape_half_extent = match shape {
+            ShapeType::Sphere    => sphere_radius,
+            ShapeType::Cylinder  => cyl_radius.max(cyl_length / 2.0),
+            ShapeType::Cuboid    => cub_hx.max(cub_hy).max(cub_hz),
+            ShapeType::Ellipsoid => ell_a.max(ell_b).max(ell_c),
+            ShapeType::Helix     => helix_r + helix_wr + helix_pitch * helix_turns / 2.0,
+            ShapeType::ImportFile => 30.0,
+        };
+
+        // --- Capture material parameters ---
+        let mat_choice  = self.materials_state.selected_material;
+        let custom_n    = self.materials_state.custom_n;
+        let custom_k    = self.materials_state.custom_k;
+
+        // --- Capture simulation parameters ---
+        let wl_start    = self.simulation_state.wavelength_start;
+        let wl_end      = self.simulation_state.wavelength_end;
+        let num_wl      = self.simulation_state.num_wavelengths;
+        let env_n       = self.simulation_state.environment_n;
 
         std::thread::spawn(move || {
             use lumina_core::solver::cda::CdaSolver;
             use lumina_core::solver::{NearFieldPlane, OpticalSolver};
-            use lumina_core::types::{
-                clausius_mossotti, radiative_correction, Dipole, SimulationParams,
-            };
+            use lumina_core::types::{clausius_mossotti, radiative_correction, Dipole, SimulationParams};
             use lumina_geometry::discretise::discretise_primitive;
-            use lumina_geometry::primitives::{Primitive, Sphere};
+            use lumina_geometry::primitives::*;
             use lumina_materials::johnson_christy::JohnsonChristyMaterial;
             use lumina_materials::provider::MaterialProvider;
 
-            let sphere = Primitive::Sphere(Sphere {
-                centre: [0.0, 0.0, 0.0],
-                radius,
-            });
-            let lattice = discretise_primitive(&sphere, spacing);
+            // Build geometry
+            let primitive = match shape {
+                ShapeType::Sphere => Primitive::Sphere(Sphere {
+                    centre: [0.0, 0.0, 0.0],
+                    radius: sphere_radius,
+                }),
+                ShapeType::Cylinder => Primitive::Cylinder(Cylinder {
+                    base_centre: [0.0, 0.0, -cyl_length / 2.0],
+                    axis: [0.0, 0.0, 1.0],
+                    length: cyl_length,
+                    radius: cyl_radius,
+                }),
+                ShapeType::Cuboid => Primitive::Cuboid(Cuboid {
+                    centre: [0.0, 0.0, 0.0],
+                    half_extents: [cub_hx, cub_hy, cub_hz],
+                }),
+                ShapeType::Ellipsoid => Primitive::Ellipsoid(Ellipsoid {
+                    centre: [0.0, 0.0, 0.0],
+                    semi_axes: [ell_a, ell_b, ell_c],
+                }),
+                ShapeType::Helix => {
+                    let total_height = helix_pitch * helix_turns;
+                    Primitive::Helix(Helix {
+                        base_centre: [0.0, 0.0, -total_height / 2.0],
+                        axis: [0.0, 0.0, 1.0],
+                        radius: helix_r,
+                        pitch: helix_pitch,
+                        turns: helix_turns,
+                        wire_radius: helix_wr,
+                    })
+                }
+                ShapeType::ImportFile => {
+                    let _ = tx.send(SimulationMessage::Error(
+                        "File import not yet supported in the GUI.".to_string(),
+                    ));
+                    return;
+                }
+            };
+
+            let lattice = discretise_primitive(&primitive, spacing);
             let positions: Vec<[f64; 3]> = lattice.iter().map(|p| p.position).collect();
 
-            let gold = JohnsonChristyMaterial::gold();
+            // Build material provider (construct once, reuse across wavelengths)
+            let jc_material: Option<JohnsonChristyMaterial> = match mat_choice {
+                MaterialChoice::GoldJC   => Some(JohnsonChristyMaterial::gold()),
+                MaterialChoice::SilverJC => Some(JohnsonChristyMaterial::silver()),
+                MaterialChoice::CopperJC => Some(JohnsonChristyMaterial::copper()),
+                MaterialChoice::Custom   => None,
+            };
+            // For custom material, ε is constant across wavelengths
+            let custom_eps = Complex64::new(
+                custom_n * custom_n - custom_k * custom_k,
+                2.0 * custom_n * custom_k,
+            );
+
             let solver = CdaSolver::with_fcd(1000, true, spacing);
             let params = SimulationParams {
                 wavelength_range: [wl_start, wl_end],
@@ -105,29 +185,33 @@ impl LuminaApp {
             let mut spectra = Vec::new();
             let epsilon_m = env_n * env_n;
 
-            // Track the response at the peak wavelength for near-field computation
             let mut peak_wl_idx = 0;
             let mut peak_ext = 0.0_f64;
             let mut all_dipoles_at_peak = Vec::new();
 
             for (wi, &wl) in wavelengths.iter().enumerate() {
                 let k = 2.0 * std::f64::consts::PI * env_n / wl;
-                let epsilon = match gold.dielectric_function(wl) {
-                    Ok(e) => e,
-                    Err(e) => {
-                        let _ = tx.send(SimulationMessage::Error(format!(
-                            "Material error at {:.1} nm: {}",
-                            wl, e
-                        )));
-                        return;
+
+                // Get dielectric function for this wavelength
+                let epsilon = if let Some(ref mat) = jc_material {
+                    match mat.dielectric_function(wl) {
+                        Ok(e) => e,
+                        Err(e) => {
+                            let _ = tx.send(SimulationMessage::Error(format!(
+                                "Material out of range at {:.1} nm: {}",
+                                wl, e
+                            )));
+                            return;
+                        }
                     }
+                } else {
+                    custom_eps
                 };
 
                 let dipoles: Vec<Dipole> = positions
                     .iter()
                     .map(|&pos| {
-                        let volume = spacing.powi(3);
-                        let alpha_cm = clausius_mossotti(volume, epsilon, epsilon_m);
+                        let alpha_cm = clausius_mossotti(spacing.powi(3), epsilon, epsilon_m);
                         let alpha = radiative_correction(alpha_cm, k);
                         Dipole::isotropic(pos, alpha)
                     })
@@ -157,7 +241,7 @@ impl LuminaApp {
                 });
             }
 
-            // Compute near-field map at the peak wavelength
+            // Compute near-field map at the peak extinction wavelength
             let mut near_field = None;
             if !all_dipoles_at_peak.is_empty() && !spectra.is_empty() {
                 let peak_wl = wavelengths[peak_wl_idx];
@@ -165,8 +249,8 @@ impl LuminaApp {
                     let plane = NearFieldPlane {
                         centre: [0.0, 0.0, 0.0],
                         normal: [0.0, 0.0, 1.0], // xy plane
-                        half_width: radius * 2.0,
-                        half_height: radius * 2.0,
+                        half_width: shape_half_extent * 2.0,
+                        half_height: shape_half_extent * 2.0,
                         nx: 40,
                         ny: 40,
                     };

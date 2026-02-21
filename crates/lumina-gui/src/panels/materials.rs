@@ -120,12 +120,10 @@ fn compute_epsilon_data(material: MaterialChoice) -> Vec<[f64; 3]> {
     use lumina_materials::provider::MaterialProvider;
 
     let mat = match material {
-        MaterialChoice::GoldJC => JohnsonChristyMaterial::gold(),
-        MaterialChoice::SilverJC | MaterialChoice::CopperJC => {
-            // Silver and copper use gold data for now (placeholder)
-            JohnsonChristyMaterial::gold()
-        }
-        MaterialChoice::Custom => return Vec::new(),
+        MaterialChoice::GoldJC   => JohnsonChristyMaterial::gold(),
+        MaterialChoice::SilverJC => JohnsonChristyMaterial::silver(),
+        MaterialChoice::CopperJC => JohnsonChristyMaterial::copper(),
+        MaterialChoice::Custom   => return Vec::new(),
     };
 
     let mut data = Vec::new();

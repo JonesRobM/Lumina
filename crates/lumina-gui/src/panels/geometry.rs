@@ -36,6 +36,16 @@ pub struct GeometryPanel {
     /// Ellipsoid semi-axis c (nm).
     pub ellipsoid_c: f64,
 
+    // Helix parameters
+    /// Helix coil radius (nm).
+    pub helix_radius: f64,
+    /// Wire cross-section radius (nm).
+    pub helix_wire_radius: f64,
+    /// Rise per full turn (nm).
+    pub helix_pitch: f64,
+    /// Number of turns.
+    pub helix_turns: f64,
+
     /// Which projection plane to show in the 2D scatter preview.
     pub projection_plane: ProjectionPlane,
 
@@ -51,6 +61,7 @@ pub enum ShapeType {
     Cylinder,
     Cuboid,
     Ellipsoid,
+    Helix,
     ImportFile,
 }
 
@@ -76,6 +87,10 @@ impl Default for GeometryPanel {
             ellipsoid_a: 15.0,
             ellipsoid_b: 10.0,
             ellipsoid_c: 8.0,
+            helix_radius: 15.0,
+            helix_wire_radius: 4.0,
+            helix_pitch: 20.0,
+            helix_turns: 3.0,
             projection_plane: ProjectionPlane::XY,
             cached_positions: None,
             cache_dirty: true,
@@ -96,6 +111,7 @@ impl GeometryPanel {
             ui.selectable_value(&mut self.selected_shape, ShapeType::Cylinder, "Cylinder");
             ui.selectable_value(&mut self.selected_shape, ShapeType::Cuboid, "Cuboid");
             ui.selectable_value(&mut self.selected_shape, ShapeType::Ellipsoid, "Ellipsoid");
+            ui.selectable_value(&mut self.selected_shape, ShapeType::Helix, "Helix");
             ui.selectable_value(&mut self.selected_shape, ShapeType::ImportFile, "Import File");
         });
 
@@ -138,6 +154,20 @@ impl GeometryPanel {
                     self.cache_dirty = true;
                 }
                 if slider_changed(ui, &mut self.ellipsoid_c, 1.0..=100.0, "Semi-axis c (nm)") {
+                    self.cache_dirty = true;
+                }
+            }
+            ShapeType::Helix => {
+                if slider_changed(ui, &mut self.helix_radius, 1.0..=100.0, "Coil radius (nm)") {
+                    self.cache_dirty = true;
+                }
+                if slider_changed(ui, &mut self.helix_wire_radius, 0.5..=20.0, "Wire radius (nm)") {
+                    self.cache_dirty = true;
+                }
+                if slider_changed(ui, &mut self.helix_pitch, 1.0..=100.0, "Pitch (nm/turn)") {
+                    self.cache_dirty = true;
+                }
+                if slider_changed(ui, &mut self.helix_turns, 0.5..=10.0, "Turns") {
                     self.cache_dirty = true;
                 }
             }
@@ -222,6 +252,18 @@ impl GeometryPanel {
                 centre: [0.0, 0.0, 0.0],
                 semi_axes: [self.ellipsoid_a, self.ellipsoid_b, self.ellipsoid_c],
             }),
+            ShapeType::Helix => {
+                use lumina_geometry::primitives::Helix;
+                let total_height = self.helix_pitch * self.helix_turns;
+                Primitive::Helix(Helix {
+                    base_centre: [0.0, 0.0, -total_height / 2.0],
+                    axis: [0.0, 0.0, 1.0],
+                    radius: self.helix_radius,
+                    pitch: self.helix_pitch,
+                    turns: self.helix_turns,
+                    wire_radius: self.helix_wire_radius,
+                })
+            }
             ShapeType::ImportFile => {
                 self.cached_positions = None;
                 self.dipole_count = 0;

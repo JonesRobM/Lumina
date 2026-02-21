@@ -2297,6 +2297,7 @@ dependencies = [
  "lumina-core",
  "lumina-geometry",
  "lumina-materials",
+ "num-complex",
 ]
 
 [[package]]
