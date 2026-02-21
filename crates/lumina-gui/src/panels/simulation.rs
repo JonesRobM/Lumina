@@ -2,6 +2,23 @@
 
 use egui::Ui;
 
+/// Incident field polarisation direction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IncidentPolarisation {
+    /// x-polarised (default).
+    X,
+    /// y-polarised.
+    Y,
+    /// z-propagating, circular (used for CD — internally runs x + y separately).
+    Circular,
+}
+
+impl Default for IncidentPolarisation {
+    fn default() -> Self {
+        Self::X
+    }
+}
+
 /// State for the simulation configuration panel.
 #[derive(Debug)]
 pub struct SimulationPanel {
@@ -13,6 +30,10 @@ pub struct SimulationPanel {
     pub num_wavelengths: usize,
     /// Refractive index of the surrounding medium.
     pub environment_n: f64,
+    /// Incident field polarisation.
+    pub polarisation: IncidentPolarisation,
+    /// Whether to compute circular dichroism (requires two solver runs per wavelength).
+    pub compute_cd: bool,
     /// Whether a simulation is currently running.
     pub is_running: bool,
     /// Progress (0.0 to 1.0).
@@ -30,6 +51,8 @@ impl Default for SimulationPanel {
             wavelength_end: 800.0,
             num_wavelengths: 20,
             environment_n: 1.0,
+            polarisation: IncidentPolarisation::X,
+            compute_cd: false,
             is_running: false,
             progress: 0.0,
             launch_requested: false,
@@ -61,6 +84,35 @@ impl SimulationPanel {
             egui::Slider::new(&mut self.environment_n, 1.0..=2.5)
                 .text("Medium refractive index"),
         );
+
+        ui.add_space(12.0);
+        ui.separator();
+
+        // Polarisation selector
+        ui.label("Incident polarisation:");
+        ui.horizontal(|ui| {
+            ui.selectable_value(&mut self.polarisation, IncidentPolarisation::X, "x-pol");
+            ui.selectable_value(&mut self.polarisation, IncidentPolarisation::Y, "y-pol");
+            ui.selectable_value(
+                &mut self.polarisation,
+                IncidentPolarisation::Circular,
+                "Circular",
+            );
+        });
+
+        ui.add_space(4.0);
+
+        // CD checkbox (only meaningful with circular or combined runs)
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut self.compute_cd, "Compute circular dichroism (ΔC_ext)");
+        });
+        if self.compute_cd {
+            ui.label(
+                egui::RichText::new("  CD requires two solver calls per wavelength.")
+                    .weak()
+                    .small(),
+            );
+        }
 
         ui.add_space(16.0);
         ui.separator();

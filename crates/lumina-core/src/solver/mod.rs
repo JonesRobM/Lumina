@@ -7,7 +7,7 @@
 
 pub mod cda;
 
-use crate::types::{CrossSections, Dipole, DipoleResponse, NearFieldMap, SimulationParams};
+use crate::types::{CrossSections, Dipole, DipoleResponse, FarFieldMap, NearFieldMap, SimulationParams};
 use thiserror::Error;
 
 /// Errors that can occur during an optical solve.
@@ -57,6 +57,19 @@ pub trait OpticalSolver {
         response: &DipoleResponse,
         plane: &NearFieldPlane,
     ) -> Result<NearFieldMap, SolverError>;
+
+    /// Compute the far-field radiation pattern at a single wavelength.
+    ///
+    /// Returns a [`FarFieldMap`] sampled at `n_theta × n_phi` directions on the
+    /// unit sphere. The intensity at each direction is the differential scattering
+    /// cross-section (unnormalised).
+    fn compute_far_field(
+        &self,
+        dipoles: &[Dipole],
+        response: &DipoleResponse,
+        n_theta: usize,
+        n_phi: usize,
+    ) -> FarFieldMap;
 
     /// Human-readable name of the solver method.
     fn method_name(&self) -> &str;

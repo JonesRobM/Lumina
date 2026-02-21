@@ -46,12 +46,21 @@
 
 ## v0.1.3 — I/O & Export
 
-- [ ] Far-field radiation pattern computation and polar plots
-- [ ] File dialog for CSV export path
-- [ ] JSON export option for simulation results
-- [ ] Metadata header in CSV (simulation params, date, version)
+- [x] Far-field radiation pattern computation (`compute_far_field` in `fields.rs`)
+- [x] Far-field polar plot (E-plane / H-plane cuts) in the GUI results panel
+- [x] Circular dichroism ΔC_ext computation (`compute_circular_dichroism` in `fields.rs`)
+- [x] Incident polarisation selector in GUI (x-pol / y-pol / circular)
+- [x] CD checkbox in GUI simulation panel; CD line on spectra plot
+- [x] File dialog for CSV export (via `rfd`)
+- [x] JSON export option for simulation results (GUI + CLI)
+- [x] Metadata header in CSV (version, object list, material, spacing)
+- [x] Palik TiO₂ and SiO₂ dielectric data (300–1000 nm) in `lumina-materials`
+- [x] TiO₂ / SiO₂ available in GUI materials panel and CLI (`TiO2_Palik`, `SiO2_Palik`)
+- [x] Ag_JC and Cu_JC fully wired in CLI material resolver
+- [x] CLI geometry expanded: cylinder, cuboid, ellipsoid, helix in TOML configs
+- [x] Near-field export to CSV (`save_near_field = true` in TOML output config)
+- [x] .xyz file import in GUI geometry panel (Ångström → nm conversion)
 - [ ] OBJ mesh parser (vertex + face → volume-filling dipole lattice)
-- [ ] .xyz file parser
 
 ## v0.2.0 — GPU Compute Engine
 
@@ -71,7 +80,8 @@
 - [ ] Ewald summation for 1D/2D/3D periodicity
 - [ ] Bloch boundary conditions for oblique incidence
 - [ ] MPI distributed computing backend
-- [ ] Palik dielectric data library
+- [x] Palik dielectric data (TiO₂, SiO₂) — shipped in v0.1.3
+- [ ] Extended Palik library (Al₂O₃, Si, GaAs, etc.)
 - [ ] DFT polarisability import (VASP, Gaussian)
 
 ## v1.0 — Multi-Method & Cross-Platform

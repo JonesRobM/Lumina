@@ -9,7 +9,7 @@
 //! | Source | Module | Status |
 //! |--------|--------|--------|
 //! | Johnson & Christy (Au/Ag/Cu) | [`johnson_christy`] | Implemented |
-//! | Palik handbook | [`palik`] | Stub |
+//! | Palik handbook (TiO₂, SiO₂) | [`palik`] | Implemented |
 //! | DFT (VASP/Gaussian) | [`dft`] | Stub |
 //!
 //! ## Interpolation

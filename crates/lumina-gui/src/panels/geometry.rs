@@ -1,6 +1,7 @@
 //! Geometry panel: shape builder, file import, and dipole lattice preview.
 
 use egui::Ui;
+use rfd;
 
 /// State for the geometry configuration panel.
 #[derive(Debug)]
@@ -53,6 +54,11 @@ pub struct GeometryPanel {
     pub cached_positions: Option<Vec<[f64; 3]>>,
     /// Whether the cache needs refreshing.
     cache_dirty: bool,
+
+    /// Path to the loaded .xyz file (for display).
+    pub xyz_path_display: Option<String>,
+    /// Error message from last .xyz parse attempt.
+    pub xyz_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,6 +100,8 @@ impl Default for GeometryPanel {
             projection_plane: ProjectionPlane::XY,
             cached_positions: None,
             cache_dirty: true,
+            xyz_path_display: None,
+            xyz_error: None,
         }
     }
 }
@@ -172,7 +180,25 @@ impl GeometryPanel {
                 }
             }
             ShapeType::ImportFile => {
-                ui.label("File import not yet implemented.");
+                if let Some(path) = &self.xyz_path_display {
+                    ui.label(format!("Loaded: {}", path));
+                } else {
+                    ui.label("No file loaded.");
+                }
+
+                if let Some(err) = &self.xyz_error {
+                    ui.colored_label(egui::Color32::RED, format!("Parse error: {}", err));
+                }
+
+                if ui.button("Open .xyz file…").clicked() {
+                    self.load_xyz_file();
+                }
+
+                ui.label(
+                    egui::RichText::new("Coordinates are read in Ångströms and converted to nm.")
+                        .weak()
+                        .small(),
+                );
             }
         }
 
@@ -229,6 +255,37 @@ impl GeometryPanel {
         }
     }
 
+    /// Open a file dialog, load and parse a .xyz file, and store positions.
+    fn load_xyz_file(&mut self) {
+        use lumina_geometry::parsers::xyz::parse_xyz;
+
+        let path = rfd::FileDialog::new()
+            .set_title("Open XYZ file")
+            .add_filter("XYZ", &["xyz"])
+            .pick_file();
+
+        if let Some(path) = path {
+            self.xyz_error = None;
+            match std::fs::read_to_string(&path) {
+                Ok(content) => match parse_xyz(&content) {
+                    Ok(points) => {
+                        self.xyz_path_display =
+                            Some(path.file_name().unwrap_or_default().to_string_lossy().into_owned());
+                        self.cached_positions = Some(points.iter().map(|p| p.position).collect());
+                        self.dipole_count = points.len();
+                        self.cache_dirty = false;
+                    }
+                    Err(e) => {
+                        self.xyz_error = Some(format!("{:?}", e));
+                    }
+                },
+                Err(e) => {
+                    self.xyz_error = Some(format!("Could not read file: {}", e));
+                }
+            }
+        }
+    }
+
     fn recompute_lattice(&mut self) {
         use lumina_geometry::discretise::discretise_primitive;
         use lumina_geometry::primitives::*;
@@ -265,8 +322,8 @@ impl GeometryPanel {
                 })
             }
             ShapeType::ImportFile => {
-                self.cached_positions = None;
-                self.dipole_count = 0;
+                // Positions already stored from load_xyz_file() — just mark clean
+                self.dipole_count = self.cached_positions.as_ref().map(|v| v.len()).unwrap_or(0);
                 self.cache_dirty = false;
                 return;
             }

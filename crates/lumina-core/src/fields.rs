@@ -12,7 +12,7 @@ use num_complex::Complex64;
 
 use crate::solver::cda::greens::dyadic_greens_tensor;
 use crate::solver::{NearFieldPlane, SolverError};
-use crate::types::{Dipole, DipoleResponse, IncidentField, NearFieldMap};
+use crate::types::{Dipole, DipoleResponse, FarFieldMap, IncidentField, NearFieldMap};
 
 /// Compute the electric field at a single observation point due to all dipoles.
 pub fn field_at_point(
@@ -138,4 +138,116 @@ fn plane_basis(normal: &[f64; 3]) -> ([f64; 3], [f64; 3]) {
 fn normalise(v: &[f64; 3]) -> [f64; 3] {
     let len = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
     [v[0] / len, v[1] / len, v[2] / len]
+}
+
+/// Compute the far-field radiation pattern on a spherical grid.
+///
+/// Samples the differential scattering intensity
+/// $\frac{dC_\text{sca}}{d\Omega} \propto |(\mathbf{I} - \hat{\mathbf{r}}\hat{\mathbf{r}}) \cdot \mathbf{F}(\hat{\mathbf{r}})|^2$
+/// at `n_theta × n_phi` directions, where
+/// $\mathbf{F}(\hat{\mathbf{r}}) = \sum_i \mathbf{p}_i e^{-ik\hat{\mathbf{r}}\cdot\mathbf{r}_i}$.
+///
+/// # Arguments
+/// * `dipoles` — Dipole positions.
+/// * `response` — Solved dipole moments at a single wavelength.
+/// * `k` — Wavenumber in the medium (nm⁻¹).
+/// * `n_theta` — Number of polar angle samples in [0, π].
+/// * `n_phi` — Number of azimuthal angle samples in [0, 2π).
+pub fn compute_far_field(
+    dipoles: &[Dipole],
+    response: &DipoleResponse,
+    k: f64,
+    n_theta: usize,
+    n_phi: usize,
+) -> FarFieldMap {
+    use std::f64::consts::PI;
+
+    let mut theta_vals = Vec::with_capacity(n_theta * n_phi);
+    let mut phi_vals = Vec::with_capacity(n_theta * n_phi);
+    let mut intensity = Vec::with_capacity(n_theta * n_phi);
+
+    for it in 0..n_theta {
+        let theta = PI * it as f64 / (n_theta - 1).max(1) as f64;
+        let sin_t = theta.sin();
+        let cos_t = theta.cos();
+
+        for ip in 0..n_phi {
+            let phi = 2.0 * PI * ip as f64 / n_phi as f64;
+            let sin_p = phi.sin();
+            let cos_p = phi.cos();
+
+            // Unit direction vector r̂
+            let rhat = [sin_t * cos_p, sin_t * sin_p, cos_t];
+
+            // Structure factor F(r̂) = Σᵢ pᵢ exp(-ik r̂·rᵢ)
+            let mut f = [Complex64::new(0.0, 0.0); 3];
+            for (i, dipole) in dipoles.iter().enumerate() {
+                let kdotr = k * (
+                    rhat[0] * dipole.position[0]
+                    + rhat[1] * dipole.position[1]
+                    + rhat[2] * dipole.position[2]
+                );
+                let phase = Complex64::new(0.0, -kdotr).exp();
+                for a in 0..3 {
+                    f[a] += response.moments[[i, a]] * phase;
+                }
+            }
+
+            // Transverse projection: (I - r̂r̂) · F
+            // (f_transverse)_a = f_a - (r̂ · f) r̂_a
+            let rdotf = rhat[0] * f[0] + rhat[1] * f[1] + rhat[2] * f[2];
+            let ft = [
+                f[0] - rdotf * rhat[0],
+                f[1] - rdotf * rhat[1],
+                f[2] - rdotf * rhat[2],
+            ];
+
+            let intens = ft[0].norm_sqr() + ft[1].norm_sqr() + ft[2].norm_sqr();
+
+            theta_vals.push(theta);
+            phi_vals.push(phi);
+            intensity.push(intens);
+        }
+    }
+
+    FarFieldMap {
+        wavelength_nm: response.wavelength_nm,
+        theta: theta_vals,
+        phi: phi_vals,
+        intensity,
+        n_theta,
+        n_phi,
+    }
+}
+
+/// Compute the circular dichroism ΔC_ext = C_ext(LCP) − C_ext(RCP).
+///
+/// Uses the two-response formula (Draine & Goodman approach extended for CD):
+/// $\Delta C_\text{ext} = \frac{k}{|E_0|^2} \sum_i
+///   \bigl[\operatorname{Im}(p_{x,i}^{(y)}) - \operatorname{Im}(p_{y,i}^{(x)})\bigr]$
+///
+/// where $p_{x,i}^{(y)}$ is the y-component of dipole $i$'s moment when the incident
+/// field is x-polarised, and vice versa.
+///
+/// # Arguments
+/// * `response_x` — Solved dipole moments for x-polarised incidence.
+/// * `response_y` — Solved dipole moments for y-polarised incidence.
+/// * `k` — Wavenumber in the medium (nm⁻¹).
+pub fn compute_circular_dichroism(
+    response_x: &DipoleResponse,
+    response_y: &DipoleResponse,
+    k: f64,
+) -> f64 {
+    let n = response_x.moments.nrows();
+    let mut delta: f64 = 0.0;
+
+    for i in 0..n {
+        // y-component of dipole i under x-pol excitation
+        let py_under_x = response_x.moments[[i, 1]].im;
+        // x-component of dipole i under y-pol excitation
+        let px_under_y = response_y.moments[[i, 0]].im;
+        delta += py_under_x - px_under_y;
+    }
+
+    k * delta
 }

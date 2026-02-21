@@ -20,6 +20,8 @@ pub enum MaterialChoice {
     GoldJC,
     SilverJC,
     CopperJC,
+    TiO2Palik,
+    SiO2Palik,
     Custom,
 }
 
@@ -41,19 +43,13 @@ impl MaterialsPanel {
 
         let prev_material = self.selected_material;
 
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label("Material:");
             ui.selectable_value(&mut self.selected_material, MaterialChoice::GoldJC, "Au (J&C)");
-            ui.selectable_value(
-                &mut self.selected_material,
-                MaterialChoice::SilverJC,
-                "Ag (J&C)",
-            );
-            ui.selectable_value(
-                &mut self.selected_material,
-                MaterialChoice::CopperJC,
-                "Cu (J&C)",
-            );
+            ui.selectable_value(&mut self.selected_material, MaterialChoice::SilverJC, "Ag (J&C)");
+            ui.selectable_value(&mut self.selected_material, MaterialChoice::CopperJC, "Cu (J&C)");
+            ui.selectable_value(&mut self.selected_material, MaterialChoice::TiO2Palik, "TiO₂ (Palik)");
+            ui.selectable_value(&mut self.selected_material, MaterialChoice::SiO2Palik, "SiO₂ (Palik)");
             ui.selectable_value(&mut self.selected_material, MaterialChoice::Custom, "Custom");
         });
 
@@ -71,8 +67,13 @@ impl MaterialsPanel {
         }
 
         // Compute and cache ε(λ) data
-        if self.epsilon_cache.is_none() && self.selected_material != MaterialChoice::Custom {
-            self.epsilon_cache = Some((self.selected_material, compute_epsilon_data(self.selected_material)));
+        if self.epsilon_cache.is_none()
+            && self.selected_material != MaterialChoice::Custom
+        {
+            self.epsilon_cache = Some((
+                self.selected_material,
+                compute_epsilon_data(self.selected_material),
+            ));
         }
 
         // Plot ε(λ)
@@ -114,26 +115,28 @@ impl MaterialsPanel {
     }
 }
 
-/// Compute ε₁(λ) and ε₂(λ) data for a Johnson & Christy material.
+/// Compute ε₁(λ) and ε₂(λ) data for a material, for plotting.
 fn compute_epsilon_data(material: MaterialChoice) -> Vec<[f64; 3]> {
     use lumina_materials::johnson_christy::JohnsonChristyMaterial;
+    use lumina_materials::palik::PalikMaterial;
     use lumina_materials::provider::MaterialProvider;
 
-    let mat = match material {
-        MaterialChoice::GoldJC   => JohnsonChristyMaterial::gold(),
-        MaterialChoice::SilverJC => JohnsonChristyMaterial::silver(),
-        MaterialChoice::CopperJC => JohnsonChristyMaterial::copper(),
-        MaterialChoice::Custom   => return Vec::new(),
+    // Trait object so we can dispatch to either JC or Palik
+    let mat: Box<dyn MaterialProvider> = match material {
+        MaterialChoice::GoldJC    => Box::new(JohnsonChristyMaterial::gold()),
+        MaterialChoice::SilverJC  => Box::new(JohnsonChristyMaterial::silver()),
+        MaterialChoice::CopperJC  => Box::new(JohnsonChristyMaterial::copper()),
+        MaterialChoice::TiO2Palik => Box::new(PalikMaterial::tio2()),
+        MaterialChoice::SiO2Palik => Box::new(PalikMaterial::sio2()),
+        MaterialChoice::Custom    => return Vec::new(),
     };
 
-    let mut data = Vec::new();
-    // Sample at 2nm intervals across J&C range
-    let wl_start = 200.0;
-    let wl_end = 890.0;
-    let num_points = 346;
+    let (wl_start, wl_end) = mat.wavelength_range();
+    let num_points = 350.min(((wl_end - wl_start) as usize).saturating_add(1));
 
+    let mut data = Vec::new();
     for i in 0..num_points {
-        let wl = wl_start + (wl_end - wl_start) * i as f64 / (num_points - 1) as f64;
+        let wl = wl_start + (wl_end - wl_start) * i as f64 / (num_points - 1).max(1) as f64;
         if let Ok(eps) = mat.dielectric_function(wl) {
             data.push([wl, eps.re, eps.im]);
         }

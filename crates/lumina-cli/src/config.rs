@@ -86,15 +86,15 @@ pub struct OutputConfig {
     /// Output directory (default: "./output").
     #[serde(default = "default_output_dir")]
     pub directory: String,
-    /// Whether to save spectra as CSV.
+    /// Whether to save spectra as CSV (default: true).
     #[serde(default = "default_true")]
     pub save_spectra: bool,
-    /// Whether to compute and save near-field maps.
+    /// Whether to also save spectra as JSON (default: false).
+    #[serde(default)]
+    pub save_json: bool,
+    /// Whether to compute and save the near-field map at peak extinction (default: false).
     #[serde(default)]
     pub save_near_field: bool,
-    /// Whether to save raw dipole moments.
-    #[serde(default)]
-    pub save_dipoles: bool,
 }
 
 impl Default for OutputConfig {
@@ -102,8 +102,8 @@ impl Default for OutputConfig {
         Self {
             directory: default_output_dir(),
             save_spectra: true,
+            save_json: false,
             save_near_field: false,
-            save_dipoles: false,
         }
     }
 }

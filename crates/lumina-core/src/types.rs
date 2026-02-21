@@ -105,12 +105,36 @@ impl Default for SimulationParams {
 pub struct CrossSections {
     /// Wavelength (nm).
     pub wavelength_nm: f64,
-    /// Extinction cross-section (nm^2).
+    /// Extinction cross-section (nm²).
     pub extinction: f64,
-    /// Absorption cross-section (nm^2).
+    /// Absorption cross-section (nm²).
     pub absorption: f64,
-    /// Scattering cross-section (nm^2).
+    /// Scattering cross-section (nm²).
     pub scattering: f64,
+    /// Circular dichroism ΔC_ext = C_ext(LCP) − C_ext(RCP) (nm²).
+    /// `None` unless CD mode is enabled.
+    pub circular_dichroism: Option<f64>,
+}
+
+/// Far-field radiation pattern sampled on the unit sphere.
+///
+/// The differential scattering intensity at each direction r̂ is proportional to
+/// $|(\mathbf{I} - \hat{\mathbf{r}}\hat{\mathbf{r}}) \cdot \mathbf{F}(\hat{\mathbf{r}})|^2$
+/// where $\mathbf{F}(\hat{\mathbf{r}}) = \sum_i \mathbf{p}_i \exp(-ik\hat{\mathbf{r}} \cdot \mathbf{r}_i)$.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FarFieldMap {
+    /// Wavelength at which the pattern was computed (nm).
+    pub wavelength_nm: f64,
+    /// Polar angles θ ∈ [0, π] (radians), one per sample.
+    pub theta: Vec<f64>,
+    /// Azimuthal angles φ ∈ [0, 2π) (radians), one per sample.
+    pub phi: Vec<f64>,
+    /// Differential scattering intensity (nm⁴, unnormalised) at each (θ, φ).
+    pub intensity: Vec<f64>,
+    /// Number of θ samples.
+    pub n_theta: usize,
+    /// Number of φ samples.
+    pub n_phi: usize,
 }
 
 /// The solved dipole moments for a given excitation.

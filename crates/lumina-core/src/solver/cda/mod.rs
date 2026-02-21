@@ -21,7 +21,7 @@ use ndarray::Array2;
 use num_complex::Complex64;
 
 use super::{NearFieldPlane, OpticalSolver, SolverError};
-use crate::types::{CrossSections, Dipole, DipoleResponse, IncidentField, NearFieldMap, SimulationParams};
+use crate::types::{CrossSections, Dipole, DipoleResponse, FarFieldMap, IncidentField, NearFieldMap, SimulationParams};
 
 /// The CDA solver, holding configuration for the numerical method.
 pub struct CdaSolver {
@@ -64,6 +64,16 @@ impl CdaSolver {
         Self {
             iterative_threshold,
             incident_field: IncidentField::default(),
+            use_fcd,
+            cell_size,
+        }
+    }
+
+    /// Create a CDA solver with a custom incident field (polarisation/direction).
+    pub fn with_incident(iterative_threshold: usize, use_fcd: bool, cell_size: f64, incident_field: IncidentField) -> Self {
+        Self {
+            iterative_threshold,
+            incident_field,
             use_fcd,
             cell_size,
         }
@@ -135,6 +145,7 @@ impl OpticalSolver for CdaSolver {
             extinction: c_ext,
             absorption: c_abs,
             scattering: c_sca.max(0.0), // Numerical noise can make this slightly negative
+            circular_dichroism: None,
         })
     }
 
@@ -209,6 +220,17 @@ impl OpticalSolver for CdaSolver {
         );
 
         crate::fields::compute_near_field_map(dipoles, response, plane, k, &self.incident_field)
+    }
+
+    fn compute_far_field(
+        &self,
+        dipoles: &[Dipole],
+        response: &DipoleResponse,
+        n_theta: usize,
+        n_phi: usize,
+    ) -> FarFieldMap {
+        let k = Self::wavenumber(response.wavelength_nm, 1.0);
+        crate::fields::compute_far_field(dipoles, response, k, n_theta, n_phi)
     }
 
     fn method_name(&self) -> &str {

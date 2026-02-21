@@ -4,7 +4,7 @@ use std::sync::mpsc;
 use eframe::egui;
 use num_complex::Complex64;
 
-use lumina_core::types::{CrossSections, NearFieldMap};
+use lumina_core::types::{CrossSections, FarFieldMap, NearFieldMap};
 
 use crate::panels;
 use crate::panels::geometry::ShapeType;
@@ -33,6 +33,7 @@ pub enum SimulationMessage {
     Complete {
         spectra: Vec<CrossSections>,
         near_field: Option<NearFieldMap>,
+        far_field: Option<FarFieldMap>,
     },
     Error(String),
 }
@@ -71,6 +72,13 @@ impl LuminaApp {
         let shape       = self.geometry_state.selected_shape;
         let spacing     = self.geometry_state.dipole_spacing;
 
+        // For ImportFile, capture the pre-parsed positions
+        let xyz_positions: Option<Vec<[f64; 3]>> = if shape == ShapeType::ImportFile {
+            self.geometry_state.cached_positions.clone()
+        } else {
+            None
+        };
+
         let sphere_radius   = self.geometry_state.sphere_radius;
         let cyl_radius      = self.geometry_state.cylinder_radius;
         let cyl_length      = self.geometry_state.cylinder_length;
@@ -105,15 +113,43 @@ impl LuminaApp {
         let wl_end      = self.simulation_state.wavelength_end;
         let num_wl      = self.simulation_state.num_wavelengths;
         let env_n       = self.simulation_state.environment_n;
+        let polarisation = self.simulation_state.polarisation;
+        let compute_cd  = self.simulation_state.compute_cd;
 
         std::thread::spawn(move || {
+            use lumina_core::fields::compute_circular_dichroism;
             use lumina_core::solver::cda::CdaSolver;
             use lumina_core::solver::{NearFieldPlane, OpticalSolver};
-            use lumina_core::types::{clausius_mossotti, radiative_correction, Dipole, SimulationParams};
+            use lumina_core::types::{
+                clausius_mossotti, radiative_correction, Dipole, IncidentField, SimulationParams,
+            };
             use lumina_geometry::discretise::discretise_primitive;
             use lumina_geometry::primitives::*;
             use lumina_materials::johnson_christy::JohnsonChristyMaterial;
+            use lumina_materials::palik::PalikMaterial;
             use lumina_materials::provider::MaterialProvider;
+            use crate::panels::simulation::IncidentPolarisation;
+
+            // Build material provider (needed by ImportFile arm before geometry is dispatched)
+            let dyn_material: Option<Box<dyn MaterialProvider>> = match mat_choice {
+                MaterialChoice::GoldJC    => Some(Box::new(JohnsonChristyMaterial::gold())),
+                MaterialChoice::SilverJC  => Some(Box::new(JohnsonChristyMaterial::silver())),
+                MaterialChoice::CopperJC  => Some(Box::new(JohnsonChristyMaterial::copper())),
+                MaterialChoice::TiO2Palik => Some(Box::new(PalikMaterial::tio2())),
+                MaterialChoice::SiO2Palik => Some(Box::new(PalikMaterial::sio2())),
+                MaterialChoice::Custom    => None,
+            };
+            let custom_eps = Complex64::new(
+                custom_n * custom_n - custom_k * custom_k,
+                2.0 * custom_n * custom_k,
+            );
+
+            let params = SimulationParams {
+                wavelength_range: [wl_start, wl_end],
+                num_wavelengths: num_wl,
+                environment_n: env_n,
+                ..Default::default()
+            };
 
             // Build geometry
             let primitive = match shape {
@@ -147,36 +183,135 @@ impl LuminaApp {
                     })
                 }
                 ShapeType::ImportFile => {
-                    let _ = tx.send(SimulationMessage::Error(
-                        "File import not yet supported in the GUI.".to_string(),
-                    ));
-                    return;
+                    match xyz_positions {
+                        Some(ref positions_xyz) => {
+                            // Skip discretisation — use raw parsed positions directly
+                            let positions_copy: Vec<[f64; 3]> = positions_xyz.clone();
+                            let lattice_len = positions_copy.len();
+
+                            if lattice_len == 0 {
+                                let _ = tx.send(SimulationMessage::Error(
+                                    "Loaded .xyz file has no atoms.".to_string(),
+                                ));
+                                return;
+                            }
+
+                            // Use xyz positions directly as dipole positions
+                            let half_extent = positions_copy
+                                .iter()
+                                .map(|p| (p[0]*p[0]+p[1]*p[1]+p[2]*p[2]).sqrt())
+                                .fold(0.0_f64, f64::max);
+                            let shape_half_extent_xyz = (half_extent * 2.0).max(5.0);
+
+                            // Build the solver using a synthetic lattice from the .xyz coordinates
+                            // We build dipoles inline below using these positions and current material
+                            let positions_for_thread = positions_copy;
+
+                            // Determine epsilon_m and run simulation inline
+                            let epsilon_m = env_n * env_n;
+                            let solver_xyz = CdaSolver::with_fcd(1000, true, spacing);
+
+                            let wavelengths: Vec<f64> = (0..num_wl)
+                                .map(|i| wl_start + (wl_end - wl_start) * i as f64 / (num_wl - 1).max(1) as f64)
+                                .collect();
+
+                            let mut spectra = Vec::new();
+                            let mut peak_ext_xyz = 0.0_f64;
+                            let mut peak_wl_xyz = wavelengths[0];
+                            let mut peak_dipoles_xyz: Vec<Dipole> = Vec::new();
+
+                            for (wi, &wl) in wavelengths.iter().enumerate() {
+                                let k = 2.0 * std::f64::consts::PI * env_n / wl;
+                                let epsilon = if let Some(ref mat) = dyn_material {
+                                    match mat.dielectric_function(wl) {
+                                        Ok(e) => e,
+                                        Err(e) => {
+                                            let _ = tx.send(SimulationMessage::Error(format!(
+                                                "Material out of range at {:.1} nm: {}", wl, e)));
+                                            return;
+                                        }
+                                    }
+                                } else { custom_eps };
+
+                                let dipoles: Vec<Dipole> = positions_for_thread.iter().map(|&pos| {
+                                    let alpha_cm = clausius_mossotti(spacing.powi(3), epsilon, epsilon_m);
+                                    let alpha = radiative_correction(alpha_cm, k);
+                                    Dipole::isotropic(pos, alpha)
+                                }).collect();
+
+                                match solver_xyz.compute_cross_sections(&dipoles, wl, &params) {
+                                    Ok(cs) => {
+                                        if cs.extinction > peak_ext_xyz {
+                                            peak_ext_xyz = cs.extinction;
+                                            peak_wl_xyz = wl;
+                                            peak_dipoles_xyz = dipoles.clone();
+                                        }
+                                        spectra.push(cs);
+                                    }
+                                    Err(e) => {
+                                        let _ = tx.send(SimulationMessage::Error(format!(
+                                            "Solver error at {:.1} nm: {}", wl, e)));
+                                        return;
+                                    }
+                                }
+                                let _ = tx.send(SimulationMessage::Progress { done: wi + 1, total: num_wl });
+                            }
+
+                            // Near/far-field at peak
+                            let mut near_field = None;
+                            let mut far_field = None;
+                            if !peak_dipoles_xyz.is_empty() {
+                                if let Ok(response) = solver_xyz.solve_dipoles(&peak_dipoles_xyz, peak_wl_xyz, &params) {
+                                    let plane = NearFieldPlane {
+                                        centre: [0.0, 0.0, 0.0],
+                                        normal: [0.0, 0.0, 1.0],
+                                        half_width: shape_half_extent_xyz,
+                                        half_height: shape_half_extent_xyz,
+                                        nx: 40, ny: 40,
+                                    };
+                                    if let Ok(nf_map) = solver_xyz.compute_near_field(&peak_dipoles_xyz, &response, &plane) {
+                                        near_field = Some(nf_map);
+                                    }
+                                    far_field = Some(solver_xyz.compute_far_field(&peak_dipoles_xyz, &response, 36, 72));
+                                }
+                            }
+
+                            let _ = tx.send(SimulationMessage::Complete { spectra, near_field, far_field });
+                            return;
+                        }
+                        None => {
+                            let _ = tx.send(SimulationMessage::Error(
+                                "No .xyz file loaded. Use the Geometry panel to import one.".to_string(),
+                            ));
+                            return;
+                        }
+                    }
                 }
             };
 
             let lattice = discretise_primitive(&primitive, spacing);
             let positions: Vec<[f64; 3]> = lattice.iter().map(|p| p.position).collect();
 
-            // Build material provider (construct once, reuse across wavelengths)
-            let jc_material: Option<JohnsonChristyMaterial> = match mat_choice {
-                MaterialChoice::GoldJC   => Some(JohnsonChristyMaterial::gold()),
-                MaterialChoice::SilverJC => Some(JohnsonChristyMaterial::silver()),
-                MaterialChoice::CopperJC => Some(JohnsonChristyMaterial::copper()),
-                MaterialChoice::Custom   => None,
+            // Build incident fields
+            let incident_x = IncidentField {
+                direction: [0.0, 0.0, 1.0],
+                polarisation: [1.0, 0.0, 0.0],
+                amplitude: 1.0,
             };
-            // For custom material, ε is constant across wavelengths
-            let custom_eps = Complex64::new(
-                custom_n * custom_n - custom_k * custom_k,
-                2.0 * custom_n * custom_k,
-            );
+            let incident_y = IncidentField {
+                direction: [0.0, 0.0, 1.0],
+                polarisation: [0.0, 1.0, 0.0],
+                amplitude: 1.0,
+            };
 
-            let solver = CdaSolver::with_fcd(1000, true, spacing);
-            let params = SimulationParams {
-                wavelength_range: [wl_start, wl_end],
-                num_wavelengths: num_wl,
-                environment_n: env_n,
-                ..Default::default()
+            // Select primary incident field
+            let primary_incident = match polarisation {
+                IncidentPolarisation::X | IncidentPolarisation::Circular => incident_x.clone(),
+                IncidentPolarisation::Y => incident_y.clone(),
             };
+
+            let solver = CdaSolver::with_incident(1000, true, spacing, primary_incident.clone());
+            let solver_y = CdaSolver::with_incident(1000, true, spacing, incident_y.clone());
 
             let wavelengths: Vec<f64> = (0..num_wl)
                 .map(|i| wl_start + (wl_end - wl_start) * i as f64 / (num_wl - 1).max(1) as f64)
@@ -189,11 +324,14 @@ impl LuminaApp {
             let mut peak_ext = 0.0_f64;
             let mut all_dipoles_at_peak = Vec::new();
 
+            // Total steps for progress: 1 or 2 solver passes
+            let passes = if compute_cd { 2 } else { 1 };
+
             for (wi, &wl) in wavelengths.iter().enumerate() {
                 let k = 2.0 * std::f64::consts::PI * env_n / wl;
 
                 // Get dielectric function for this wavelength
-                let epsilon = if let Some(ref mat) = jc_material {
+                let epsilon = if let Some(ref mat) = dyn_material {
                     match mat.dielectric_function(wl) {
                         Ok(e) => e,
                         Err(e) => {
@@ -217,8 +355,26 @@ impl LuminaApp {
                     })
                     .collect();
 
-                match solver.compute_cross_sections(&dipoles, wl, &params) {
-                    Ok(cs) => {
+                // Solve primary (x-pol or selected)
+                let cs_result = solver.compute_cross_sections(&dipoles, wl, &params);
+
+                // Optionally compute CD
+                let cd_value: Option<f64> = if compute_cd {
+                    let resp_x = solver.solve_dipoles(&dipoles, wl, &params);
+                    let resp_y = solver_y.solve_dipoles(&dipoles, wl, &params);
+                    match (resp_x, resp_y) {
+                        (Ok(rx), Ok(ry)) => {
+                            Some(compute_circular_dichroism(&rx, &ry, k))
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
+
+                match cs_result {
+                    Ok(mut cs) => {
+                        cs.circular_dichroism = cd_value;
                         if cs.extinction > peak_ext {
                             peak_ext = cs.extinction;
                             peak_wl_idx = wi;
@@ -236,19 +392,22 @@ impl LuminaApp {
                 }
 
                 let _ = tx.send(SimulationMessage::Progress {
-                    done: wi + 1,
-                    total: num_wl,
+                    done: (wi + 1) * passes,
+                    total: num_wl * passes,
                 });
             }
 
-            // Compute near-field map at the peak extinction wavelength
+            // Compute near-field and far-field at the peak extinction wavelength
             let mut near_field = None;
+            let mut far_field = None;
+
             if !all_dipoles_at_peak.is_empty() && !spectra.is_empty() {
                 let peak_wl = wavelengths[peak_wl_idx];
                 if let Ok(response) = solver.solve_dipoles(&all_dipoles_at_peak, peak_wl, &params) {
+                    // Near-field (xy plane)
                     let plane = NearFieldPlane {
                         centre: [0.0, 0.0, 0.0],
-                        normal: [0.0, 0.0, 1.0], // xy plane
+                        normal: [0.0, 0.0, 1.0],
                         half_width: shape_half_extent * 2.0,
                         half_height: shape_half_extent * 2.0,
                         nx: 40,
@@ -261,10 +420,19 @@ impl LuminaApp {
                     ) {
                         near_field = Some(nf_map);
                     }
+
+                    // Far-field pattern (36 theta x 72 phi)
+                    let ff_map = solver.compute_far_field(
+                        &all_dipoles_at_peak,
+                        &response,
+                        36,
+                        72,
+                    );
+                    far_field = Some(ff_map);
                 }
             }
 
-            let _ = tx.send(SimulationMessage::Complete { spectra, near_field });
+            let _ = tx.send(SimulationMessage::Complete { spectra, near_field, far_field });
         });
     }
 }
@@ -279,9 +447,10 @@ impl eframe::App for LuminaApp {
                         self.simulation_state.progress = done as f32 / total as f32;
                         ctx.request_repaint();
                     }
-                    SimulationMessage::Complete { spectra, near_field } => {
+                    SimulationMessage::Complete { spectra, near_field, far_field } => {
                         self.results_state.spectra = Some(spectra);
                         self.results_state.near_field = near_field;
+                        self.results_state.far_field = far_field;
                         self.results_state.has_results = true;
                         self.simulation_state.is_running = false;
                         self.simulation_state.progress = 1.0;

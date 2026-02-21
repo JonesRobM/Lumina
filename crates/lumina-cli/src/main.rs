@@ -4,6 +4,7 @@
 //! ```sh
 //! lumina-cli run job.toml
 //! lumina-cli validate job.toml
+//! lumina-cli materials
 //! ```
 
 mod config;
@@ -51,14 +52,29 @@ fn main() -> anyhow::Result<()> {
             let job = config::load_config(&config)?;
             println!("Configuration: {}", config.display());
 
-            let spectra = runner::run_simulation(&job)?;
+            let result = runner::run_simulation(&job)?;
 
-            // Determine output path
-            let out_dir = output
-                .unwrap_or_else(|| PathBuf::from(&job.output.directory));
-            let csv_path = out_dir.join("spectra.csv");
+            // Determine output directory
+            let out_dir = output.unwrap_or_else(|| PathBuf::from(&job.output.directory));
 
-            runner::write_spectra_csv(&spectra, &csv_path)?;
+            // CSV spectra (default on)
+            if job.output.save_spectra {
+                let csv_path = out_dir.join("spectra.csv");
+                runner::write_spectra_csv(&result.spectra, &csv_path, &job)?;
+            }
+
+            // JSON spectra (optional)
+            if job.output.save_json {
+                let json_path = out_dir.join("spectra.json");
+                runner::write_spectra_json(&result.spectra, &json_path)?;
+            }
+
+            // Near-field map (optional)
+            if let Some(nf) = &result.near_field {
+                let nf_path = out_dir.join("near_field.csv");
+                runner::write_near_field_csv(nf, &nf_path)?;
+            }
+
             println!("Simulation complete.");
             Ok(())
         }
@@ -69,9 +85,15 @@ fn main() -> anyhow::Result<()> {
         }
         Commands::Materials => {
             println!("Available materials:");
-            println!("  Au_JC  - Gold (Johnson & Christy, 400-800 nm)");
-            println!("  Ag_JC  - Silver (Johnson & Christy) [placeholder]");
-            println!("  Cu_JC  - Copper (Johnson & Christy) [placeholder]");
+            println!();
+            println!("  Johnson & Christy (1972) metals:");
+            println!("    Au_JC      — Gold,   188–892 nm");
+            println!("    Ag_JC      — Silver, 188–892 nm");
+            println!("    Cu_JC      — Copper, 188–892 nm");
+            println!();
+            println!("  Palik Handbook dielectrics:");
+            println!("    TiO2_Palik — Rutile TiO₂, 300–1000 nm");
+            println!("    SiO2_Palik — Fused silica SiO₂, 300–1000 nm");
             Ok(())
         }
     }
