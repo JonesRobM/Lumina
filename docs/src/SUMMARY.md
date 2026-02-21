@@ -11,6 +11,15 @@
 - [Periodic Structures & Ewald Summation](./theory/periodic.md)
 - [v0.1 Validation](./theory/validation.md)
 
+# Tutorials
+
+- [Overview](./tutorials/index.md)
+- [1. Gold Nanosphere Spectrum](./tutorials/01-gold-nanosphere.md)
+- [2. Nanorod & Plasmon Red-Shift](./tutorials/02-nanorod.md)
+- [3. Near-Field Intensity Map](./tutorials/03-near-field.md)
+- [4. Chiral Helix](./tutorials/04-chiral-helix.md)
+- [5. Custom Dielectric Material](./tutorials/05-custom-material.md)
+
 # User Guide
 
 - [Installation](./user-guide/installation.md)
