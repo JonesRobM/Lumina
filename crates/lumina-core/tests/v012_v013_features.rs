@@ -21,7 +21,8 @@ use lumina_core::types::{
     clausius_mossotti, radiative_correction, CrossSections, Dipole, DipoleResponse,
     FarFieldMap, IncidentField, SimulationParams,
 };
-use lumina_geometry::discretise::discretise_primitive;
+use lumina_geometry::discretise::{discretise_mesh, discretise_primitive};
+use lumina_geometry::parsers::obj::parse_obj;
 use lumina_geometry::primitives::{Cuboid, Ellipsoid, Primitive, Sphere};
 use lumina_materials::johnson_christy::JohnsonChristyMaterial;
 use lumina_materials::palik::PalikMaterial;
@@ -637,4 +638,70 @@ fn test_far_field_map_json_round_trip() {
     assert_eq!(ff2.n_phi, 2);
     assert_relative_eq!(ff2.wavelength_nm, 500.0, epsilon = 1e-6);
     assert_relative_eq!(ff2.intensity[0], 1.0, epsilon = 1e-6);
+}
+
+// ─────────────────────────────────────────────────────────────
+// v0.1.3: OBJ mesh parser + volume-fill discretisation
+// ─────────────────────────────────────────────────────────────
+
+#[test]
+fn test_obj_parse_and_discretise_round_trip() {
+    // A cube OBJ (±5 nm) parsed and discretised at 2 nm spacing.
+    let obj = "\
+        v 5 5 -5\nv 5 -5 -5\nv -5 -5 -5\nv -5 5 -5\n\
+        v 5 5 5\nv 5 -5 5\nv -5 -5 5\nv -5 5 5\n\
+        f 1 2 3 4\nf 5 8 7 6\nf 1 5 6 2\nf 3 7 8 4\nf 1 4 8 5\nf 2 6 7 3\n";
+
+    let mesh = parse_obj(obj).unwrap();
+    assert_eq!(mesh.vertices.len(), 8);
+    assert_eq!(mesh.faces.len(), 12); // 6 quads → 12 triangles
+
+    let points = discretise_mesh(&mesh, 2.0);
+    // Interior grid for ±5 cube at 2nm: points at -4,-2,0,2,4 = 5 per axis → 125
+    // Some boundary effects may shift this slightly
+    assert!(
+        points.len() >= 100 && points.len() <= 200,
+        "OBJ cube dipole count = {}, expected ~125",
+        points.len()
+    );
+
+    // All points must lie within the cube ±5 nm
+    for p in &points {
+        assert!(p.position[0].abs() <= 5.0 + 1e-8, "x out of bounds: {}", p.position[0]);
+        assert!(p.position[1].abs() <= 5.0 + 1e-8, "y out of bounds: {}", p.position[1]);
+        assert!(p.position[2].abs() <= 5.0 + 1e-8, "z out of bounds: {}", p.position[2]);
+    }
+}
+
+#[test]
+fn test_obj_mesh_bounding_box() {
+    let obj = "\
+        v 0 0 0\nv 10 0 0\nv 10 10 0\nv 0 10 0\n\
+        v 0 0 10\nv 10 0 10\nv 10 10 10\nv 0 10 10\n\
+        f 1 2 3 4\nf 5 8 7 6\nf 1 5 6 2\nf 3 7 8 4\nf 1 4 8 5\nf 2 6 7 3\n";
+    let mesh = parse_obj(obj).unwrap();
+    let (min, max) = mesh.bounding_box();
+    assert_relative_eq!(min[0], 0.0, epsilon = 1e-10);
+    assert_relative_eq!(min[1], 0.0, epsilon = 1e-10);
+    assert_relative_eq!(min[2], 0.0, epsilon = 1e-10);
+    assert_relative_eq!(max[0], 10.0, epsilon = 1e-10);
+    assert_relative_eq!(max[1], 10.0, epsilon = 1e-10);
+    assert_relative_eq!(max[2], 10.0, epsilon = 1e-10);
+}
+
+#[test]
+fn test_obj_finer_spacing_gives_more_dipoles() {
+    let obj = "\
+        v 5 5 -5\nv 5 -5 -5\nv -5 -5 -5\nv -5 5 -5\n\
+        v 5 5 5\nv 5 -5 5\nv -5 -5 5\nv -5 5 5\n\
+        f 1 2 3 4\nf 5 8 7 6\nf 1 5 6 2\nf 3 7 8 4\nf 1 4 8 5\nf 2 6 7 3\n";
+    let mesh = parse_obj(obj).unwrap();
+    let coarse = discretise_mesh(&mesh, 3.0);
+    let fine = discretise_mesh(&mesh, 1.0);
+    assert!(
+        fine.len() > coarse.len(),
+        "Finer spacing should give more dipoles: {} (1nm) vs {} (3nm)",
+        fine.len(),
+        coarse.len()
+    );
 }

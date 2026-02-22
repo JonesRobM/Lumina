@@ -59,6 +59,13 @@ pub struct GeometryPanel {
     pub xyz_path_display: Option<String>,
     /// Error message from last .xyz parse attempt.
     pub xyz_error: Option<String>,
+
+    /// Loaded OBJ mesh (stored so it can be re-discretised when spacing changes).
+    pub obj_mesh: Option<lumina_geometry::parsers::obj::ObjMesh>,
+    /// Path to the loaded .obj file (for display).
+    pub obj_path_display: Option<String>,
+    /// Error message from last .obj parse attempt.
+    pub obj_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -102,6 +109,9 @@ impl Default for GeometryPanel {
             cache_dirty: true,
             xyz_path_display: None,
             xyz_error: None,
+            obj_mesh: None,
+            obj_path_display: None,
+            obj_error: None,
         }
     }
 }
@@ -180,8 +190,18 @@ impl GeometryPanel {
                 }
             }
             ShapeType::ImportFile => {
-                if let Some(path) = &self.xyz_path_display {
-                    ui.label(format!("Loaded: {}", path));
+                // Display current loaded file info
+                if let Some(path) = &self.obj_path_display {
+                    ui.label(format!("Loaded OBJ: {}", path));
+                    if let Some(mesh) = &self.obj_mesh {
+                        ui.label(format!(
+                            "  {} vertices, {} triangles",
+                            mesh.vertices.len(),
+                            mesh.faces.len()
+                        ));
+                    }
+                } else if let Some(path) = &self.xyz_path_display {
+                    ui.label(format!("Loaded XYZ: {}", path));
                 } else {
                     ui.label("No file loaded.");
                 }
@@ -189,15 +209,25 @@ impl GeometryPanel {
                 if let Some(err) = &self.xyz_error {
                     ui.colored_label(egui::Color32::RED, format!("Parse error: {}", err));
                 }
-
-                if ui.button("Open .xyz file…").clicked() {
-                    self.load_xyz_file();
+                if let Some(err) = &self.obj_error {
+                    ui.colored_label(egui::Color32::RED, format!("Parse error: {}", err));
                 }
 
+                ui.horizontal(|ui| {
+                    if ui.button("Open .xyz file…").clicked() {
+                        self.load_xyz_file();
+                    }
+                    if ui.button("Open .obj file…").clicked() {
+                        self.load_obj_file();
+                    }
+                });
+
                 ui.label(
-                    egui::RichText::new("Coordinates are read in Ångströms and converted to nm.")
-                        .weak()
-                        .small(),
+                    egui::RichText::new(
+                        ".xyz: Ångströms → nm.  .obj: coordinates in nm, mesh volume filled with dipoles.",
+                    )
+                    .weak()
+                    .small(),
                 );
             }
         }
@@ -286,6 +316,42 @@ impl GeometryPanel {
         }
     }
 
+    /// Open a file dialog, load and parse an .obj file, discretise, and store positions.
+    fn load_obj_file(&mut self) {
+        use lumina_geometry::parsers::obj::parse_obj;
+        use lumina_geometry::discretise::discretise_mesh;
+
+        let path = rfd::FileDialog::new()
+            .set_title("Open OBJ file")
+            .add_filter("OBJ", &["obj"])
+            .pick_file();
+
+        if let Some(path) = path {
+            self.obj_error = None;
+            self.xyz_error = None;
+            match std::fs::read_to_string(&path) {
+                Ok(content) => match parse_obj(&content) {
+                    Ok(mesh) => {
+                        self.obj_path_display =
+                            Some(path.file_name().unwrap_or_default().to_string_lossy().into_owned());
+                        self.xyz_path_display = None; // Clear xyz if loading obj
+                        let lattice = discretise_mesh(&mesh, self.dipole_spacing);
+                        self.dipole_count = lattice.len();
+                        self.cached_positions = Some(lattice.iter().map(|p| p.position).collect());
+                        self.obj_mesh = Some(mesh);
+                        self.cache_dirty = false;
+                    }
+                    Err(e) => {
+                        self.obj_error = Some(format!("{:?}", e));
+                    }
+                },
+                Err(e) => {
+                    self.obj_error = Some(format!("Could not read file: {}", e));
+                }
+            }
+        }
+    }
+
     fn recompute_lattice(&mut self) {
         use lumina_geometry::discretise::discretise_primitive;
         use lumina_geometry::primitives::*;
@@ -322,8 +388,16 @@ impl GeometryPanel {
                 })
             }
             ShapeType::ImportFile => {
-                // Positions already stored from load_xyz_file() — just mark clean
-                self.dipole_count = self.cached_positions.as_ref().map(|v| v.len()).unwrap_or(0);
+                if let Some(mesh) = &self.obj_mesh {
+                    // Re-discretise the stored OBJ mesh at the current spacing
+                    use lumina_geometry::discretise::discretise_mesh;
+                    let lattice = discretise_mesh(mesh, self.dipole_spacing);
+                    self.dipole_count = lattice.len();
+                    self.cached_positions = Some(lattice.iter().map(|p| p.position).collect());
+                } else {
+                    // XYZ positions are fixed — no re-discretisation
+                    self.dipole_count = self.cached_positions.as_ref().map(|v| v.len()).unwrap_or(0);
+                }
                 self.cache_dirty = false;
                 return;
             }

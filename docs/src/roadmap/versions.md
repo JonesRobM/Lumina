@@ -60,7 +60,7 @@
 - [x] CLI geometry expanded: cylinder, cuboid, ellipsoid, helix in TOML configs
 - [x] Near-field export to CSV (`save_near_field = true` in TOML output config)
 - [x] .xyz file import in GUI geometry panel (Ångström → nm conversion)
-- [ ] OBJ mesh parser (vertex + face → volume-filling dipole lattice)
+- [x] OBJ mesh parser (vertex + face → volume-filling dipole lattice via ray-casting)
 
 ## v0.2.0 — GPU Compute Engine
 
