@@ -11,10 +11,15 @@
 
 use ndarray::{Array1, Array2};
 use num_complex::Complex64;
+use rayon::prelude::*;
 
 use crate::types::{Dipole, IncidentField};
 
 /// Assemble the full $3N \times 3N$ interaction matrix.
+///
+/// Off-diagonal blocks (Green's tensor evaluations) are computed in parallel
+/// using Rayon. Diagonal blocks (inverse polarisability) are filled sequentially
+/// since they are cheap.
 ///
 /// # Arguments
 /// * `dipoles` - Slice of dipoles with positions and polarisabilities.
@@ -36,38 +41,53 @@ pub fn assemble_interaction_matrix(
     let dim = 3 * n;
     let mut matrix = Array2::<Complex64>::zeros((dim, dim));
 
+    // Diagonal blocks: inverse polarisability (cheap, sequential)
     for i in 0..n {
-        // Diagonal block: inverse polarisability (3x3)
         let inv_alpha = invert_3x3(&dipoles[i].polarisability);
         for row in 0..3 {
             for col in 0..3 {
                 matrix[[3 * i + row, 3 * i + col]] = inv_alpha[3 * row + col];
             }
         }
+    }
 
-        // Off-diagonal blocks: -G(r_i, r_j)
-        for j in 0..n {
-            if i == j {
-                continue;
-            }
-            let g = if use_fcd {
-                super::greens::dyadic_greens_tensor_filtered(
-                    &dipoles[i].position,
-                    &dipoles[j].position,
-                    k,
-                    cell_size,
-                )
-            } else {
-                super::greens::dyadic_greens_tensor(
-                    &dipoles[i].position,
-                    &dipoles[j].position,
-                    k,
-                )
-            };
-            for row in 0..3 {
-                for col in 0..3 {
-                    matrix[[3 * i + row, 3 * j + col]] = -g[[row, col]];
+    // Off-diagonal blocks: -G(r_i, r_j), computed in parallel.
+    // Each block is a 3×3 Green's tensor — compute all of them via Rayon,
+    // then place into the matrix sequentially.
+    let blocks: Vec<(usize, usize, [[Complex64; 3]; 3])> = (0..n)
+        .into_par_iter()
+        .flat_map(|i| {
+            let dipoles_ref = dipoles;
+            (0..n).into_par_iter().filter(move |&j| i != j).map(move |j| {
+                let g = if use_fcd {
+                    super::greens::dyadic_greens_tensor_filtered(
+                        &dipoles_ref[i].position,
+                        &dipoles_ref[j].position,
+                        k,
+                        cell_size,
+                    )
+                } else {
+                    super::greens::dyadic_greens_tensor(
+                        &dipoles_ref[i].position,
+                        &dipoles_ref[j].position,
+                        k,
+                    )
+                };
+                let mut block = [[Complex64::from(0.0); 3]; 3];
+                for row in 0..3 {
+                    for col in 0..3 {
+                        block[row][col] = g[[row, col]];
+                    }
                 }
+                (i, j, block)
+            })
+        })
+        .collect();
+
+    for (i, j, block) in blocks {
+        for row in 0..3 {
+            for col in 0..3 {
+                matrix[[3 * i + row, 3 * j + col]] = -block[row][col];
             }
         }
     }

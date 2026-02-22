@@ -68,13 +68,4 @@ impl ComputeBackend for CpuBackend {
     ) -> Result<Array1<Complex64>, ComputeError> {
         Ok(matrix.dot(vector))
     }
-
-    fn dense_solve(
-        &self,
-        _matrix: &Array2<Complex64>,
-        _rhs: &Array1<Complex64>,
-    ) -> Result<Array1<Complex64>, ComputeError> {
-        // TODO: Implement via faer LU decomposition.
-        todo!("CPU dense solve via faer")
-    }
 }

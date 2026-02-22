@@ -156,7 +156,7 @@ fn ray_triangle_z(origin: &[f64; 3], v0: &[f64; 3], v1: &[f64; 3], v2: &[f64; 3]
 
     // u = (T · P) * inv_det
     let u = (tx * px + ty * py) * inv_det;
-    if u < 0.0 || u > 1.0 {
+    if !(0.0..=1.0).contains(&u) {
         return None;
     }
 

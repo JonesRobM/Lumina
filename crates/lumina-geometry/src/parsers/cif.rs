@@ -12,6 +12,7 @@ use super::{ParseError, ParsedPoint};
 
 /// Parse a CIF file from a string.
 pub fn parse_cif(_content: &str) -> Result<Vec<ParsedPoint>, ParseError> {
-    // TODO: Implement CIF parser with unit cell expansion.
-    todo!("CIF parser")
+    Err(ParseError::UnsupportedFormat(
+        "CIF parser not yet implemented".to_string(),
+    ))
 }

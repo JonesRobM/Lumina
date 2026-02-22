@@ -17,11 +17,14 @@ pub mod direct;
 pub mod greens;
 pub mod iterative;
 
+use std::sync::Arc;
+
 use ndarray::Array2;
 use num_complex::Complex64;
 
 use super::{NearFieldPlane, OpticalSolver, SolverError};
 use crate::types::{CrossSections, Dipole, DipoleResponse, FarFieldMap, IncidentField, NearFieldMap, SimulationParams};
+use lumina_compute::{ComputeBackend, CpuBackend};
 
 /// The CDA solver, holding configuration for the numerical method.
 pub struct CdaSolver {
@@ -36,6 +39,8 @@ pub struct CdaSolver {
     pub use_fcd: bool,
     /// Dipole lattice spacing (nm). Required for FCD integration volume.
     pub cell_size: f64,
+    /// Compute backend for matrix-vector products and parallel operations.
+    pub backend: Arc<dyn ComputeBackend>,
 }
 
 impl Default for CdaSolver {
@@ -45,6 +50,7 @@ impl Default for CdaSolver {
             incident_field: IncidentField::default(),
             use_fcd: true,
             cell_size: 3.0,
+            backend: Arc::new(CpuBackend::new()),
         }
     }
 }
@@ -56,6 +62,7 @@ impl CdaSolver {
             incident_field: IncidentField::default(),
             use_fcd: true,
             cell_size: 3.0,
+            backend: Arc::new(CpuBackend::new()),
         }
     }
 
@@ -66,6 +73,7 @@ impl CdaSolver {
             incident_field: IncidentField::default(),
             use_fcd,
             cell_size,
+            backend: Arc::new(CpuBackend::new()),
         }
     }
 
@@ -76,6 +84,18 @@ impl CdaSolver {
             incident_field,
             use_fcd,
             cell_size,
+            backend: Arc::new(CpuBackend::new()),
+        }
+    }
+
+    /// Create a CDA solver with a specific compute backend.
+    pub fn with_backend(iterative_threshold: usize, use_fcd: bool, cell_size: f64, backend: Arc<dyn ComputeBackend>) -> Self {
+        Self {
+            iterative_threshold,
+            incident_field: IncidentField::default(),
+            use_fcd,
+            cell_size,
+            backend,
         }
     }
 
@@ -173,8 +193,13 @@ impl OpticalSolver for CdaSolver {
             direct::solve_direct(&matrix, &rhs)
                 .map_err(|e| SolverError::LinAlgError(e.to_string()))?
         } else {
+            let backend = Arc::clone(&self.backend);
+            let matvec_fn = move |x: &ndarray::Array1<Complex64>| -> Result<ndarray::Array1<Complex64>, SolverError> {
+                backend.matvec(&matrix, x)
+                    .map_err(|e| SolverError::LinAlgError(e.to_string()))
+            };
             iterative::solve_gmres(
-                &matrix,
+                &matvec_fn,
                 &rhs,
                 params.solver_tolerance,
                 params.max_iterations,

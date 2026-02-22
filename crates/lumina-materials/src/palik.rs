@@ -58,6 +58,7 @@ impl PalikMaterial {
     /// edge near 380 nm. Values below 380 nm carry non-negligible $k > 0$.
     ///
     /// Source: Palik Vol. 1, Table "TiO₂ (Rutile)" pp. 795–804.
+    #[allow(clippy::approx_constant)] // 3.140 is measured refractive index data, not π
     pub fn tio2() -> Self {
         // (λ/nm, n, k) — rutile TiO₂ ordinary ray
         let data: &[(f64, f64, f64)] = &[

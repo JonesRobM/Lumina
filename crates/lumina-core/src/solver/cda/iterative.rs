@@ -13,10 +13,17 @@ use num_complex::Complex64;
 
 use super::super::SolverError;
 
-/// Solve the interaction system using restarted GMRES(m).
+/// A matrix-vector product function: given vector $\mathbf{x}$, returns $\mathbf{A}\mathbf{x}$.
+pub type MatvecFn<'a> = dyn Fn(&Array1<Complex64>) -> Result<Array1<Complex64>, SolverError> + 'a;
+
+/// Solve the interaction system using restarted GMRES(m) with a matrix-free interface.
+///
+/// The solver only requires the ability to compute matrix-vector products via
+/// `matvec_fn`, making it agnostic to how the matrix is stored or which
+/// compute backend (CPU/GPU) performs the multiplication.
 ///
 /// # Arguments
-/// * `matrix` - The $3N \times 3N$ interaction matrix.
+/// * `matvec_fn` - A closure that computes `A * x` for a given vector `x`.
 /// * `rhs` - The incident field vector (length $3N$).
 /// * `tolerance` - Convergence tolerance on the relative residual.
 /// * `max_iterations` - Maximum total number of iterations across all restarts.
@@ -24,7 +31,7 @@ use super::super::SolverError;
 /// # Returns
 /// The solved dipole moment vector $\mathbf{p}$ (length $3N$).
 pub fn solve_gmres(
-    matrix: &Array2<Complex64>,
+    matvec_fn: &MatvecFn<'_>,
     rhs: &Array1<Complex64>,
     tolerance: f64,
     max_iterations: usize,
@@ -45,7 +52,7 @@ pub fn solve_gmres(
 
     loop {
         // Compute residual: r = rhs - A*x
-        let r = rhs - &matvec(matrix, &x);
+        let r = rhs - &matvec_fn(&x)?;
         let beta = vector_norm(&r);
 
         if beta < abs_tol {
@@ -79,8 +86,7 @@ pub fn solve_gmres(
 
         while j < restart_dim && total_iters < max_iterations {
             // Arnoldi step: w = A * v_j
-            let w = matvec(matrix, &v_basis[j]);
-            let mut w = w;
+            let mut w = matvec_fn(&v_basis[j])?;
 
             // Modified Gram-Schmidt orthogonalisation
             for i in 0..=j {
@@ -138,7 +144,7 @@ pub fn solve_gmres(
         }
 
         // Check if we've converged
-        let residual = rhs - &matvec(matrix, &x);
+        let residual = rhs - &matvec_fn(&x)?;
         let res_norm = vector_norm(&residual);
         if res_norm < abs_tol {
             return Ok(x);
@@ -151,11 +157,6 @@ pub fn solve_gmres(
             });
         }
     }
-}
-
-/// Matrix-vector product: y = A * x.
-fn matvec(a: &Array2<Complex64>, x: &Array1<Complex64>) -> Array1<Complex64> {
-    a.dot(x)
 }
 
 /// Complex inner product: <a, b> = sum(conj(a_i) * b_i).
@@ -207,7 +208,12 @@ fn back_substitute(h: &Array2<Complex64>, g: &Array1<Complex64>, m: usize) -> Ve
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ndarray::array;
+    use ndarray::{array, Array2};
+
+    /// Helper: create a matvec closure from a matrix reference.
+    fn matrix_matvec(matrix: &Array2<Complex64>) -> impl Fn(&Array1<Complex64>) -> Result<Array1<Complex64>, SolverError> + '_ {
+        move |x| Ok(matrix.dot(x))
+    }
 
     #[test]
     fn test_gmres_identity_system() {
@@ -223,7 +229,7 @@ mod tests {
                 .collect(),
         );
 
-        let x = solve_gmres(&matrix, &rhs, 1e-10, 100).unwrap();
+        let x = solve_gmres(&matrix_matvec(&matrix), &rhs, 1e-10, 100).unwrap();
 
         for i in 0..n {
             assert!(
@@ -262,7 +268,7 @@ mod tests {
             Complex64::new(-1.0, 0.5),
         ];
 
-        let x = solve_gmres(&matrix, &rhs, 1e-12, 100).unwrap();
+        let x = solve_gmres(&matrix_matvec(&matrix), &rhs, 1e-12, 100).unwrap();
 
         // Verify: ||A*x - b|| / ||b|| < tolerance
         let residual = &rhs - &matrix.dot(&x);
@@ -287,7 +293,7 @@ mod tests {
             rhs[i] = alpha * Complex64::new(1.0, -0.5); // x_i = 1 - 0.5i for all i
         }
 
-        let x = solve_gmres(&matrix, &rhs, 1e-12, 100).unwrap();
+        let x = solve_gmres(&matrix_matvec(&matrix), &rhs, 1e-12, 100).unwrap();
 
         for i in 0..n {
             let expected = Complex64::new(1.0, -0.5);
@@ -311,7 +317,7 @@ mod tests {
             Complex64::new(1.0, 1.0),
         ];
 
-        let result = solve_gmres(&matrix, &rhs, 1e-10, 50);
+        let result = solve_gmres(&matrix_matvec(&matrix), &rhs, 1e-10, 50);
         assert!(result.is_err(), "Should fail to converge for singular system");
     }
 }
