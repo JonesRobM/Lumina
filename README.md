@@ -7,7 +7,7 @@
 
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-31%20passing-brightgreen.svg)](https://github.com/jonesrobm/lumina)
+[![Tests](https://img.shields.io/badge/tests-80%20passing-brightgreen.svg)](https://github.com/jonesrobm/lumina)
 [![Documentation](https://img.shields.io/badge/docs-mdBook-blue.svg)](docs/)
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20Development-ff5e5b?logo=ko-fi&logoColor=white)](https://ko-fi.com/jonesrobm)
 
@@ -27,12 +27,14 @@ Lumina is a Rust-based framework for computing the linear and nonlinear optical 
 
 ## Features
 
-### v0.1.2 (Current)
+### v0.1.3 (Current)
 
 - **Accurate Physics**
   - Full dyadic Green's function for electromagnetic interactions
   - Clausius-Mossotti polarisability with radiative reaction correction (RRCM)
   - Filtered Coupled Dipole (FCD) for improved metallic particle accuracy
+  - Far-field radiation patterns (E-plane / H-plane polar plots)
+  - Circular dichroism ΔC_ext computation
   - Validated against Mie theory (<15% error for dielectrics, <30% for Au interband region)
 
 - **Scalable Solvers**
@@ -42,6 +44,7 @@ Lumina is a Rust-based framework for computing the linear and nonlinear optical 
 
 - **Materials Library**
   - Johnson & Christy (1972) optical data for Au, Ag, Cu (188–892 nm, 43 data points)
+  - Palik handbook data for TiO₂ and SiO₂ (300–1000 nm)
   - Cubic spline interpolation for smooth ε(λ) curves
   - Custom material support (constant n + ik)
 
@@ -49,18 +52,22 @@ Lumina is a Rust-based framework for computing the linear and nonlinear optical 
   - Primitives: sphere, cylinder, cuboid, ellipsoid, helix
   - Centred cubic lattice discretisation (critical for metallic accuracy)
   - .xyz file import for custom structures
+  - OBJ mesh import (volume-filling dipole lattice via ray-casting)
 
 - **Interactive GUI** (`lumina-gui`)
   - Real-time spectra plotting (C_ext, C_abs, C_sca vs λ)
+  - Far-field polar plots and circular dichroism spectra
   - Dielectric function ε(λ) visualisation
   - Near-field |E|² heatmaps on observation planes
   - 2D dipole lattice scatter preview (XY/XZ/YZ projections)
-  - Parameter sweeping with live dipole count updates
+  - File dialog export (CSV/JSON) with metadata headers
+  - Incident polarisation selector (x-pol / y-pol / circular)
 
 - **Command-Line Interface** (`lumina-cli`)
   - TOML-based configuration for batch processing
+  - All geometry types and materials supported
   - HPC-ready for cluster environments
-  - CSV export with metadata
+  - CSV and JSON export with metadata
 
 ---
 
@@ -243,13 +250,10 @@ GMRES iterative solver, FCD Green's function, cylinder/helix geometry
 ### v0.1.2 — Plotting & Visualisation
 egui_plot spectra, ε(λ) curves, near-field heatmaps, dipole scatter preview
 
-### v0.1.3 — I/O & Export (Next)
-- Far-field radiation patterns
-- File dialog for export paths
-- JSON output format
-- OBJ mesh parser
+### v0.1.3 — I/O & Export
+Far-field radiation patterns, circular dichroism, file dialog export, JSON output, Palik TiO₂/SiO₂, OBJ mesh parser
 
-### v0.2.0 — GPU Compute Engine
+### v0.2.0 — GPU Compute Engine (Next)
 - wgpu compute shaders for matrix assembly
 - FFT-accelerated matvec for regular lattices
 - Surface-averaging methods for metallic particles
@@ -335,7 +339,7 @@ If you use Lumina in your research, please cite:
   title = {Lumina: Coupled Dipole Approximation for Nanophotonics},
   year = {2025},
   url = {https://github.com/jonesrobm/lumina},
-  version = {0.1.2}
+  version = {0.1.3}
 }
 ```
 
