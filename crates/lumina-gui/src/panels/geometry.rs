@@ -3,6 +3,17 @@
 use egui::Ui;
 use rfd;
 
+/// An entry in the directory file listing.
+#[derive(Debug, Clone)]
+pub struct ImportFileEntry {
+    /// Full path to the file.
+    pub path: std::path::PathBuf,
+    /// Filename without the directory prefix.
+    pub filename: String,
+    /// File extension ("xyz" or "obj").
+    pub extension: String,
+}
+
 /// State for the geometry configuration panel.
 #[derive(Debug)]
 pub struct GeometryPanel {
@@ -66,6 +77,15 @@ pub struct GeometryPanel {
     pub obj_path_display: Option<String>,
     /// Error message from last .obj parse attempt.
     pub obj_error: Option<String>,
+
+    /// Directory path for browsing structure files.
+    pub import_directory: Option<std::path::PathBuf>,
+    /// Display string for the selected directory.
+    pub import_dir_display: Option<String>,
+    /// Cached list of .xyz and .obj files in the import directory.
+    pub available_files: Vec<ImportFileEntry>,
+    /// Currently selected filename from the dropdown.
+    pub selected_import_file: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -112,6 +132,10 @@ impl Default for GeometryPanel {
             obj_mesh: None,
             obj_path_display: None,
             obj_error: None,
+            import_directory: None,
+            import_dir_display: None,
+            available_files: Vec::new(),
+            selected_import_file: None,
         }
     }
 }
@@ -190,6 +214,70 @@ impl GeometryPanel {
                 }
             }
             ShapeType::ImportFile => {
+                // ── Directory browser ──
+                ui.horizontal(|ui| {
+                    if ui.button("Set folder…").clicked() {
+                        self.pick_import_directory();
+                    }
+                    if let Some(dir) = &self.import_dir_display {
+                        ui.label(dir.as_str());
+                    } else {
+                        ui.label(
+                            egui::RichText::new("No folder selected").weak(),
+                        );
+                    }
+                });
+
+                if self.import_directory.is_some() {
+                    ui.horizontal(|ui| {
+                        if ui.button("Refresh").clicked() {
+                            self.scan_directory();
+                        }
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "{} file(s)",
+                                self.available_files.len()
+                            ))
+                            .weak()
+                            .small(),
+                        );
+                    });
+
+                    if !self.available_files.is_empty() {
+                        let selected_text = self
+                            .selected_import_file
+                            .clone()
+                            .unwrap_or_else(|| "Select a file…".into());
+
+                        let mut new_selection: Option<ImportFileEntry> = None;
+
+                        egui::ComboBox::from_label("File")
+                            .selected_text(&selected_text)
+                            .width(250.0)
+                            .show_ui(ui, |ui| {
+                                for entry in &self.available_files {
+                                    let is_selected = self
+                                        .selected_import_file
+                                        .as_deref()
+                                        == Some(entry.filename.as_str());
+                                    if ui
+                                        .selectable_label(is_selected, &entry.filename)
+                                        .clicked()
+                                    {
+                                        new_selection = Some(entry.clone());
+                                    }
+                                }
+                            });
+
+                        if let Some(entry) = new_selection {
+                            self.selected_import_file = Some(entry.filename.clone());
+                            self.load_file_from_entry(&entry);
+                        }
+                    }
+                }
+
+                ui.add_space(4.0);
+
                 // Display current loaded file info
                 if let Some(path) = &self.obj_path_display {
                     ui.label(format!("Loaded OBJ: {}", path));
@@ -202,8 +290,9 @@ impl GeometryPanel {
                     }
                 } else if let Some(path) = &self.xyz_path_display {
                     ui.label(format!("Loaded XYZ: {}", path));
-                } else {
-                    ui.label("No file loaded.");
+                    if let Some(positions) = &self.cached_positions {
+                        ui.label(format!("  {} atoms", positions.len()));
+                    }
                 }
 
                 if let Some(err) = &self.xyz_error {
@@ -212,6 +301,14 @@ impl GeometryPanel {
                 if let Some(err) = &self.obj_error {
                     ui.colored_label(egui::Color32::RED, format!("Parse error: {}", err));
                 }
+
+                ui.add_space(4.0);
+                ui.separator();
+                ui.label(
+                    egui::RichText::new("Or open individual file:")
+                        .weak()
+                        .small(),
+                );
 
                 ui.horizontal(|ui| {
                     if ui.button("Open .xyz file…").clicked() {
@@ -349,6 +446,120 @@ impl GeometryPanel {
                     self.obj_error = Some(format!("Could not read file: {}", e));
                 }
             }
+        }
+    }
+
+    /// Open a folder picker and scan the selected directory for structure files.
+    fn pick_import_directory(&mut self) {
+        let path = rfd::FileDialog::new()
+            .set_title("Select structure folder")
+            .pick_folder();
+
+        if let Some(path) = path {
+            self.import_dir_display = Some(path.display().to_string());
+            self.import_directory = Some(path);
+            self.scan_directory();
+        }
+    }
+
+    /// Scan the import directory for .xyz and .obj files.
+    fn scan_directory(&mut self) {
+        self.available_files.clear();
+        self.selected_import_file = None;
+
+        let Some(dir) = &self.import_directory else {
+            return;
+        };
+
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let ext = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.to_lowercase());
+            match ext.as_deref() {
+                Some("xyz") | Some("obj") => {
+                    let filename = path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned();
+                    self.available_files.push(ImportFileEntry {
+                        path,
+                        filename,
+                        extension: ext.unwrap(),
+                    });
+                }
+                _ => {}
+            }
+        }
+
+        self.available_files.sort_by(|a, b| a.filename.cmp(&b.filename));
+    }
+
+    /// Load and parse a file selected from the directory browser.
+    fn load_file_from_entry(&mut self, entry: &ImportFileEntry) {
+        self.xyz_error = None;
+        self.obj_error = None;
+
+        let content = match std::fs::read_to_string(&entry.path) {
+            Ok(c) => c,
+            Err(e) => {
+                let msg = format!("Could not read file: {}", e);
+                if entry.extension == "xyz" {
+                    self.xyz_error = Some(msg);
+                } else {
+                    self.obj_error = Some(msg);
+                }
+                return;
+            }
+        };
+
+        match entry.extension.as_str() {
+            "xyz" => {
+                use lumina_geometry::parsers::xyz::parse_xyz;
+                match parse_xyz(&content) {
+                    Ok(points) => {
+                        self.xyz_path_display = Some(entry.filename.clone());
+                        self.obj_path_display = None;
+                        self.obj_mesh = None;
+                        self.cached_positions =
+                            Some(points.iter().map(|p| p.position).collect());
+                        self.dipole_count = points.len();
+                        self.cache_dirty = false;
+                    }
+                    Err(e) => {
+                        self.xyz_error = Some(format!("{:?}", e));
+                    }
+                }
+            }
+            "obj" => {
+                use lumina_geometry::parsers::obj::parse_obj;
+                use lumina_geometry::discretise::discretise_mesh;
+                match parse_obj(&content) {
+                    Ok(mesh) => {
+                        self.obj_path_display = Some(entry.filename.clone());
+                        self.xyz_path_display = None;
+                        let lattice = discretise_mesh(&mesh, self.dipole_spacing);
+                        self.dipole_count = lattice.len();
+                        self.cached_positions =
+                            Some(lattice.iter().map(|p| p.position).collect());
+                        self.obj_mesh = Some(mesh);
+                        self.cache_dirty = false;
+                    }
+                    Err(e) => {
+                        self.obj_error = Some(format!("{:?}", e));
+                    }
+                }
+            }
+            _ => {}
         }
     }
 

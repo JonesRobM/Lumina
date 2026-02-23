@@ -9,7 +9,7 @@
 //! | Backend | Feature flag | Status |
 //! |---------|-------------|--------|
 //! | CPU (Rayon) | `cpu` (default) | Implemented |
-//! | GPU (wgpu) | `gpu` | Stub |
+//! | GPU (wgpu) | `gpu` | Implemented |
 //! | Distributed (MPI) | `distributed` | Stub |
 
 pub mod backend;
@@ -27,3 +27,6 @@ pub use backend::{BackendType, ComputeBackend, ComputeError, DeviceInfo};
 
 #[cfg(feature = "cpu")]
 pub use cpu::CpuBackend;
+
+#[cfg(feature = "gpu")]
+pub use gpu::GpuBackend;

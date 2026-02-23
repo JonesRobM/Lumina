@@ -21,6 +21,13 @@ pub struct SimulationConfig {
     pub solver_tolerance: f64,
     #[serde(default = "default_max_iterations")]
     pub max_iterations: usize,
+    /// Compute backend: "auto", "cpu", or "gpu". Default: "auto".
+    #[serde(default = "default_backend")]
+    pub backend: String,
+}
+
+fn default_backend() -> String {
+    "auto".into()
 }
 
 fn default_env_n() -> f64 {

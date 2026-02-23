@@ -9,7 +9,7 @@
 - [Mie Theory](./theory/mie-theory.md)
 - [Nonlinear Optics (SHG/THG)](./theory/nonlinear.md)
 - [Periodic Structures & Ewald Summation](./theory/periodic.md)
-- [v0.1 Validation](./theory/validation.md)
+- [Validation](./theory/validation.md)
 
 # Tutorials
 
@@ -19,6 +19,7 @@
 - [3. Near-Field Intensity Map](./tutorials/03-near-field.md)
 - [4. Chiral Helix](./tutorials/04-chiral-helix.md)
 - [5. Custom Dielectric Material](./tutorials/05-custom-material.md)
+- [6. GPU-Accelerated Large System](./tutorials/06-gpu-acceleration.md)
 
 # User Guide
 

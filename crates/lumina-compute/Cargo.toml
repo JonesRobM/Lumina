@@ -9,7 +9,7 @@ license.workspace = true
 [features]
 default = ["cpu"]
 cpu = ["rayon"]
-gpu = []          # wgpu-based GPU compute (future)
+gpu = ["wgpu", "pollster", "bytemuck"]
 distributed = []  # MPI multi-node (future)
 
 [dependencies]
@@ -18,3 +18,6 @@ num-complex = { workspace = true }
 thiserror = { workspace = true }
 log = { workspace = true }
 rayon = { workspace = true, optional = true }
+wgpu = { workspace = true, optional = true }
+pollster = { workspace = true, optional = true }
+bytemuck = { workspace = true, optional = true }

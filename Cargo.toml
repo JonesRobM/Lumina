@@ -33,6 +33,11 @@ clap = { version = "4", features = ["derive"] }
 # Parallelism
 rayon = "1.10"
 
+# GPU compute
+wgpu = "24"
+pollster = "0.4"
+bytemuck = { version = "1", features = ["derive"] }
+
 # Error handling
 thiserror = "2"
 anyhow = "1"

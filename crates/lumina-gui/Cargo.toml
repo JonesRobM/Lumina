@@ -6,6 +6,10 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
+[features]
+default = []
+gpu = ["lumina-core/gpu", "lumina-compute/gpu"]
+
 [dependencies]
 eframe = { workspace = true }
 egui = { workspace = true }

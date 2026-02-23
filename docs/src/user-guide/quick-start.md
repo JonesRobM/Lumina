@@ -22,12 +22,19 @@ dipole_spacing = 2.0
 [output]
 directory = "./output"
 save_spectra = true
+save_json = true
 ```
 
 ## 2. Run via CLI
 
 ```bash
-lumina-cli run my_sphere.toml
+cargo run --release -p lumina-cli -- run my_sphere.toml
+```
+
+To use GPU acceleration (requires `--features gpu` build):
+
+```bash
+cargo run --release -p lumina-cli --features gpu -- run my_sphere.toml
 ```
 
 ## 3. Or Use the GUI
@@ -35,11 +42,15 @@ lumina-cli run my_sphere.toml
 Launch the GUI and configure the same parameters interactively:
 
 ```bash
-cargo run -p lumina-gui
+cargo run --release -p lumina-gui
 ```
+
+Select a shape, material, wavelength range, and click **Run Simulation**. Results appear in the Results panel with interactive spectra, near-field heatmaps, and far-field polar plots.
 
 ## 4. Examine the Results
 
 The output directory will contain:
-- `spectra.csv` — wavelength, extinction, absorption, and scattering cross-sections.
-- `near_field/` — field intensity maps (if enabled).
+
+- `spectra.csv` — wavelength, extinction, absorption, and scattering cross-sections
+- `spectra.json` — same data in JSON format (when `save_json = true`)
+- `near_field/` — field intensity maps (when `save_near_field = true`)

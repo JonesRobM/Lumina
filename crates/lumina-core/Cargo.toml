@@ -6,6 +6,10 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
+[features]
+default = []
+gpu = ["lumina-compute/gpu"]
+
 [dependencies]
 ndarray = { workspace = true }
 num-complex = { workspace = true }

@@ -138,7 +138,7 @@ The longitudinal mode is excited when the incident electric field is **parallel 
 axis = [1.0, 0.0, 0.0]   # rod along x → x-polarised wave excites longitudinal mode
 ```
 
-Rotating the incident field direction (cross-polarisation measurements) is planned for v0.1.3 via the `[source]` TOML section.
+Since v0.1.3, the GUI simulation panel includes a polarisation selector (x-pol / y-pol / circular) that controls the incident field direction.
 
 ---
 

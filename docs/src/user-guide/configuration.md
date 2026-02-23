@@ -12,6 +12,15 @@ Lumina uses TOML files for simulation configuration. This page documents all ava
 | `environment_n` | float | `1.0` | Refractive index of surrounding medium |
 | `solver_tolerance` | float | `1e-6` | Convergence tolerance for iterative solver |
 | `max_iterations` | int | `1000` | Maximum GMRES iterations |
+| `backend` | string | `"auto"` | Compute backend: `"auto"`, `"cpu"`, or `"gpu"` |
+
+The `backend` field selects the compute backend for GMRES matrix-vector products:
+
+- `"auto"` (default) — uses GPU if available, falls back to CPU
+- `"cpu"` — always use CPU (Rayon)
+- `"gpu"` — require GPU (wgpu); errors if no GPU is available
+
+> **Note:** GPU acceleration requires building with `--features gpu`. When built without this feature, the `backend` field is ignored and CPU is always used.
 
 ### `[[geometry.object]]`
 
@@ -33,5 +42,5 @@ Shape-specific parameters are documented in the [Geometry](./geometry.md) sectio
 |-----|------|---------|-------------|
 | `directory` | string | `"./output"` | Output directory path |
 | `save_spectra` | bool | `true` | Save cross-section spectra as CSV |
-| `save_near_field` | bool | `false` | Compute and save near-field maps |
-| `save_dipoles` | bool | `false` | Save raw dipole moments |
+| `save_json` | bool | `false` | Also save spectra as JSON |
+| `save_near_field` | bool | `false` | Compute and save near-field maps at peak extinction |

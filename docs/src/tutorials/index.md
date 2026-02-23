@@ -6,6 +6,7 @@ These step-by-step tutorials take you from a blank configuration file to a fully
 
 - Lumina built in release mode (`cargo build --release`)
 - Basic familiarity with the command line
+- (Optional) GPU build for Tutorial 6: `cargo build --release --features gpu`
 - (Optional) Python + matplotlib for post-processing plots
 
 ## Tutorial List
@@ -14,9 +15,10 @@ These step-by-step tutorials take you from a blank configuration file to a fully
 |---|----------|---------------|
 | 1 | [Gold Nanosphere Spectrum](./01-gold-nanosphere.md) | Basic CLI workflow, extinction/absorption/scattering |
 | 2 | [Nanorod & Plasmon Red-Shift](./02-nanorod.md) | Cylinder geometry, aspect ratio dependence |
-| 3 | [Near-Field Intensity Map](./03-near-field.md) | Near-field output, |E|² interpretation |
+| 3 | [Near-Field Intensity Map](./03-near-field.md) | Near-field output, \|E\|² interpretation |
 | 4 | [Chiral Helix](./04-chiral-helix.md) | Helix geometry, multi-object configurations |
 | 5 | [Custom Dielectric Material](./05-custom-material.md) | Constant-ε material, convergence study |
+| 6 | [GPU-Accelerated Large System](./06-gpu-acceleration.md) | GPU backend, large dipole counts, benchmarking |
 
 ## Conventions Used Throughout
 

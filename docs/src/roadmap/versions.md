@@ -64,12 +64,30 @@
 
 ## v0.2.0 — GPU Compute Engine
 
-- [ ] wgpu compute shaders for matrix assembly
+- [x] Matrix-free GMRES interface (matvec closure instead of matrix reference)
+- [x] ComputeBackend trait wired into CdaSolver (CPU default, GPU optional)
+- [x] Rayon-parallel interaction matrix assembly (off-diagonal Green's tensor blocks)
+- [x] wgpu WGSL compute shader for complex matrix-vector product (f32)
+- [x] GpuBackend with matrix caching (upload once, reuse for ~300 GMRES iterations)
+- [x] GPU feature forwarding through crate chain (lumina-compute → core → gui/cli)
+- [x] GPU toggle in GUI simulation panel
+- [x] Backend selection in CLI TOML config (`backend = "auto" | "cpu" | "gpu"`)
+- [x] Automatic CPU fallback when GPU unavailable
+- [x] GPU vs CPU benchmark harness (matvec + GMRES, N = 300–3000)
+- [x] All 85 tests passing (81 existing + 4 GPU)
+
+### v0.2.0 Performance Notes
+
+- GPU matvec is correct (agrees with CPU to ~1e-6, the f32 precision limit)
+- At N ≤ 3000, GPU is slower than CPU due to per-call buffer overhead
+- Speedup expected at N > 5000 with persistent buffer reuse (v0.2.1)
+
+### Deferred to v0.2.1+
+
+- [ ] Persistent GPU buffers (eliminate per-matvec allocation overhead)
 - [ ] FFT-accelerated matvec for regular lattices (block-Toeplitz)
-- [ ] GPU GMRES with CPU Arnoldi + GPU matvec
-- [ ] CPU fallback parity via ComputeBackend trait
-- [ ] Performance benchmarks (CPU vs GPU, N = 1k–50k)
-- [ ] Near-field |E|² maps on observation planes
+- [ ] GPU matrix assembly shader
+- [ ] Surface averaging for metallic convergence
 
 ## v0.3.0 — Nonlinear Optics & Periodicity
 

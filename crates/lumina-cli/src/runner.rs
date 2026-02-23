@@ -1,10 +1,12 @@
 //! Simulation runner: ties together geometry, materials, and solver.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use num_complex::Complex64;
 
+use lumina_compute::ComputeBackend;
 use lumina_core::solver::cda::CdaSolver;
 use lumina_core::solver::{NearFieldPlane, OpticalSolver};
 use lumina_core::types::{
@@ -88,8 +90,14 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
     let tio2   = PalikMaterial::tio2();
     let sio2   = PalikMaterial::sio2();
 
+    // Select compute backend based on config.
+    let backend: Arc<dyn ComputeBackend> = create_backend(&job.simulation.backend);
+
     // Run simulation across wavelengths
-    let solver = CdaSolver::default();
+    let solver = CdaSolver {
+        backend,
+        ..Default::default()
+    };
     let mut all_spectra = Vec::with_capacity(wavelengths.len());
 
     // Track the peak extinction wavelength for near-field computation
@@ -410,4 +418,54 @@ pub fn write_near_field_csv(
 
     println!("Near-field map written to: {}", path.display());
     Ok(())
+}
+
+/// Create a compute backend based on the user's preference string.
+///
+/// - `"gpu"` — attempt GPU, fail if unavailable.
+/// - `"cpu"` — always use CPU.
+/// - `"auto"` (default) — try GPU, fall back to CPU.
+fn create_backend(preference: &str) -> Arc<dyn ComputeBackend> {
+    match preference {
+        "cpu" => {
+            println!("Backend: CPU");
+            Arc::new(lumina_compute::CpuBackend::new())
+        }
+        "gpu" => {
+            #[cfg(feature = "gpu")]
+            {
+                match lumina_compute::GpuBackend::new_blocking() {
+                    Ok(gpu) => {
+                        println!("Backend: {}", gpu.device_info().name);
+                        Arc::new(gpu)
+                    }
+                    Err(e) => {
+                        eprintln!("GPU requested but unavailable: {}. Aborting.", e);
+                        std::process::exit(1);
+                    }
+                }
+            }
+            #[cfg(not(feature = "gpu"))]
+            {
+                eprintln!("GPU requested but binary was built without --features gpu. Aborting.");
+                std::process::exit(1);
+            }
+        }
+        _ => {
+            // "auto" or any unrecognised value
+            #[cfg(feature = "gpu")]
+            {
+                match lumina_compute::GpuBackend::new_blocking() {
+                    Ok(gpu) => {
+                        println!("Backend: {} (auto-detected)", gpu.device_info().name);
+                        return Arc::new(gpu);
+                    }
+                    Err(e) => {
+                        println!("GPU not available ({}), using CPU", e);
+                    }
+                }
+            }
+            Arc::new(lumina_compute::CpuBackend::new())
+        }
+    }
 }

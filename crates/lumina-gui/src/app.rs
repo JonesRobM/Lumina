@@ -115,20 +115,46 @@ impl LuminaApp {
         let env_n       = self.simulation_state.environment_n;
         let polarisation = self.simulation_state.polarisation;
         let compute_cd  = self.simulation_state.compute_cd;
+        let use_gpu     = self.simulation_state.use_gpu;
 
         std::thread::spawn(move || {
+            use std::sync::Arc;
             use lumina_core::fields::compute_circular_dichroism;
             use lumina_core::solver::cda::CdaSolver;
             use lumina_core::solver::{NearFieldPlane, OpticalSolver};
             use lumina_core::types::{
                 clausius_mossotti, radiative_correction, Dipole, IncidentField, SimulationParams,
             };
+            use lumina_compute::ComputeBackend;
             use lumina_geometry::discretise::discretise_primitive;
             use lumina_geometry::primitives::*;
             use lumina_materials::johnson_christy::JohnsonChristyMaterial;
             use lumina_materials::palik::PalikMaterial;
             use lumina_materials::provider::MaterialProvider;
             use crate::panels::simulation::IncidentPolarisation;
+
+            // Create compute backend (GPU with CPU fallback).
+            let backend: Arc<dyn ComputeBackend> = if use_gpu {
+                #[cfg(feature = "gpu")]
+                {
+                    match lumina_compute::GpuBackend::new_blocking() {
+                        Ok(gpu) => {
+                            log::info!("GPU backend: {}", gpu.device_info().name);
+                            Arc::new(gpu)
+                        }
+                        Err(e) => {
+                            log::warn!("GPU unavailable ({}), falling back to CPU", e);
+                            Arc::new(lumina_compute::CpuBackend::new())
+                        }
+                    }
+                }
+                #[cfg(not(feature = "gpu"))]
+                {
+                    Arc::new(lumina_compute::CpuBackend::new())
+                }
+            } else {
+                Arc::new(lumina_compute::CpuBackend::new())
+            };
 
             // Build material provider (needed by ImportFile arm before geometry is dispatched)
             let dyn_material: Option<Box<dyn MaterialProvider>> = match mat_choice {
@@ -209,7 +235,8 @@ impl LuminaApp {
 
                             // Determine epsilon_m and run simulation inline
                             let epsilon_m = env_n * env_n;
-                            let solver_xyz = CdaSolver::with_fcd(1000, true, spacing);
+                            let mut solver_xyz = CdaSolver::with_fcd(1000, true, spacing);
+                            solver_xyz.backend = Arc::clone(&backend);
 
                             let wavelengths: Vec<f64> = (0..num_wl)
                                 .map(|i| wl_start + (wl_end - wl_start) * i as f64 / (num_wl - 1).max(1) as f64)
@@ -310,8 +337,10 @@ impl LuminaApp {
                 IncidentPolarisation::Y => incident_y.clone(),
             };
 
-            let solver = CdaSolver::with_incident(1000, true, spacing, primary_incident.clone());
-            let solver_y = CdaSolver::with_incident(1000, true, spacing, incident_y.clone());
+            let mut solver = CdaSolver::with_incident(1000, true, spacing, primary_incident.clone());
+            solver.backend = Arc::clone(&backend);
+            let mut solver_y = CdaSolver::with_incident(1000, true, spacing, incident_y.clone());
+            solver_y.backend = Arc::clone(&backend);
 
             let wavelengths: Vec<f64> = (0..num_wl)
                 .map(|i| wl_start + (wl_end - wl_start) * i as f64 / (num_wl - 1).max(1) as f64)

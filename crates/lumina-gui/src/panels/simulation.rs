@@ -34,6 +34,8 @@ pub struct SimulationPanel {
     pub polarisation: IncidentPolarisation,
     /// Whether to compute circular dichroism (requires two solver runs per wavelength).
     pub compute_cd: bool,
+    /// Whether to use GPU acceleration for GMRES matvec (requires `gpu` feature).
+    pub use_gpu: bool,
     /// Whether a simulation is currently running.
     pub is_running: bool,
     /// Progress (0.0 to 1.0).
@@ -53,6 +55,7 @@ impl Default for SimulationPanel {
             environment_n: 1.0,
             polarisation: IncidentPolarisation::X,
             compute_cd: false,
+            use_gpu: cfg!(feature = "gpu"),
             is_running: false,
             progress: 0.0,
             launch_requested: false,
@@ -109,6 +112,28 @@ impl SimulationPanel {
         if self.compute_cd {
             ui.label(
                 egui::RichText::new("  CD requires two solver calls per wavelength.")
+                    .weak()
+                    .small(),
+            );
+        }
+
+        ui.add_space(8.0);
+
+        // GPU acceleration toggle
+        if cfg!(feature = "gpu") {
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut self.use_gpu, "GPU acceleration (wgpu)");
+            });
+            if self.use_gpu {
+                ui.label(
+                    egui::RichText::new("  GPU accelerates GMRES matvec for large systems.")
+                        .weak()
+                        .small(),
+                );
+            }
+        } else {
+            ui.label(
+                egui::RichText::new("GPU acceleration: not available (build with --features gpu)")
                     .weak()
                     .small(),
             );

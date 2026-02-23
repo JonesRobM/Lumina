@@ -4,12 +4,13 @@
 
 1. Fork the repository and clone your fork.
 2. Install Rust 1.75+ via [rustup](https://rustup.rs).
-3. Run `cargo test --workspace` to ensure everything passes.
+3. Run `cargo test --workspace --exclude lumina-gui` to ensure everything passes.
+4. (Optional) Run `cargo test --workspace --exclude lumina-gui --features gpu` to include GPU tests.
 
 ## Code Style
 
 - Follow standard `rustfmt` formatting (`cargo fmt`).
-- Run `cargo clippy --workspace` and address all warnings.
+- Run `cargo clippy --workspace` (and `cargo clippy --workspace --features gpu` if working on GPU code) and address all warnings.
 - All public functions must include documentation comments.
 - Use British English spelling in documentation and comments.
 

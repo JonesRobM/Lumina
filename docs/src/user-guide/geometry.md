@@ -34,6 +34,17 @@ centre = [0.0, 0.0, 0.0]
 semi_axes = [20.0, 15.0, 10.0]
 ```
 
+### Helix
+```toml
+type = "helix"
+centre = [0.0, 0.0, 0.0]
+helix_radius = 15.0
+wire_radius = 4.0
+pitch = 20.0
+turns = 3
+handedness = "right"
+```
+
 ## File Import
 
 Import atomic coordinates or mesh geometry:

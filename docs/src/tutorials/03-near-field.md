@@ -148,7 +148,7 @@ let plane = NearFieldPlane {
 let nf = compute_near_field(&plane, &dipoles, wavelength, &params)?;
 ```
 
-CLI-based plane selection is planned for v0.1.3.
+CLI-based plane selection is planned for a future release.
 
 ---
 

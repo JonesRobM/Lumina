@@ -200,12 +200,13 @@ As a rule of thumb:
 | Au interband (420–510 nm) | ≤ 0.10 | Error < 25% with FCD |
 | Au Drude (> 550 nm) | ≤ 0.05 | Still 30–80% error; use BEM |
 
-For a 20 nm sphere, d = 0.10 R = 2 nm is the practical minimum on a desktop CPU without GPU acceleration.
+For a 20 nm sphere, d = 0.10 R = 2 nm is practical on a desktop CPU. For finer grids (d \\(\leq\\) 1 nm, N \\(>\\) 30 000), building with `--features gpu` enables GPU-accelerated GMRES — see [Tutorial 6](./06-gpu-acceleration.md).
 
 ---
 
 ## Next Steps
 
 - Read the [Validation](../theory/validation.md) chapter for a systematic accuracy analysis
-- See the [Roadmap](../roadmap/versions.md) for planned v0.2.0 GPU and surface-averaging improvements
+- [Tutorial 6: GPU-Accelerated Large System](./06-gpu-acceleration.md) — use GPU acceleration for large dipole counts
+- See the [Roadmap](../roadmap/versions.md) for the full version history and future plans
 - Return to the [Tutorials index](./index.md) for a summary of all tutorials

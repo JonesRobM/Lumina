@@ -1,6 +1,6 @@
-# v0.1 Validation
+# Validation
 
-This chapter documents the validation of the Lumina CDA solver against Mie theory for homogeneous spheres. All results use the v0.1 implementation: direct LU factorisation (`faer`), Clausius-Mossotti polarisability with radiative reaction correction (RRCM), and centred cubic lattice discretisation.
+This chapter documents the validation of the Lumina CDA solver against Mie theory for homogeneous spheres, covering results from v0.1 through v0.2.0.
 
 ## Methodology
 
@@ -151,21 +151,71 @@ The CDA with RRCM is reliable when the metallicity ratio \\(|\epsilon_1|/\epsilo
 | \\(3 \text{–} 5\\) | Fair (\\(30\text{–}50\%\\)) | Au at 550 nm |
 | \\(> 5\\) | Poor (\\(> 100\%\\)) | Au at 600+ nm, Ag in the UV |
 
-### Mitigation Strategies (v0.2+)
+### Mitigation Strategies
 
-The following improvements are planned for future releases:
+The following improvements address the staircase limitation:
 
-- **Filtered Coupled Dipole (FCD)**: Replaces the free-space Green's function with a lattice-filtered version, eliminating aliasing artefacts from the staircase surface.
-- **Surface averaging**: Assigns reduced polarisabilities to dipoles that partially overlap the surface boundary.
-- **Smooth surface methods**: Interpolation-based boundary representations that avoid the staircase entirely.
-- **GMRES iterative solver**: Enables much finer discretisation (\\(N > 10^4\\)) that partially compensates for the staircase.
+- **Filtered Coupled Dipole (FCD)** (v0.1.1): Replaces the free-space Green's function with a volume-averaged version for near-field interactions, reducing errors by 5–10 percentage points in the interband region.
+- **GMRES iterative solver** (v0.1.1): Enables finer discretisation (\\(N > 10^4\\)) that partially compensates for the staircase.
+- **GPU-accelerated GMRES** (v0.2.0): Makes large-N computations practical by offloading the matvec to the GPU.
+- **Surface averaging** (planned, v0.2.1+): Assigns reduced polarisabilities to dipoles that partially overlap the surface boundary.
+- **Smooth surface methods** (planned, v0.2.1+): Interpolation-based boundary representations that avoid the staircase entirely.
+
+## v0.2.0 Results: GPU Compute Engine
+
+### Matrix-Free GMRES
+
+v0.2.0 refactors the GMRES solver to a matrix-free interface. Instead of receiving the interaction matrix directly, GMRES accepts a matvec closure:
+
+```rust
+pub fn solve_gmres(
+    matvec_fn: &MatvecFn<'_>,
+    rhs: &Array1<Complex64>,
+    tolerance: f64,
+    max_iterations: usize,
+) -> Result<Array1<Complex64>, SolverError>
+```
+
+This allows the matvec to be dispatched to any `ComputeBackend` (CPU or GPU) without changing the solver logic.
+
+### GPU Matvec Correctness
+
+The GPU backend (wgpu/WGSL) computes the matvec in f32 precision. Validation against the f64 CPU backend:
+
+| N (3N\\(\times\\)3N) | Max relative error |
+|----------------------|--------------------|
+| 300 | \\(7.3 \times 10^{-7}\\) |
+| 1 000 | \\(1.6 \times 10^{-6}\\) |
+| 3 000 | \\(3.2 \times 10^{-6}\\) |
+
+All errors are within the expected f32 precision limit (\\(\sim 10^{-6}\\)). The slight growth with N is expected as rounding errors accumulate over longer dot products.
+
+### GPU GMRES Solution Accuracy
+
+GMRES solutions computed with GPU matvec (f32) vs CPU matvec (f64) agree to:
+
+| N (3N\\(\times\\)3N) | Max relative error |
+|----------------------|--------------------|
+| 300 | \\(8.5 \times 10^{-7}\\) |
+| 1 000 | \\(1.3 \times 10^{-6}\\) |
+| 3 000 | \\(1.9 \times 10^{-6}\\) |
+
+For CDA applications where the discretisation error is typically 5–25%, the f32 precision is more than adequate. The GPU GMRES tolerance should be set to \\(\geq 10^{-6}\\) (the default).
+
+### Rayon-Parallel Assembly
+
+v0.2.0 parallelises the off-diagonal Green's tensor computation using Rayon `par_iter`. The assembled matrix is bit-identical to the sequential version — parallelism does not affect numerical results.
 
 ## Test Suite
 
-The v0.1 validation tests are located in `crates/lumina-core/tests/` and can be run with:
+The validation tests are located in `crates/lumina-core/tests/` and can be run with:
 
 ```bash
-cargo test --workspace
+# All tests (CPU)
+cargo test --workspace --exclude lumina-gui
+
+# Including GPU tests
+cargo test --workspace --exclude lumina-gui --features gpu
 ```
 
 ### `mie_validation.rs`
@@ -191,6 +241,19 @@ Diagnostic tests for debugging and characterisation:
 ### `cda_convergence.rs`
 
 Convergence comparison between RRCM and LDR polarisability prescriptions for dielectric and metallic particles at spacings from 4 nm to 1.5 nm. Confirms that both prescriptions give equivalent results in Lumina's unit convention.
+
+### `gpu_benchmark.rs`
+
+GPU vs CPU performance and correctness benchmark (requires `--features gpu`):
+
+1. **Matvec benchmark** — compares CPU and GPU matvec speed and verifies results agree within f32 tolerance at N = 300, 1000, 3000.
+2. **GMRES benchmark** — compares full GMRES solve on CPU (f64, tol=\\(10^{-10}\\)) vs GPU (f32, tol=\\(10^{-6}\\)) and verifies solution agreement.
+
+Run with timing output:
+
+```bash
+cargo test -p lumina-core --features gpu --release -- gpu_benchmark --nocapture
+```
 
 ## References
 
