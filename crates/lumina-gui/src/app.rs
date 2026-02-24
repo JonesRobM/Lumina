@@ -123,7 +123,7 @@ impl LuminaApp {
             use std::sync::Arc;
             use lumina_core::fields::compute_circular_dichroism;
             use lumina_core::solver::cda::CdaSolver;
-            use lumina_core::solver::{NearFieldPlane, OpticalSolver};
+            use lumina_core::solver::{NearFieldPlane, OpticalSolver, SolverError};
             use lumina_core::types::{
                 clausius_mossotti, radiative_correction, Dipole, IncidentField, SimulationParams,
             };
@@ -318,8 +318,27 @@ impl LuminaApp {
                                         Dipole::isotropic(pos, alpha)
                                     }).collect();
 
-                                    let cs = solver_xyz.compute_cross_sections(&dipoles, wl, &params)
-                                        .map_err(|e| format!("Solver error at {:.1} nm: {}", wl, e))?;
+                                    let cs = match solver_xyz.compute_cross_sections(&dipoles, wl, &params) {
+                                        Ok(cs) => cs,
+                                        Err(SolverError::ConvergenceFailure { max_iter, residual }) => {
+                                            if let Ok(tx_lock) = tx_par.lock() {
+                                                let _ = tx_lock.send(SimulationMessage::DebugLog(format!(
+                                                    "WARNING: λ={:.1} nm did not converge after {} iterations \
+                                                     (residual: {:.2e}). Consider increasing max_iterations, \
+                                                     refining dipole spacing, or checking the material at this wavelength.",
+                                                    wl, max_iter, residual
+                                                )));
+                                            }
+                                            CrossSections {
+                                                wavelength_nm: wl,
+                                                extinction: f64::NAN,
+                                                absorption: f64::NAN,
+                                                scattering: f64::NAN,
+                                                circular_dichroism: None,
+                                            }
+                                        }
+                                        Err(e) => return Err(format!("Solver error at {:.1} nm: {}", wl, e)),
+                                    };
 
                                     let done = progress_counter.fetch_add(1, Ordering::Relaxed) + 1;
                                     if let Ok(tx_lock) = tx_par.lock() {
@@ -354,10 +373,20 @@ impl LuminaApp {
                                         }
                                         collected.push(cs.clone());
                                     }
+                                    let n_failed = collected.iter()
+                                        .filter(|cs| cs.extinction.is_nan()).count();
                                     spectra = collected;
                                     peak_wl_xyz = wavelengths[peak_idx];
                                     peak_dipoles_xyz = pairs.into_iter().nth(peak_idx)
                                         .map(|(_, d)| d).unwrap_or_default();
+                                    if n_failed > 0 {
+                                        let _ = tx.send(SimulationMessage::DebugLog(format!(
+                                            "WARNING: {}/{} wavelengths did not converge. \
+                                             These points appear as NaN in the spectra. \
+                                             Try reducing dipole spacing or increasing solver iterations.",
+                                            n_failed, num_wl
+                                        )));
+                                    }
                                 }
                                 Err(e) => {
                                     let _ = tx.send(SimulationMessage::Error(e));
@@ -470,11 +499,30 @@ impl LuminaApp {
                         })
                         .collect();
 
-                    let mut cs = solver.compute_cross_sections(&dipoles, wl, &params)
-                        .map_err(|e| format!("Solver error at {:.1} nm: {}", wl, e))?;
+                    let mut cs = match solver.compute_cross_sections(&dipoles, wl, &params) {
+                        Ok(cs) => cs,
+                        Err(SolverError::ConvergenceFailure { max_iter, residual }) => {
+                            if let Ok(tx_lock) = tx_par.lock() {
+                                let _ = tx_lock.send(SimulationMessage::DebugLog(format!(
+                                    "WARNING: λ={:.1} nm did not converge after {} iterations \
+                                     (residual: {:.2e}). Consider increasing max_iterations, \
+                                     refining dipole spacing, or checking the material at this wavelength.",
+                                    wl, max_iter, residual
+                                )));
+                            }
+                            CrossSections {
+                                wavelength_nm: wl,
+                                extinction: f64::NAN,
+                                absorption: f64::NAN,
+                                scattering: f64::NAN,
+                                circular_dichroism: None,
+                            }
+                        }
+                        Err(e) => return Err(format!("Solver error at {:.1} nm: {}", wl, e)),
+                    };
 
-                    // Optionally compute CD
-                    if compute_cd {
+                    // Optionally compute CD (skip if cross-sections failed to converge)
+                    if compute_cd && !cs.extinction.is_nan() {
                         let resp_x = solver.solve_dipoles(&dipoles, wl, &params);
                         let resp_y = solver_y.solve_dipoles(&dipoles, wl, &params);
                         if let (Ok(rx), Ok(ry)) = (resp_x, resp_y) {
@@ -519,10 +567,20 @@ impl LuminaApp {
                         }
                         collected.push(cs.clone());
                     }
+                    let n_failed = collected.iter()
+                        .filter(|cs| cs.extinction.is_nan()).count();
                     spectra = collected;
                     peak_wl_idx = p_idx;
                     all_dipoles_at_peak = pairs.into_iter().nth(p_idx)
                         .map(|(_, d)| d).unwrap_or_default();
+                    if n_failed > 0 {
+                        let _ = tx.send(SimulationMessage::DebugLog(format!(
+                            "WARNING: {}/{} wavelengths did not converge. \
+                             These points appear as NaN in the spectra. \
+                             Try reducing dipole spacing or increasing solver iterations.",
+                            n_failed, num_wl
+                        )));
+                    }
                 }
                 Err(e) => {
                     let _ = tx.send(SimulationMessage::Error(e));

@@ -10,7 +10,7 @@ use rayon::prelude::*;
 
 use lumina_compute::ComputeBackend;
 use lumina_core::solver::cda::CdaSolver;
-use lumina_core::solver::{NearFieldPlane, OpticalSolver};
+use lumina_core::solver::{NearFieldPlane, OpticalSolver, SolverError};
 use lumina_core::types::{
     clausius_mossotti, radiative_correction, CrossSections, Dipole, NearFieldMap, SimulationParams,
 };
@@ -124,9 +124,25 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
                 dipoles.push(Dipole::isotropic(all_positions[i], alpha));
             }
 
-            let cs = solver
-                .compute_cross_sections(&dipoles, wl, &params)
-                .map_err(|e| anyhow::anyhow!("Solver error at λ={:.1} nm: {}", wl, e))?;
+            let cs = match solver.compute_cross_sections(&dipoles, wl, &params) {
+                Ok(cs) => cs,
+                Err(SolverError::ConvergenceFailure { max_iter, residual }) => {
+                    eprintln!(
+                        "  WARNING: λ={:.1} nm did not converge after {} iterations \
+                         (residual: {:.2e}). Consider increasing max_iterations, \
+                         refining dipole spacing, or checking the material at this wavelength.",
+                        wl, max_iter, residual
+                    );
+                    CrossSections {
+                        wavelength_nm: wl,
+                        extinction: f64::NAN,
+                        absorption: f64::NAN,
+                        scattering: f64::NAN,
+                        circular_dichroism: None,
+                    }
+                }
+                Err(e) => return Err(anyhow::anyhow!("Solver error at λ={:.1} nm: {}", wl, e)),
+            };
 
             let done = progress.fetch_add(1, Ordering::Relaxed) + 1;
             if done.is_multiple_of(10) || done == 1 || done == n_wl {
@@ -139,6 +155,17 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
             Ok(cs)
         })
         .collect::<Result<Vec<_>>>()?;
+
+    // Report convergence failures
+    let n_failed = all_spectra.iter().filter(|cs| cs.extinction.is_nan()).count();
+    if n_failed > 0 {
+        eprintln!(
+            "WARNING: {}/{} wavelengths did not converge. \
+             These points appear as NaN in the output. \
+             Try reducing dipole spacing or increasing solver iterations.",
+            n_failed, n_wl
+        );
+    }
 
     // Find peak extinction wavelength for near-field computation
     let (peak_wl, peak_ext) = all_spectra
