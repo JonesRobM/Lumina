@@ -82,7 +82,36 @@
 - At N ≤ 3000, GPU is slower than CPU due to per-call buffer overhead
 - Speedup expected at N > 5000 with persistent buffer reuse (v0.2.1)
 
-### Deferred to v0.2.1+
+## v0.2.1 — Performance & XYZ Workflow
+
+### Performance
+
+- [x] Parallel wavelength sweep in GUI (rayon `par_iter` — matches CLI performance)
+- [x] Parallel wavelength sweep in CLI (rayon `par_iter`, `AtomicUsize` progress)
+- [x] Stack-allocated Green's tensors (`[[Complex64; 3]; 3]` — eliminates ~N² heap allocations per wavelength)
+- [x] Direct-write matrix assembly (raw pointer writes to disjoint row groups — removes intermediate `Vec` allocation)
+
+### XYZ Import Workflow
+
+- [x] Auto-detected nearest-neighbour distance for XYZ imports (correct FCD cell size and CM volume)
+- [x] Directory-scoped file browser in GUI geometry panel (pick folder, then select from dropdown)
+- [x] Example Au Mackay icosahedron (k=6, 923 atoms) supplied in `examples/au_icosahedron_k6.xyz`
+- [x] Mackay icosahedron test suite in `lumina-geometry` (atom counts, symmetry, distances)
+
+### GUI Enhancements
+
+- [x] Debug output toggle in simulation panel (per-wavelength timing, matrix size, ε values, solver method)
+- [x] Scrollable monospace debug log area with auto-scroll
+- [x] Folder browser + file dropdown for `.xyz`/`.obj` import (with manual refresh)
+
+### v0.2.1 Performance Notes
+
+- GUI wavelength sweep now runs in parallel on all CPU cores (previously sequential)
+- For a 923-dipole icosahedron with 51 wavelengths, runtime drops from ~90 minutes to ~30 seconds (release mode)
+- Stack-allocated Green's tensors eliminate ~850K heap allocations per wavelength for N=923
+- Direct-write assembly removes ~136 MB intermediate buffer for N=923
+
+### Deferred to v0.2.2+
 
 - [ ] Persistent GPU buffers (eliminate per-matvec allocation overhead)
 - [ ] FFT-accelerated matvec for regular lattices (block-Toeplitz)

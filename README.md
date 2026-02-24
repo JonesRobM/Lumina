@@ -7,7 +7,7 @@
 
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-80%20passing-brightgreen.svg)](https://github.com/jonesrobm/lumina)
+[![Tests](https://img.shields.io/badge/tests-86%20passing-brightgreen.svg)](https://github.com/jonesrobm/lumina)
 [![Documentation](https://img.shields.io/badge/docs-mdBook-blue.svg)](docs/)
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20Development-ff5e5b?logo=ko-fi&logoColor=white)](https://ko-fi.com/jonesrobm)
 
@@ -27,7 +27,7 @@ Lumina is a Rust-based framework for computing the linear and nonlinear optical 
 
 ## Features
 
-### v0.1.3 (Current)
+### v0.2.1 (Current)
 
 - **Accurate Physics**
   - Full dyadic Green's function for electromagnetic interactions
@@ -41,6 +41,13 @@ Lumina is a Rust-based framework for computing the linear and nonlinear optical 
   - Direct LU decomposition (LAPACK via `faer`) for N ≤ 1000 dipoles
   - GMRES(m) iterative solver for N > 1000 (agrees with direct to 10⁻¹³ relative error)
   - Automatic solver selection based on system size
+  - GPU-accelerated GMRES matvec via wgpu compute shaders (optional `--features gpu`)
+
+- **High Performance** (new in v0.2.1)
+  - Parallel wavelength sweep in both GUI and CLI (rayon)
+  - Stack-allocated Green's tensors (zero heap allocation in the inner N² loop)
+  - Direct-write matrix assembly (eliminates intermediate buffer allocation)
+  - Auto-detected nearest-neighbour distance for XYZ imports (correct FCD cell size)
 
 - **Materials Library**
   - Johnson & Christy (1972) optical data for Au, Ag, Cu (188–892 nm, 43 data points)
@@ -51,8 +58,9 @@ Lumina is a Rust-based framework for computing the linear and nonlinear optical 
 - **Geometry**
   - Primitives: sphere, cylinder, cuboid, ellipsoid, helix
   - Centred cubic lattice discretisation (critical for metallic accuracy)
-  - .xyz file import for custom structures
+  - .xyz file import for atomistic structures (e.g. nanoparticle coordinates from DFT or MD)
   - OBJ mesh import (volume-filling dipole lattice via ray-casting)
+  - Supplied example: Au Mackay icosahedron (k=6, 923 atoms)
 
 - **Interactive GUI** (`lumina-gui`)
   - Real-time spectra plotting (C_ext, C_abs, C_sca vs λ)
@@ -62,6 +70,8 @@ Lumina is a Rust-based framework for computing the linear and nonlinear optical 
   - 2D dipole lattice scatter preview (XY/XZ/YZ projections)
   - File dialog export (CSV/JSON) with metadata headers
   - Incident polarisation selector (x-pol / y-pol / circular)
+  - Directory-scoped file browser for .xyz/.obj import (new in v0.2.1)
+  - Debug output toggle with per-wavelength solver diagnostics (new in v0.2.1)
 
 - **Command-Line Interface** (`lumina-cli`)
   - TOML-based configuration for batch processing
@@ -185,6 +195,44 @@ Scattering: 1.73e1 nm²
 
 ---
 
+## Example: Au Icosahedron from XYZ File
+
+Lumina can treat each atom in an `.xyz` file as an interacting dipole, allowing direct simulation of atomistic nanoparticle geometries from DFT relaxations, MD snapshots, or crystallographic generators.
+
+A 923-atom Au Mackay icosahedron (k=6 shells) is included at `examples/au_icosahedron_k6.xyz`:
+
+```
+923
+Au Mackay icosahedron, k=6 shells, 923 atoms, nn=2.884 A
+Au 0.000000 0.000000 0.000000
+Au 0.000000 1.515988 2.452921
+Au 0.000000 1.515988 -2.452921
+...
+```
+
+**GUI workflow:**
+1. Launch `cargo run --release -p lumina-gui`
+2. Geometry panel → select **Import File** → **Set folder...** → pick the `examples/` directory
+3. Select `au_icosahedron_k6.xyz` from the dropdown
+4. Materials panel → select **Gold (J&C)**
+5. Simulation panel → set wavelength range (e.g. 400–800 nm), enable **Debug output** to monitor per-wavelength progress
+6. Click **Run Simulation** — wavelengths are solved in parallel across all CPU cores
+
+**CLI workflow:**
+
+```bash
+# The CLI currently supports primitive geometry. For XYZ files, use the GUI.
+# CLI XYZ import is planned for v0.3.0.
+```
+
+**Key details:**
+- Coordinates in the `.xyz` file are in Angstroms; Lumina converts to nm automatically (1 A = 0.1 nm)
+- The nearest-neighbour distance is auto-detected from the atomic positions and used as the FCD cell size and Clausius-Mossotti volume
+- For the k=6 Au icosahedron: nn = 0.288 nm, particle diameter ~ 1.6 nm, 923 dipoles → 2769 x 2769 system
+- With debug output enabled, the log shows per-wavelength ε, C_ext, and solve time
+
+---
+
 ## Documentation
 
 Comprehensive documentation is available in the `docs/` directory (built with mdBook):
@@ -229,7 +277,7 @@ Lumina is rigorously validated against analytical Mie theory:
 | **Au (interband)** | Complex | 420–510 nm | < 25% |
 | **Au (Drude, FCD)** | Complex | 550+ nm | 80–300%* |
 
-*The Drude region requires d < 1 nm or surface-averaging methods (planned for v0.2.0).
+*The Drude region requires d < 1 nm or surface-averaging methods (planned for v0.3.0).
 
 Run the full test suite:
 
@@ -241,24 +289,17 @@ cargo test --workspace --release
 
 ## Roadmap
 
-### v0.1.0 — Linear Solver Foundation
-Direct LU solver, GUI, CLI, Mie validation
+### v0.1.x — Foundation
+- **v0.1.0**: Direct LU solver, GUI, CLI, Mie validation
+- **v0.1.1**: GMRES iterative solver, FCD Green's function, cylinder/helix geometry
+- **v0.1.2**: egui_plot spectra, ε(λ) curves, near-field heatmaps, dipole scatter preview
+- **v0.1.3**: Far-field radiation, circular dichroism, CSV/JSON export, Palik TiO₂/SiO₂, OBJ mesh parser
 
-### v0.1.1 — Accurate & Scalable
-GMRES iterative solver, FCD Green's function, cylinder/helix geometry
+### v0.2.x — GPU & Performance
+- **v0.2.0**: wgpu compute shaders for GMRES matvec, GPU/CPU backend abstraction
+- **v0.2.1** (current): Parallel wavelength sweep (GUI + CLI), stack-allocated Green's tensors, XYZ import workflow, debug output, directory-scoped file browser
 
-### v0.1.2 — Plotting & Visualisation
-egui_plot spectra, ε(λ) curves, near-field heatmaps, dipole scatter preview
-
-### v0.1.3 — I/O & Export
-Far-field radiation patterns, circular dichroism, file dialog export, JSON output, Palik TiO₂/SiO₂, OBJ mesh parser
-
-### v0.2.0 — GPU Compute Engine (Next)
-- wgpu compute shaders for matrix assembly
-- FFT-accelerated matvec for regular lattices
-- Surface-averaging methods for metallic particles
-
-### v0.3.0 — Nonlinear Optics & Periodicity
+### v0.3.0 — Nonlinear Optics & Periodicity (Next)
 - SHG/THG source terms
 - Ewald summation for periodic structures
 - MPI distributed computing
@@ -339,7 +380,7 @@ If you use Lumina in your research, please cite:
   title = {Lumina: Coupled Dipole Approximation for Nanophotonics},
   year = {2025},
   url = {https://github.com/jonesrobm/lumina},
-  version = {0.1.3}
+  version = {0.2.1}
 }
 ```
 
