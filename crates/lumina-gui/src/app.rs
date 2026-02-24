@@ -36,6 +36,7 @@ pub enum SimulationMessage {
         far_field: Option<FarFieldMap>,
     },
     Error(String),
+    DebugLog(String),
 }
 
 /// Sidebar navigation panels.
@@ -116,6 +117,7 @@ impl LuminaApp {
         let polarisation = self.simulation_state.polarisation;
         let compute_cd  = self.simulation_state.compute_cd;
         let use_gpu     = self.simulation_state.use_gpu;
+        let debug       = self.simulation_state.debug_output;
 
         std::thread::spawn(move || {
             use std::sync::Arc;
@@ -125,6 +127,9 @@ impl LuminaApp {
             use lumina_core::types::{
                 clausius_mossotti, radiative_correction, Dipole, IncidentField, SimulationParams,
             };
+            use std::sync::atomic::{AtomicUsize, Ordering};
+            use std::sync::Mutex;
+            use rayon::prelude::*;
             use lumina_compute::ComputeBackend;
             use lumina_geometry::discretise::discretise_primitive;
             use lumina_geometry::primitives::*;
@@ -133,26 +138,36 @@ impl LuminaApp {
             use lumina_materials::provider::MaterialProvider;
             use crate::panels::simulation::IncidentPolarisation;
 
+            // Helper: send debug log message if enabled.
+            let tx_debug = tx.clone();
+            let dbg = move |msg: String| {
+                if debug {
+                    let _ = tx_debug.send(SimulationMessage::DebugLog(msg));
+                }
+            };
+
             // Create compute backend (GPU with CPU fallback).
             let backend: Arc<dyn ComputeBackend> = if use_gpu {
                 #[cfg(feature = "gpu")]
                 {
                     match lumina_compute::GpuBackend::new_blocking() {
                         Ok(gpu) => {
-                            log::info!("GPU backend: {}", gpu.device_info().name);
+                            dbg(format!("Backend: GPU ({})", gpu.device_info().name));
                             Arc::new(gpu)
                         }
                         Err(e) => {
-                            log::warn!("GPU unavailable ({}), falling back to CPU", e);
+                            dbg(format!("GPU unavailable ({}), falling back to CPU", e));
                             Arc::new(lumina_compute::CpuBackend::new())
                         }
                     }
                 }
                 #[cfg(not(feature = "gpu"))]
                 {
+                    dbg("Backend: CPU (GPU feature not compiled)".to_string());
                     Arc::new(lumina_compute::CpuBackend::new())
                 }
             } else {
+                dbg("Backend: CPU (selected)".to_string());
                 Arc::new(lumina_compute::CpuBackend::new())
             };
 
@@ -176,6 +191,14 @@ impl LuminaApp {
                 environment_n: env_n,
                 ..Default::default()
             };
+
+            dbg(format!(
+                "Wavelength range: {:.1}–{:.1} nm, {} points",
+                wl_start, wl_end, num_wl
+            ));
+            dbg(format!("Environment n = {:.3}, ε_m = {:.3}", env_n, env_n * env_n));
+            dbg(format!("Material: {:?}", mat_choice));
+            dbg(format!("Polarisation: {:?}, CD: {}", polarisation, compute_cd));
 
             // Build geometry
             let primitive = match shape {
@@ -229,60 +252,124 @@ impl LuminaApp {
                                 .fold(0.0_f64, f64::max);
                             let shape_half_extent_xyz = (half_extent * 2.0).max(5.0);
 
-                            // Build the solver using a synthetic lattice from the .xyz coordinates
-                            // We build dipoles inline below using these positions and current material
+                            // Auto-detect nearest-neighbour distance from the positions.
+                            // This is used as the FCD cell size and CM volume.
+                            // Sample a few atoms to find the minimum nn distance robustly.
+                            let nn_dist = {
+                                let n_sample = lattice_len.min(20);
+                                let mut min_d = f64::MAX;
+                                for i in 0..n_sample {
+                                    for j in 0..lattice_len {
+                                        if i == j { continue; }
+                                        let dx = positions_copy[i][0] - positions_copy[j][0];
+                                        let dy = positions_copy[i][1] - positions_copy[j][1];
+                                        let dz = positions_copy[i][2] - positions_copy[j][2];
+                                        let d = (dx * dx + dy * dy + dz * dz).sqrt();
+                                        if d > 1e-12 && d < min_d {
+                                            min_d = d;
+                                        }
+                                    }
+                                }
+                                if min_d == f64::MAX { spacing } else { min_d }
+                            };
+
                             let positions_for_thread = positions_copy;
 
                             // Determine epsilon_m and run simulation inline
                             let epsilon_m = env_n * env_n;
-                            let mut solver_xyz = CdaSolver::with_fcd(1000, true, spacing);
+                            let mut solver_xyz = CdaSolver::with_fcd(1000, true, nn_dist);
                             solver_xyz.backend = Arc::clone(&backend);
+
+                            let n = lattice_len;
+                            let dim = 3 * n;
+                            let solver_method = if n <= 1000 { "Direct (LU)" } else { "GMRES" };
+                            dbg(format!("Import file: {} dipoles, matrix {}×{}", n, dim, dim));
+                            dbg(format!(
+                                "Auto-detected nn distance: {:.4} nm (FCD threshold: {:.4} nm)",
+                                nn_dist, 2.0 * nn_dist
+                            ));
+                            dbg(format!("Solver: {}, FCD: on, cell_size: {:.4} nm", solver_method, nn_dist));
+                            dbg(format!("Bounding radius: {:.3} nm", half_extent));
 
                             let wavelengths: Vec<f64> = (0..num_wl)
                                 .map(|i| wl_start + (wl_end - wl_start) * i as f64 / (num_wl - 1).max(1) as f64)
                                 .collect();
 
-                            let mut spectra = Vec::new();
-                            let mut peak_ext_xyz = 0.0_f64;
-                            let mut peak_wl_xyz = wavelengths[0];
-                            let mut peak_dipoles_xyz: Vec<Dipole> = Vec::new();
+                            let sim_start = std::time::Instant::now();
+                            let tx_par = Mutex::new(tx.clone());
+                            let progress_counter = AtomicUsize::new(0);
 
-                            for (wi, &wl) in wavelengths.iter().enumerate() {
-                                let k = 2.0 * std::f64::consts::PI * env_n / wl;
-                                let epsilon = if let Some(ref mat) = dyn_material {
-                                    match mat.dielectric_function(wl) {
-                                        Ok(e) => e,
-                                        Err(e) => {
-                                            let _ = tx.send(SimulationMessage::Error(format!(
-                                                "Material out of range at {:.1} nm: {}", wl, e)));
-                                            return;
+                            dbg("Solving wavelengths in parallel (rayon)...".to_string());
+
+                            let results: Result<Vec<(CrossSections, Vec<Dipole>)>, String> = wavelengths
+                                .par_iter()
+                                .map(|&wl| {
+                                    let wl_start_time = std::time::Instant::now();
+                                    let k = 2.0 * std::f64::consts::PI * env_n / wl;
+                                    let epsilon = if let Some(ref mat) = dyn_material {
+                                        mat.dielectric_function(wl).map_err(|e| format!(
+                                            "Material out of range at {:.1} nm: {}", wl, e
+                                        ))?
+                                    } else { custom_eps };
+
+                                    let dipoles: Vec<Dipole> = positions_for_thread.iter().map(|&pos| {
+                                        let alpha_cm = clausius_mossotti(nn_dist.powi(3), epsilon, epsilon_m);
+                                        let alpha = radiative_correction(alpha_cm, k);
+                                        Dipole::isotropic(pos, alpha)
+                                    }).collect();
+
+                                    let cs = solver_xyz.compute_cross_sections(&dipoles, wl, &params)
+                                        .map_err(|e| format!("Solver error at {:.1} nm: {}", wl, e))?;
+
+                                    let done = progress_counter.fetch_add(1, Ordering::Relaxed) + 1;
+                                    if let Ok(tx_lock) = tx_par.lock() {
+                                        let _ = tx_lock.send(SimulationMessage::Progress { done, total: num_wl });
+                                        if debug {
+                                            let elapsed = wl_start_time.elapsed();
+                                            let _ = tx_lock.send(SimulationMessage::DebugLog(format!(
+                                                "[{}/{}] λ={:.1} nm  ε=({:.2},{:.2})  C_ext={:.3e}  {:.1}ms",
+                                                done, num_wl, wl, epsilon.re, epsilon.im,
+                                                cs.extinction, elapsed.as_secs_f64() * 1000.0
+                                            )));
                                         }
                                     }
-                                } else { custom_eps };
 
-                                let dipoles: Vec<Dipole> = positions_for_thread.iter().map(|&pos| {
-                                    let alpha_cm = clausius_mossotti(spacing.powi(3), epsilon, epsilon_m);
-                                    let alpha = radiative_correction(alpha_cm, k);
-                                    Dipole::isotropic(pos, alpha)
-                                }).collect();
+                                    Ok((cs, dipoles))
+                                })
+                                .collect();
 
-                                match solver_xyz.compute_cross_sections(&dipoles, wl, &params) {
-                                    Ok(cs) => {
+                            let spectra;
+                            let peak_wl_xyz;
+                            let peak_dipoles_xyz: Vec<Dipole>;
+
+                            match results {
+                                Ok(pairs) => {
+                                    let mut peak_ext_xyz = 0.0_f64;
+                                    let mut peak_idx = 0;
+                                    let mut collected = Vec::with_capacity(pairs.len());
+                                    for (i, (cs, _)) in pairs.iter().enumerate() {
                                         if cs.extinction > peak_ext_xyz {
                                             peak_ext_xyz = cs.extinction;
-                                            peak_wl_xyz = wl;
-                                            peak_dipoles_xyz = dipoles.clone();
+                                            peak_idx = i;
                                         }
-                                        spectra.push(cs);
+                                        collected.push(cs.clone());
                                     }
-                                    Err(e) => {
-                                        let _ = tx.send(SimulationMessage::Error(format!(
-                                            "Solver error at {:.1} nm: {}", wl, e)));
-                                        return;
-                                    }
+                                    spectra = collected;
+                                    peak_wl_xyz = wavelengths[peak_idx];
+                                    peak_dipoles_xyz = pairs.into_iter().nth(peak_idx)
+                                        .map(|(_, d)| d).unwrap_or_default();
                                 }
-                                let _ = tx.send(SimulationMessage::Progress { done: wi + 1, total: num_wl });
+                                Err(e) => {
+                                    let _ = tx.send(SimulationMessage::Error(e));
+                                    return;
+                                }
                             }
+
+                            dbg(format!(
+                                "Spectra complete: {:.2}s total, peak C_ext at λ={:.1} nm",
+                                sim_start.elapsed().as_secs_f64(),
+                                peak_wl_xyz
+                            ));
 
                             // Near/far-field at peak
                             let mut near_field = None;
@@ -319,6 +406,12 @@ impl LuminaApp {
             let lattice = discretise_primitive(&primitive, spacing);
             let positions: Vec<[f64; 3]> = lattice.iter().map(|p| p.position).collect();
 
+            let n = positions.len();
+            let dim = 3 * n;
+            let solver_method = if n <= 1000 { "Direct (LU)" } else { "GMRES" };
+            dbg(format!("Geometry: {:?}, {} dipoles, matrix {}×{}", shape, n, dim, dim));
+            dbg(format!("Solver: {}, FCD: on, spacing: {:.2} nm", solver_method, spacing));
+
             // Build incident fields
             let incident_x = IncidentField {
                 direction: [0.0, 0.0, 1.0],
@@ -346,85 +439,102 @@ impl LuminaApp {
                 .map(|i| wl_start + (wl_end - wl_start) * i as f64 / (num_wl - 1).max(1) as f64)
                 .collect();
 
-            let mut spectra = Vec::new();
             let epsilon_m = env_n * env_n;
-
-            let mut peak_wl_idx = 0;
-            let mut peak_ext = 0.0_f64;
-            let mut all_dipoles_at_peak = Vec::new();
-
-            // Total steps for progress: 1 or 2 solver passes
             let passes = if compute_cd { 2 } else { 1 };
+            let sim_start = std::time::Instant::now();
+            let tx_par = Mutex::new(tx.clone());
+            let progress_counter = AtomicUsize::new(0);
 
-            for (wi, &wl) in wavelengths.iter().enumerate() {
-                let k = 2.0 * std::f64::consts::PI * env_n / wl;
+            dbg("Solving wavelengths in parallel (rayon)...".to_string());
 
-                // Get dielectric function for this wavelength
-                let epsilon = if let Some(ref mat) = dyn_material {
-                    match mat.dielectric_function(wl) {
-                        Ok(e) => e,
-                        Err(e) => {
-                            let _ = tx.send(SimulationMessage::Error(format!(
-                                "Material out of range at {:.1} nm: {}",
-                                wl, e
+            let results: Result<Vec<(CrossSections, Vec<Dipole>)>, String> = wavelengths
+                .par_iter()
+                .map(|&wl| {
+                    let wl_start_time = std::time::Instant::now();
+                    let k = 2.0 * std::f64::consts::PI * env_n / wl;
+
+                    let epsilon = if let Some(ref mat) = dyn_material {
+                        mat.dielectric_function(wl).map_err(|e| format!(
+                            "Material out of range at {:.1} nm: {}", wl, e
+                        ))?
+                    } else {
+                        custom_eps
+                    };
+
+                    let dipoles: Vec<Dipole> = positions
+                        .iter()
+                        .map(|&pos| {
+                            let alpha_cm = clausius_mossotti(spacing.powi(3), epsilon, epsilon_m);
+                            let alpha = radiative_correction(alpha_cm, k);
+                            Dipole::isotropic(pos, alpha)
+                        })
+                        .collect();
+
+                    let mut cs = solver.compute_cross_sections(&dipoles, wl, &params)
+                        .map_err(|e| format!("Solver error at {:.1} nm: {}", wl, e))?;
+
+                    // Optionally compute CD
+                    if compute_cd {
+                        let resp_x = solver.solve_dipoles(&dipoles, wl, &params);
+                        let resp_y = solver_y.solve_dipoles(&dipoles, wl, &params);
+                        if let (Ok(rx), Ok(ry)) = (resp_x, resp_y) {
+                            cs.circular_dichroism = Some(compute_circular_dichroism(&rx, &ry, k));
+                        }
+                    }
+
+                    let done = progress_counter.fetch_add(1, Ordering::Relaxed) + 1;
+                    if let Ok(tx_lock) = tx_par.lock() {
+                        let _ = tx_lock.send(SimulationMessage::Progress {
+                            done: done * passes,
+                            total: num_wl * passes,
+                        });
+                        if debug {
+                            let elapsed = wl_start_time.elapsed();
+                            let _ = tx_lock.send(SimulationMessage::DebugLog(format!(
+                                "[{}/{}] λ={:.1} nm  ε=({:.2},{:.2})  C_ext={:.3e}  C_abs={:.3e}  {:.1}ms",
+                                done, num_wl, wl, epsilon.re, epsilon.im,
+                                cs.extinction, cs.absorption,
+                                elapsed.as_secs_f64() * 1000.0
                             )));
-                            return;
                         }
                     }
-                } else {
-                    custom_eps
-                };
 
-                let dipoles: Vec<Dipole> = positions
-                    .iter()
-                    .map(|&pos| {
-                        let alpha_cm = clausius_mossotti(spacing.powi(3), epsilon, epsilon_m);
-                        let alpha = radiative_correction(alpha_cm, k);
-                        Dipole::isotropic(pos, alpha)
-                    })
-                    .collect();
+                    Ok((cs, dipoles))
+                })
+                .collect();
 
-                // Solve primary (x-pol or selected)
-                let cs_result = solver.compute_cross_sections(&dipoles, wl, &params);
+            let spectra;
+            let peak_wl_idx;
+            let all_dipoles_at_peak: Vec<Dipole>;
 
-                // Optionally compute CD
-                let cd_value: Option<f64> = if compute_cd {
-                    let resp_x = solver.solve_dipoles(&dipoles, wl, &params);
-                    let resp_y = solver_y.solve_dipoles(&dipoles, wl, &params);
-                    match (resp_x, resp_y) {
-                        (Ok(rx), Ok(ry)) => {
-                            Some(compute_circular_dichroism(&rx, &ry, k))
-                        }
-                        _ => None,
-                    }
-                } else {
-                    None
-                };
-
-                match cs_result {
-                    Ok(mut cs) => {
-                        cs.circular_dichroism = cd_value;
+            match results {
+                Ok(pairs) => {
+                    let mut peak_ext = 0.0_f64;
+                    let mut p_idx = 0;
+                    let mut collected = Vec::with_capacity(pairs.len());
+                    for (i, (cs, _)) in pairs.iter().enumerate() {
                         if cs.extinction > peak_ext {
                             peak_ext = cs.extinction;
-                            peak_wl_idx = wi;
-                            all_dipoles_at_peak = dipoles.clone();
+                            p_idx = i;
                         }
-                        spectra.push(cs);
+                        collected.push(cs.clone());
                     }
-                    Err(e) => {
-                        let _ = tx.send(SimulationMessage::Error(format!(
-                            "Solver error at {:.1} nm: {}",
-                            wl, e
-                        )));
-                        return;
-                    }
+                    spectra = collected;
+                    peak_wl_idx = p_idx;
+                    all_dipoles_at_peak = pairs.into_iter().nth(p_idx)
+                        .map(|(_, d)| d).unwrap_or_default();
                 }
-
-                let _ = tx.send(SimulationMessage::Progress {
-                    done: (wi + 1) * passes,
-                    total: num_wl * passes,
-                });
+                Err(e) => {
+                    let _ = tx.send(SimulationMessage::Error(e));
+                    return;
+                }
             }
+
+            dbg(format!(
+                "Spectra complete: {:.2}s total, peak C_ext at λ={:.1} nm",
+                sim_start.elapsed().as_secs_f64(),
+                wavelengths[peak_wl_idx]
+            ));
 
             // Compute near-field and far-field at the peak extinction wavelength
             let mut near_field = None;
@@ -433,7 +543,6 @@ impl LuminaApp {
             if !all_dipoles_at_peak.is_empty() && !spectra.is_empty() {
                 let peak_wl = wavelengths[peak_wl_idx];
                 if let Ok(response) = solver.solve_dipoles(&all_dipoles_at_peak, peak_wl, &params) {
-                    // Near-field (xy plane)
                     let plane = NearFieldPlane {
                         centre: [0.0, 0.0, 0.0],
                         normal: [0.0, 0.0, 1.0],
@@ -450,7 +559,6 @@ impl LuminaApp {
                         near_field = Some(nf_map);
                     }
 
-                    // Far-field pattern (36 theta x 72 phi)
                     let ff_map = solver.compute_far_field(
                         &all_dipoles_at_peak,
                         &response,
@@ -488,6 +596,9 @@ impl eframe::App for LuminaApp {
                     SimulationMessage::Error(e) => {
                         self.simulation_state.is_running = false;
                         self.simulation_state.error_message = Some(e);
+                    }
+                    SimulationMessage::DebugLog(msg) => {
+                        self.simulation_state.debug_log.push(msg);
                     }
                 }
             }

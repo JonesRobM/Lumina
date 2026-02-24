@@ -17,6 +17,7 @@ egui_plot = "0.29"
 rfd = "0.15"
 serde_json = { workspace = true }
 num-complex = { workspace = true }
+rayon = { workspace = true }
 log = { workspace = true }
 env_logger = { workspace = true }
 

@@ -20,6 +20,8 @@ env_logger = { workspace = true }
 anyhow = { workspace = true }
 num-complex = { workspace = true }
 
+rayon = { workspace = true }
+
 lumina-core = { workspace = true }
 lumina-geometry = { workspace = true }
 lumina-materials = { workspace = true }

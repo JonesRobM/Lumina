@@ -52,45 +52,45 @@ pub fn assemble_interaction_matrix(
     }
 
     // Off-diagonal blocks: -G(r_i, r_j), computed in parallel.
-    // Each block is a 3×3 Green's tensor — compute all of them via Rayon,
-    // then place into the matrix sequentially.
-    let blocks: Vec<(usize, usize, [[Complex64; 3]; 3])> = (0..n)
-        .into_par_iter()
-        .flat_map(|i| {
-            let dipoles_ref = dipoles;
-            (0..n).into_par_iter().filter(move |&j| i != j).map(move |j| {
-                let g = if use_fcd {
-                    super::greens::dyadic_greens_tensor_filtered(
-                        &dipoles_ref[i].position,
-                        &dipoles_ref[j].position,
-                        k,
-                        cell_size,
-                    )
-                } else {
-                    super::greens::dyadic_greens_tensor(
-                        &dipoles_ref[i].position,
-                        &dipoles_ref[j].position,
-                        k,
-                    )
-                };
-                let mut block = [[Complex64::from(0.0); 3]; 3];
-                for row in 0..3 {
-                    for col in 0..3 {
-                        block[row][col] = g[[row, col]];
+    //
+    // Each dipole i owns rows [3i, 3i+2] which are disjoint from all other
+    // dipoles, so we can write directly into the matrix from parallel threads
+    // using raw pointer arithmetic (no data races).
+    //
+    // The pointer is cast to usize for Send+Sync capture in the closure.
+    let matrix_ptr = matrix.as_mut_ptr() as usize;
+    let stride = dim; // row-major stride for C-contiguous ndarray
+
+    (0..n).into_par_iter().for_each(|i| {
+        for j in 0..n {
+            if i == j { continue; }
+            let g = if use_fcd {
+                super::greens::dyadic_greens_tensor_filtered(
+                    &dipoles[i].position,
+                    &dipoles[j].position,
+                    k,
+                    cell_size,
+                )
+            } else {
+                super::greens::dyadic_greens_tensor(
+                    &dipoles[i].position,
+                    &dipoles[j].position,
+                    k,
+                )
+            };
+            // Write -G block directly into rows [3i..3i+2], columns [3j..3j+2].
+            // SAFETY: each thread handles a unique i, so row groups are disjoint.
+            // The matrix is C-contiguous (row-major), so element [r,c] is at r*dim+c.
+            for (row, g_row) in g.iter().enumerate() {
+                for (col, &g_val) in g_row.iter().enumerate() {
+                    unsafe {
+                        let offset = (3 * i + row) * stride + (3 * j + col);
+                        *(matrix_ptr as *mut Complex64).add(offset) = -g_val;
                     }
                 }
-                (i, j, block)
-            })
-        })
-        .collect();
-
-    for (i, j, block) in blocks {
-        for row in 0..3 {
-            for col in 0..3 {
-                matrix[[3 * i + row, 3 * j + col]] = -block[row][col];
             }
         }
-    }
+    });
 
     matrix
 }

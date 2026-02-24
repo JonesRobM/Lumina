@@ -36,6 +36,8 @@ pub struct SimulationPanel {
     pub compute_cd: bool,
     /// Whether to use GPU acceleration for GMRES matvec (requires `gpu` feature).
     pub use_gpu: bool,
+    /// Whether to show debug-level output during simulation.
+    pub debug_output: bool,
     /// Whether a simulation is currently running.
     pub is_running: bool,
     /// Progress (0.0 to 1.0).
@@ -44,6 +46,8 @@ pub struct SimulationPanel {
     pub launch_requested: bool,
     /// Error message from the last run, if any.
     pub error_message: Option<String>,
+    /// Accumulated debug log lines from the simulation thread.
+    pub debug_log: Vec<String>,
 }
 
 impl Default for SimulationPanel {
@@ -56,10 +60,12 @@ impl Default for SimulationPanel {
             polarisation: IncidentPolarisation::X,
             compute_cd: false,
             use_gpu: cfg!(feature = "gpu"),
+            debug_output: false,
             is_running: false,
             progress: 0.0,
             launch_requested: false,
             error_message: None,
+            debug_log: Vec::new(),
         }
     }
 }
@@ -139,6 +145,20 @@ impl SimulationPanel {
             );
         }
 
+        ui.add_space(4.0);
+
+        // Debug output toggle
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut self.debug_output, "Debug output");
+        });
+        if self.debug_output {
+            ui.label(
+                egui::RichText::new("  Shows per-wavelength timing, matrix size, ε values.")
+                    .weak()
+                    .small(),
+            );
+        }
+
         ui.add_space(16.0);
         ui.separator();
 
@@ -154,7 +174,25 @@ impl SimulationPanel {
             )));
         } else if ui.button("Run Simulation").clicked() {
             self.error_message = None;
+            self.debug_log.clear();
             self.launch_requested = true;
+        }
+
+        // Debug log display
+        if self.debug_output && !self.debug_log.is_empty() {
+            ui.add_space(8.0);
+            ui.separator();
+            ui.label(egui::RichText::new("Debug Log").strong());
+
+            let max_height = ui.available_height().min(300.0);
+            egui::ScrollArea::vertical()
+                .max_height(max_height)
+                .stick_to_bottom(true)
+                .show(ui, |ui| {
+                    for line in &self.debug_log {
+                        ui.label(egui::RichText::new(line).monospace().small());
+                    }
+                });
         }
     }
 }

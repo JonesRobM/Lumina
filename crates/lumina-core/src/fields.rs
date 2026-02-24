@@ -39,7 +39,7 @@ pub fn field_at_point(
         let g = dyadic_greens_tensor(obs_point, &dipole.position, k);
         for a in 0..3 {
             for b in 0..3 {
-                e[a] += g[[a, b]] * response.moments[[i, b]];
+                e[a] += g[a][b] * response.moments[[i, b]];
             }
         }
     }

@@ -2336,6 +2336,7 @@ dependencies = [
  "lumina-geometry",
  "lumina-materials",
  "num-complex",
+ "rayon",
  "serde",
  "serde_json",
  "toml",
@@ -2398,6 +2399,7 @@ dependencies = [
  "lumina-geometry",
  "lumina-materials",
  "num-complex",
+ "rayon",
  "rfd",
  "serde_json",
 ]

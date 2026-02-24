@@ -11,10 +11,15 @@
 //!
 //! where $\mathbf{R} = \mathbf{r} - \mathbf{r}'$ and $R = |\mathbf{R}|$.
 
-use ndarray::Array2;
 use num_complex::Complex64;
 
+/// Stack-allocated 3×3 complex tensor (zero heap allocation).
+pub type Tensor3x3 = [[Complex64; 3]; 3];
+
 /// Compute the 3x3 dyadic Green's tensor between two points.
+///
+/// Returns a stack-allocated `[[Complex64; 3]; 3]` to avoid heap allocation
+/// in the inner assembly loop (~N² calls per wavelength).
 ///
 /// # Arguments
 /// * `r1` - Position of the observation point (nm).
@@ -22,11 +27,11 @@ use num_complex::Complex64;
 /// * `k` - Wavenumber in the medium (nm^{-1}), i.e. $k = 2\pi n / \lambda$.
 ///
 /// # Returns
-/// A 3x3 complex matrix representing $\mathbf{G}(\mathbf{r}_1, \mathbf{r}_2)$.
+/// A 3x3 complex tensor representing $\mathbf{G}(\mathbf{r}_1, \mathbf{r}_2)$.
 ///
 /// # Panics
 /// Panics if `r1 == r2` (self-interaction is not defined via this function).
-pub fn dyadic_greens_tensor(r1: &[f64; 3], r2: &[f64; 3], k: f64) -> Array2<Complex64> {
+pub fn dyadic_greens_tensor(r1: &[f64; 3], r2: &[f64; 3], k: f64) -> Tensor3x3 {
     let rx = r1[0] - r2[0];
     let ry = r1[1] - r2[1];
     let rz = r1[2] - r2[2];
@@ -53,11 +58,12 @@ pub fn dyadic_greens_tensor(r1: &[f64; 3], r2: &[f64; 3], k: f64) -> Array2<Comp
     let r_hat = [rx / r, ry / r, rz / r];
 
     // Build the 3x3 tensor: G_ij = prefactor * (a * delta_ij + b * r_hat_i * r_hat_j)
-    let mut g = Array2::<Complex64>::zeros((3, 3));
+    let zero = Complex64::from(0.0);
+    let mut g = [[zero; 3]; 3];
     for i in 0..3 {
         for j in 0..3 {
             let delta_ij = if i == j { 1.0 } else { 0.0 };
-            g[[i, j]] = prefactor * (a * delta_ij + b * r_hat[i] * r_hat[j]);
+            g[i][j] = prefactor * (a * delta_ij + b * r_hat[i] * r_hat[j]);
         }
     }
 
@@ -90,7 +96,7 @@ pub fn dyadic_greens_tensor_filtered(
     r_src: &[f64; 3],
     k: f64,
     cell_size: f64,
-) -> Array2<Complex64> {
+) -> Tensor3x3 {
     let dx = r_obs[0] - r_src[0];
     let dy = r_obs[1] - r_src[1];
     let dz = r_obs[2] - r_src[2];
@@ -102,7 +108,6 @@ pub fn dyadic_greens_tensor_filtered(
     }
 
     // 3-point Gauss-Legendre quadrature on [-1, 1]
-    // Nodes and weights for 3-point rule
     let gl_nodes: [f64; 3] = [
         -(3.0_f64 / 5.0).sqrt(),
         0.0,
@@ -112,7 +117,8 @@ pub fn dyadic_greens_tensor_filtered(
 
     let half_d = cell_size / 2.0;
 
-    let mut g_avg = Array2::<Complex64>::zeros((3, 3));
+    let zero = Complex64::from(0.0);
+    let mut g_avg = [[zero; 3]; 3];
     let mut total_weight = 0.0;
 
     // 3D quadrature: 3^3 = 27 evaluation points per cell
@@ -139,7 +145,7 @@ pub fn dyadic_greens_tensor_filtered(
 
                 for a in 0..3 {
                     for b in 0..3 {
-                        g_avg[[a, b]] += Complex64::from(w) * g[[a, b]];
+                        g_avg[a][b] += Complex64::from(w) * g[a][b];
                     }
                 }
                 total_weight += w;
@@ -150,9 +156,9 @@ pub fn dyadic_greens_tensor_filtered(
     // Normalise by total weight (should be 8.0 for 3-point GL on [-1,1]^3)
     if total_weight > 1e-30 {
         let inv_w = Complex64::from(1.0 / total_weight);
-        for a in 0..3 {
-            for b in 0..3 {
-                g_avg[[a, b]] *= inv_w;
+        for row in &mut g_avg {
+            for val in row.iter_mut() {
+                *val *= inv_w;
             }
         }
     }
@@ -177,8 +183,8 @@ mod tests {
 
         for i in 0..3 {
             for j in 0..3 {
-                assert_abs_diff_eq!(g_12[[i, j]].re, g_21[[j, i]].re, epsilon = 1e-12);
-                assert_abs_diff_eq!(g_12[[i, j]].im, g_21[[j, i]].im, epsilon = 1e-12);
+                assert_abs_diff_eq!(g_12[i][j].re, g_21[j][i].re, epsilon = 1e-12);
+                assert_abs_diff_eq!(g_12[i][j].im, g_21[j][i].im, epsilon = 1e-12);
             }
         }
     }
@@ -204,9 +210,8 @@ mod tests {
 
         for i in 0..3 {
             for j in 0..3 {
-                // At 10d separation, the FCD correction is negligible
-                assert_abs_diff_eq!(g_point[[i, j]].re, g_fcd[[i, j]].re, epsilon = 1e-10);
-                assert_abs_diff_eq!(g_point[[i, j]].im, g_fcd[[i, j]].im, epsilon = 1e-10);
+                assert_abs_diff_eq!(g_point[i][j].re, g_fcd[i][j].re, epsilon = 1e-10);
+                assert_abs_diff_eq!(g_point[i][j].im, g_fcd[i][j].im, epsilon = 1e-10);
             }
         }
     }
@@ -223,8 +228,8 @@ mod tests {
 
         for i in 0..3 {
             for j in 0..3 {
-                assert!(g_fcd[[i, j]].re.is_finite(), "FCD G[{},{}] real part not finite", i, j);
-                assert!(g_fcd[[i, j]].im.is_finite(), "FCD G[{},{}] imag part not finite", i, j);
+                assert!(g_fcd[i][j].re.is_finite(), "FCD G[{},{}] real part not finite", i, j);
+                assert!(g_fcd[i][j].im.is_finite(), "FCD G[{},{}] imag part not finite", i, j);
             }
         }
     }
@@ -244,7 +249,7 @@ mod tests {
         let mut max_diff = 0.0_f64;
         for i in 0..3 {
             for j in 0..3 {
-                let diff = (g_fcd[[i, j]] - g_point[[i, j]]).norm();
+                let diff = (g_fcd[i][j] - g_point[i][j]).norm();
                 max_diff = max_diff.max(diff);
             }
         }

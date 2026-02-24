@@ -1,10 +1,12 @@
 //! Simulation runner: ties together geometry, materials, and solver.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use num_complex::Complex64;
+use rayon::prelude::*;
 
 use lumina_compute::ComputeBackend;
 use lumina_core::solver::cda::CdaSolver;
@@ -93,61 +95,77 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
     // Select compute backend based on config.
     let backend: Arc<dyn ComputeBackend> = create_backend(&job.simulation.backend);
 
-    // Run simulation across wavelengths
+    // Run simulation across wavelengths — parallel via Rayon.
     let solver = CdaSolver {
         backend,
         ..Default::default()
     };
-    let mut all_spectra = Vec::with_capacity(wavelengths.len());
 
-    // Track the peak extinction wavelength for near-field computation
-    let mut peak_ext = 0.0_f64;
-    let mut peak_wl = wavelengths[0];
-    let mut peak_dipoles: Vec<Dipole> = Vec::new();
+    let n_wl = wavelengths.len();
+    let progress = AtomicUsize::new(0);
 
-    for (wi, &wl) in wavelengths.iter().enumerate() {
-        let k = 2.0 * std::f64::consts::PI * params.environment_n / wl;
+    println!("Solving {} wavelengths in parallel (rayon)...", n_wl);
+
+    let all_spectra: Vec<CrossSections> = wavelengths
+        .par_iter()
+        .map(|&wl| {
+            let k = 2.0 * std::f64::consts::PI * params.environment_n / wl;
+            let epsilon_m = params.environment_n * params.environment_n;
+
+            let mut dipoles = Vec::with_capacity(total_dipoles);
+            for i in 0..total_dipoles {
+                let epsilon = resolve_material_epsilon(
+                    &all_materials[i], wl, &gold, &silver, &copper, &tio2, &sio2,
+                )
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+                let volume = all_spacings[i].powi(3);
+                let alpha_cm = clausius_mossotti(volume, epsilon, epsilon_m);
+                let alpha = radiative_correction(alpha_cm, k);
+                dipoles.push(Dipole::isotropic(all_positions[i], alpha));
+            }
+
+            let cs = solver
+                .compute_cross_sections(&dipoles, wl, &params)
+                .map_err(|e| anyhow::anyhow!("Solver error at λ={:.1} nm: {}", wl, e))?;
+
+            let done = progress.fetch_add(1, Ordering::Relaxed) + 1;
+            if done.is_multiple_of(10) || done == 1 || done == n_wl {
+                println!(
+                    "  [{}/{}] λ={:.1} nm: C_ext={:.2e}, C_abs={:.2e}, C_sca={:.2e}",
+                    done, n_wl, wl, cs.extinction, cs.absorption, cs.scattering
+                );
+            }
+
+            Ok(cs)
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    // Find peak extinction wavelength for near-field computation
+    let (peak_wl, peak_ext) = all_spectra
+        .iter()
+        .map(|cs| (cs.wavelength_nm, cs.extinction))
+        .fold((wavelengths[0], 0.0_f64), |(pw, pe), (w, e)| {
+            if e > pe { (w, e) } else { (pw, pe) }
+        });
+
+    // Optionally compute near-field map at peak wavelength
+    let near_field = if job.output.save_near_field && peak_ext > 0.0 {
+        println!("Computing near-field map at λ={:.1} nm (peak extinction)...", peak_wl);
+
+        // Rebuild dipoles at the peak wavelength
+        let k_peak = 2.0 * std::f64::consts::PI * params.environment_n / peak_wl;
         let epsilon_m = params.environment_n * params.environment_n;
-
-        let mut dipoles = Vec::with_capacity(total_dipoles);
+        let mut peak_dipoles = Vec::with_capacity(total_dipoles);
         for i in 0..total_dipoles {
             let epsilon = resolve_material_epsilon(
-                &all_materials[i], wl, &gold, &silver, &copper, &tio2, &sio2,
+                &all_materials[i], peak_wl, &gold, &silver, &copper, &tio2, &sio2,
             )?;
             let volume = all_spacings[i].powi(3);
             let alpha_cm = clausius_mossotti(volume, epsilon, epsilon_m);
-            let alpha = radiative_correction(alpha_cm, k);
-            dipoles.push(Dipole::isotropic(all_positions[i], alpha));
+            let alpha = radiative_correction(alpha_cm, k_peak);
+            peak_dipoles.push(Dipole::isotropic(all_positions[i], alpha));
         }
 
-        let cs = solver
-            .compute_cross_sections(&dipoles, wl, &params)
-            .map_err(|e| anyhow::anyhow!("Solver error at λ={:.1} nm: {}", wl, e))?;
-
-        if (wi + 1) % 10 == 0 || wi == 0 || wi == wavelengths.len() - 1 {
-            println!(
-                "  [{}/{}] λ={:.1} nm: C_ext={:.2e}, C_abs={:.2e}, C_sca={:.2e}",
-                wi + 1,
-                wavelengths.len(),
-                wl,
-                cs.extinction,
-                cs.absorption,
-                cs.scattering
-            );
-        }
-
-        if cs.extinction > peak_ext {
-            peak_ext = cs.extinction;
-            peak_wl = wl;
-            peak_dipoles = dipoles;
-        }
-
-        all_spectra.push(cs);
-    }
-
-    // Optionally compute near-field map at peak wavelength
-    let near_field = if job.output.save_near_field && !peak_dipoles.is_empty() {
-        println!("Computing near-field map at λ={:.1} nm (peak extinction)...", peak_wl);
         match solver.solve_dipoles(&peak_dipoles, peak_wl, &params) {
             Ok(response) => {
                 // Estimate bounding radius of the structure for the observation plane
