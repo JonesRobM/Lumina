@@ -4,7 +4,7 @@
 //! (CPU, GPU, distributed) so that the physics code in `lumina-core` remains
 //! device-agnostic.
 
-use ndarray::Array2;
+use ndarray::{Array1, Array2, ArrayView1};
 use num_complex::Complex64;
 use thiserror::Error;
 
@@ -38,6 +38,22 @@ pub enum BackendType {
     Distributed,
 }
 
+/// A persistent GPU solve session with pre-allocated device buffers.
+///
+/// Obtained via [`ComputeBackend::create_session`]. Upload the interaction
+/// matrix once with [`upload_matrix`](MatvecSession::upload_matrix), then call
+/// [`matvec`](MatvecSession::matvec) for each GMRES iteration without any
+/// further device allocations.
+pub trait MatvecSession: Send + Sync {
+    /// Upload the interaction matrix to device memory.
+    ///
+    /// Must be called once before the first [`matvec`](MatvecSession::matvec).
+    fn upload_matrix(&self, matrix: &Array2<Complex64>) -> Result<(), ComputeError>;
+
+    /// Perform $\mathbf{y} = \mathbf{A}\mathbf{x}$ using the pre-uploaded matrix.
+    fn matvec(&self, x: ArrayView1<Complex64>) -> Result<Array1<Complex64>, ComputeError>;
+}
+
 /// Abstraction over compute backends.
 ///
 /// Physics code in `lumina-core` operates against this trait. Implementations
@@ -46,6 +62,14 @@ pub enum BackendType {
 pub trait ComputeBackend: Send + Sync {
     /// Return information about the device.
     fn device_info(&self) -> DeviceInfo;
+
+    /// Create a persistent solve session with pre-allocated buffers for `n` unknowns.
+    ///
+    /// GPU backends return a [`MatvecSession`] that eliminates per-matvec buffer
+    /// allocations. CPU backends return `None` (no allocation overhead to eliminate).
+    fn create_session(&self, _n: usize) -> Option<Box<dyn MatvecSession>> {
+        None
+    }
 
     /// Perform a parallel element-wise operation over a matrix.
     ///

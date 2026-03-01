@@ -192,18 +192,22 @@ impl OpticalSolver for CdaSolver {
         let solution = if n <= self.iterative_threshold {
             direct::solve_direct(&matrix, &rhs)
                 .map_err(|e| SolverError::LinAlgError(e.to_string()))?
+        } else if let Some(session) = self.backend.create_session(3 * n) {
+            // GPU path: upload matrix once, reuse buffers for all GMRES iterations.
+            session
+                .upload_matrix(&matrix)
+                .map_err(|e| SolverError::LinAlgError(e.to_string()))?;
+            let matvec_fn = move |x: &ndarray::Array1<Complex64>| -> Result<ndarray::Array1<Complex64>, SolverError> {
+                session.matvec(x.view()).map_err(|e| SolverError::LinAlgError(e.to_string()))
+            };
+            iterative::solve_gmres(&matvec_fn, &rhs, params.solver_tolerance, params.max_iterations)?
         } else {
+            // CPU path: pass matrix by reference through the backend matvec.
             let backend = Arc::clone(&self.backend);
             let matvec_fn = move |x: &ndarray::Array1<Complex64>| -> Result<ndarray::Array1<Complex64>, SolverError> {
-                backend.matvec(&matrix, x)
-                    .map_err(|e| SolverError::LinAlgError(e.to_string()))
+                backend.matvec(&matrix, x).map_err(|e| SolverError::LinAlgError(e.to_string()))
             };
-            iterative::solve_gmres(
-                &matvec_fn,
-                &rhs,
-                params.solver_tolerance,
-                params.max_iterations,
-            )?
+            iterative::solve_gmres(&matvec_fn, &rhs, params.solver_tolerance, params.max_iterations)?
         };
 
         // Reshape the solution into (N, 3) dipole moments

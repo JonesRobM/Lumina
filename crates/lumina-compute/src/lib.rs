@@ -23,10 +23,10 @@ pub mod gpu;
 #[cfg(feature = "distributed")]
 pub mod distributed;
 
-pub use backend::{BackendType, ComputeBackend, ComputeError, DeviceInfo};
+pub use backend::{BackendType, ComputeBackend, ComputeError, DeviceInfo, MatvecSession};
 
 #[cfg(feature = "cpu")]
 pub use cpu::CpuBackend;
 
 #[cfg(feature = "gpu")]
-pub use gpu::GpuBackend;
+pub use gpu::{GpuBackend, GpuSession};
