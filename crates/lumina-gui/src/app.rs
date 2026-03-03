@@ -5,19 +5,16 @@ use eframe::egui;
 use num_complex::Complex64;
 
 use lumina_core::types::{CrossSections, FarFieldMap, NearFieldMap};
+use lumina_geometry::scene::SceneSpec;
 
 use crate::panels;
-use crate::panels::geometry::ShapeType;
-use crate::panels::materials::MaterialChoice;
 
 /// The main Lumina application.
 pub struct LuminaApp {
     /// Which panel is currently selected in the sidebar.
     active_panel: Panel,
-    /// State for the geometry panel.
-    pub geometry_state: panels::geometry::GeometryPanel,
-    /// State for the materials panel.
-    pub materials_state: panels::materials::MaterialsPanel,
+    /// Unified scene editor (replaces separate geometry + materials panels).
+    pub scene_panel: panels::scene::ScenePanel,
     /// State for the simulation panel.
     pub simulation_state: panels::simulation::SimulationPanel,
     /// State for the results panel.
@@ -42,8 +39,7 @@ pub enum SimulationMessage {
 /// Sidebar navigation panels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Panel {
-    Geometry,
-    Materials,
+    Scene,
     Simulation,
     Results,
 }
@@ -51,9 +47,8 @@ pub enum Panel {
 impl Default for LuminaApp {
     fn default() -> Self {
         Self {
-            active_panel: Panel::Geometry,
-            geometry_state: panels::geometry::GeometryPanel::default(),
-            materials_state: panels::materials::MaterialsPanel::default(),
+            active_panel: Panel::Scene,
+            scene_panel: panels::scene::ScenePanel::default(),
             simulation_state: panels::simulation::SimulationPanel::default(),
             results_state: panels::results::ResultsPanel::default(),
             result_rx: None,
@@ -62,54 +57,16 @@ impl Default for LuminaApp {
 }
 
 impl LuminaApp {
-    /// Launch a simulation on a background thread using the current panel state.
+    /// Launch a simulation on a background thread using the current scene.
     fn launch_simulation(&mut self) {
         let (tx, rx) = mpsc::channel();
         self.result_rx = Some(rx);
         self.simulation_state.is_running = true;
         self.simulation_state.progress = 0.0;
 
-        // --- Capture geometry parameters ---
-        let shape       = self.geometry_state.selected_shape;
-        let spacing     = self.geometry_state.dipole_spacing;
+        // Capture everything the thread needs by value.
+        let scene: SceneSpec = self.scene_panel.scene.clone();
 
-        // For ImportFile, capture the pre-parsed positions
-        let xyz_positions: Option<Vec<[f64; 3]>> = if shape == ShapeType::ImportFile {
-            self.geometry_state.cached_positions.clone()
-        } else {
-            None
-        };
-
-        let sphere_radius   = self.geometry_state.sphere_radius;
-        let cyl_radius      = self.geometry_state.cylinder_radius;
-        let cyl_length      = self.geometry_state.cylinder_length;
-        let cub_hx          = self.geometry_state.cuboid_hx;
-        let cub_hy          = self.geometry_state.cuboid_hy;
-        let cub_hz          = self.geometry_state.cuboid_hz;
-        let ell_a           = self.geometry_state.ellipsoid_a;
-        let ell_b           = self.geometry_state.ellipsoid_b;
-        let ell_c           = self.geometry_state.ellipsoid_c;
-        let helix_r         = self.geometry_state.helix_radius;
-        let helix_wr        = self.geometry_state.helix_wire_radius;
-        let helix_pitch     = self.geometry_state.helix_pitch;
-        let helix_turns     = self.geometry_state.helix_turns;
-
-        // Estimate bounding half-extent for the near-field observation plane
-        let shape_half_extent = match shape {
-            ShapeType::Sphere    => sphere_radius,
-            ShapeType::Cylinder  => cyl_radius.max(cyl_length / 2.0),
-            ShapeType::Cuboid    => cub_hx.max(cub_hy).max(cub_hz),
-            ShapeType::Ellipsoid => ell_a.max(ell_b).max(ell_c),
-            ShapeType::Helix     => helix_r + helix_wr + helix_pitch * helix_turns / 2.0,
-            ShapeType::ImportFile => 30.0,
-        };
-
-        // --- Capture material parameters ---
-        let mat_choice  = self.materials_state.selected_material;
-        let custom_n    = self.materials_state.custom_n;
-        let custom_k    = self.materials_state.custom_k;
-
-        // --- Capture simulation parameters ---
         let wl_start    = self.simulation_state.wavelength_start;
         let wl_end      = self.simulation_state.wavelength_end;
         let num_wl      = self.simulation_state.num_wavelengths;
@@ -121,24 +78,23 @@ impl LuminaApp {
 
         std::thread::spawn(move || {
             use std::sync::Arc;
+            use std::sync::atomic::{AtomicUsize, Ordering};
+            use std::sync::Mutex;
+            use rayon::prelude::*;
+
+            use lumina_compute::ComputeBackend;
             use lumina_core::fields::compute_circular_dichroism;
             use lumina_core::solver::cda::CdaSolver;
             use lumina_core::solver::{NearFieldPlane, OpticalSolver, SolverError};
             use lumina_core::types::{
                 clausius_mossotti, radiative_correction, Dipole, IncidentField, SimulationParams,
             };
-            use std::sync::atomic::{AtomicUsize, Ordering};
-            use std::sync::Mutex;
-            use rayon::prelude::*;
-            use lumina_compute::ComputeBackend;
-            use lumina_geometry::discretise::discretise_primitive;
-            use lumina_geometry::primitives::*;
             use lumina_materials::johnson_christy::JohnsonChristyMaterial;
             use lumina_materials::palik::PalikMaterial;
             use lumina_materials::provider::MaterialProvider;
             use crate::panels::simulation::IncidentPolarisation;
 
-            // Helper: send debug log message if enabled.
+            // Debug logger helper.
             let tx_debug = tx.clone();
             let dbg = move |msg: String| {
                 if debug {
@@ -146,7 +102,7 @@ impl LuminaApp {
                 }
             };
 
-            // Create compute backend (GPU with CPU fallback).
+            // ── Compute backend ──────────────────────────────────────────────
             let backend: Arc<dyn ComputeBackend> = if use_gpu {
                 #[cfg(feature = "gpu")]
                 {
@@ -171,20 +127,57 @@ impl LuminaApp {
                 Arc::new(lumina_compute::CpuBackend::new())
             };
 
-            // Build material provider (needed by ImportFile arm before geometry is dispatched)
-            let dyn_material: Option<Box<dyn MaterialProvider>> = match mat_choice {
-                MaterialChoice::GoldJC    => Some(Box::new(JohnsonChristyMaterial::gold())),
-                MaterialChoice::SilverJC  => Some(Box::new(JohnsonChristyMaterial::silver())),
-                MaterialChoice::CopperJC  => Some(Box::new(JohnsonChristyMaterial::copper())),
-                MaterialChoice::TiO2Palik => Some(Box::new(PalikMaterial::tio2())),
-                MaterialChoice::SiO2Palik => Some(Box::new(PalikMaterial::sio2())),
-                MaterialChoice::Custom    => None,
+            // ── Build geometry ───────────────────────────────────────────────
+            let geom = match scene.build_geometry() {
+                Ok(g) => g,
+                Err(e) => {
+                    let _ = tx.send(SimulationMessage::Error(format!("Geometry error: {e}")));
+                    return;
+                }
             };
-            let custom_eps = Complex64::new(
-                custom_n * custom_n - custom_k * custom_k,
-                2.0 * custom_n * custom_k,
-            );
 
+            let n = geom.positions.len();
+            if n == 0 {
+                let _ = tx.send(SimulationMessage::Error(
+                    "Scene produced no dipoles — check shape parameters and dipole spacing.".into(),
+                ));
+                return;
+            }
+
+            // Half-extent for near-field plane sizing.
+            let half_extent = geom.positions
+                .iter()
+                .map(|p| (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt())
+                .fold(0.0_f64, f64::max);
+
+            dbg(format!(
+                "Scene: {} objects, {} dipoles total, bounding radius {:.1} nm",
+                scene.objects.len(), n, half_extent
+            ));
+
+            // ── Material providers ───────────────────────────────────────────
+            // Created once here; borrowed by the Rayon closure below.
+            let gold   = JohnsonChristyMaterial::gold();
+            let silver = JohnsonChristyMaterial::silver();
+            let copper = JohnsonChristyMaterial::copper();
+            let tio2   = PalikMaterial::tio2();
+            let sio2   = PalikMaterial::sio2();
+
+            let resolve_eps = |mat: &str, wl: f64| -> Result<Complex64, String> {
+                let provider: &dyn MaterialProvider = match mat {
+                    "Au_JC"       => &gold,
+                    "Ag_JC"       => &silver,
+                    "Cu_JC"       => &copper,
+                    "TiO2_Palik"  => &tio2,
+                    "SiO2_Palik"  => &sio2,
+                    other => return Err(format!(
+                        "Unknown material '{other}'. Valid: Au_JC, Ag_JC, Cu_JC, TiO2_Palik, SiO2_Palik"
+                    )),
+                };
+                provider.dielectric_function(wl).map_err(|e| format!("{e}"))
+            };
+
+            // ── Simulation parameters ────────────────────────────────────────
             let params = SimulationParams {
                 wavelength_range: [wl_start, wl_end],
                 num_wavelengths: num_wl,
@@ -192,256 +185,15 @@ impl LuminaApp {
                 ..Default::default()
             };
 
+            let epsilon_m = env_n * env_n;
+            let k_of = |wl: f64| 2.0 * std::f64::consts::PI * env_n / wl;
+
             dbg(format!(
-                "Wavelength range: {:.1}–{:.1} nm, {} points",
-                wl_start, wl_end, num_wl
+                "Wavelengths: {wl_start:.1}–{wl_end:.1} nm, {num_wl} points, \
+                 n_env = {env_n:.3}, CD = {compute_cd}"
             ));
-            dbg(format!("Environment n = {:.3}, ε_m = {:.3}", env_n, env_n * env_n));
-            dbg(format!("Material: {:?}", mat_choice));
-            dbg(format!("Polarisation: {:?}, CD: {}", polarisation, compute_cd));
 
-            // Build geometry
-            let primitive = match shape {
-                ShapeType::Sphere => Primitive::Sphere(Sphere {
-                    centre: [0.0, 0.0, 0.0],
-                    radius: sphere_radius,
-                }),
-                ShapeType::Cylinder => Primitive::Cylinder(Cylinder {
-                    base_centre: [0.0, 0.0, -cyl_length / 2.0],
-                    axis: [0.0, 0.0, 1.0],
-                    length: cyl_length,
-                    radius: cyl_radius,
-                }),
-                ShapeType::Cuboid => Primitive::Cuboid(Cuboid {
-                    centre: [0.0, 0.0, 0.0],
-                    half_extents: [cub_hx, cub_hy, cub_hz],
-                }),
-                ShapeType::Ellipsoid => Primitive::Ellipsoid(Ellipsoid {
-                    centre: [0.0, 0.0, 0.0],
-                    semi_axes: [ell_a, ell_b, ell_c],
-                }),
-                ShapeType::Helix => {
-                    let total_height = helix_pitch * helix_turns;
-                    Primitive::Helix(Helix {
-                        base_centre: [0.0, 0.0, -total_height / 2.0],
-                        axis: [0.0, 0.0, 1.0],
-                        radius: helix_r,
-                        pitch: helix_pitch,
-                        turns: helix_turns,
-                        wire_radius: helix_wr,
-                    })
-                }
-                ShapeType::ImportFile => {
-                    match xyz_positions {
-                        Some(ref positions_xyz) => {
-                            // Skip discretisation — use raw parsed positions directly
-                            let positions_copy: Vec<[f64; 3]> = positions_xyz.clone();
-                            let lattice_len = positions_copy.len();
-
-                            if lattice_len == 0 {
-                                let _ = tx.send(SimulationMessage::Error(
-                                    "Loaded .xyz file has no atoms.".to_string(),
-                                ));
-                                return;
-                            }
-
-                            // Use xyz positions directly as dipole positions
-                            let half_extent = positions_copy
-                                .iter()
-                                .map(|p| (p[0]*p[0]+p[1]*p[1]+p[2]*p[2]).sqrt())
-                                .fold(0.0_f64, f64::max);
-                            let shape_half_extent_xyz = (half_extent * 2.0).max(5.0);
-
-                            // Auto-detect nearest-neighbour distance from the positions.
-                            // This is used as the FCD cell size and CM volume.
-                            // Sample a few atoms to find the minimum nn distance robustly.
-                            let nn_dist = {
-                                let n_sample = lattice_len.min(20);
-                                let mut min_d = f64::MAX;
-                                for i in 0..n_sample {
-                                    for j in 0..lattice_len {
-                                        if i == j { continue; }
-                                        let dx = positions_copy[i][0] - positions_copy[j][0];
-                                        let dy = positions_copy[i][1] - positions_copy[j][1];
-                                        let dz = positions_copy[i][2] - positions_copy[j][2];
-                                        let d = (dx * dx + dy * dy + dz * dz).sqrt();
-                                        if d > 1e-12 && d < min_d {
-                                            min_d = d;
-                                        }
-                                    }
-                                }
-                                if min_d == f64::MAX { spacing } else { min_d }
-                            };
-
-                            let positions_for_thread = positions_copy;
-
-                            // Determine epsilon_m and run simulation inline
-                            let epsilon_m = env_n * env_n;
-                            let mut solver_xyz = CdaSolver::with_fcd(1000, true, nn_dist);
-                            solver_xyz.backend = Arc::clone(&backend);
-
-                            let n = lattice_len;
-                            let dim = 3 * n;
-                            let solver_method = if n <= 1000 { "Direct (LU)" } else { "GMRES" };
-                            dbg(format!("Import file: {} dipoles, matrix {}×{}", n, dim, dim));
-                            dbg(format!(
-                                "Auto-detected nn distance: {:.4} nm (FCD threshold: {:.4} nm)",
-                                nn_dist, 2.0 * nn_dist
-                            ));
-                            dbg(format!("Solver: {}, FCD: on, cell_size: {:.4} nm", solver_method, nn_dist));
-                            dbg(format!("Bounding radius: {:.3} nm", half_extent));
-
-                            let wavelengths: Vec<f64> = (0..num_wl)
-                                .map(|i| wl_start + (wl_end - wl_start) * i as f64 / (num_wl - 1).max(1) as f64)
-                                .collect();
-
-                            let sim_start = std::time::Instant::now();
-                            let tx_par = Mutex::new(tx.clone());
-                            let progress_counter = AtomicUsize::new(0);
-
-                            dbg("Solving wavelengths in parallel (rayon)...".to_string());
-
-                            let results: Result<Vec<(CrossSections, Vec<Dipole>)>, String> = wavelengths
-                                .par_iter()
-                                .map(|&wl| {
-                                    let wl_start_time = std::time::Instant::now();
-                                    let k = 2.0 * std::f64::consts::PI * env_n / wl;
-                                    let epsilon = if let Some(ref mat) = dyn_material {
-                                        mat.dielectric_function(wl).map_err(|e| format!(
-                                            "Material out of range at {:.1} nm: {}", wl, e
-                                        ))?
-                                    } else { custom_eps };
-
-                                    let dipoles: Vec<Dipole> = positions_for_thread.iter().map(|&pos| {
-                                        let alpha_cm = clausius_mossotti(nn_dist.powi(3), epsilon, epsilon_m);
-                                        let alpha = radiative_correction(alpha_cm, k);
-                                        Dipole::isotropic(pos, alpha)
-                                    }).collect();
-
-                                    let cs = match solver_xyz.compute_cross_sections(&dipoles, wl, &params) {
-                                        Ok(cs) => cs,
-                                        Err(SolverError::ConvergenceFailure { max_iter, residual }) => {
-                                            if let Ok(tx_lock) = tx_par.lock() {
-                                                let _ = tx_lock.send(SimulationMessage::DebugLog(format!(
-                                                    "WARNING: λ={:.1} nm did not converge after {} iterations \
-                                                     (residual: {:.2e}). Consider increasing max_iterations, \
-                                                     refining dipole spacing, or checking the material at this wavelength.",
-                                                    wl, max_iter, residual
-                                                )));
-                                            }
-                                            CrossSections {
-                                                wavelength_nm: wl,
-                                                extinction: f64::NAN,
-                                                absorption: f64::NAN,
-                                                scattering: f64::NAN,
-                                                circular_dichroism: None,
-                                            }
-                                        }
-                                        Err(e) => return Err(format!("Solver error at {:.1} nm: {}", wl, e)),
-                                    };
-
-                                    let done = progress_counter.fetch_add(1, Ordering::Relaxed) + 1;
-                                    if let Ok(tx_lock) = tx_par.lock() {
-                                        let _ = tx_lock.send(SimulationMessage::Progress { done, total: num_wl });
-                                        if debug {
-                                            let elapsed = wl_start_time.elapsed();
-                                            let _ = tx_lock.send(SimulationMessage::DebugLog(format!(
-                                                "[{}/{}] λ={:.1} nm  ε=({:.2},{:.2})  C_ext={:.3e}  {:.1}ms",
-                                                done, num_wl, wl, epsilon.re, epsilon.im,
-                                                cs.extinction, elapsed.as_secs_f64() * 1000.0
-                                            )));
-                                        }
-                                    }
-
-                                    Ok((cs, dipoles))
-                                })
-                                .collect();
-
-                            let spectra;
-                            let peak_wl_xyz;
-                            let peak_dipoles_xyz: Vec<Dipole>;
-
-                            match results {
-                                Ok(pairs) => {
-                                    let mut peak_ext_xyz = 0.0_f64;
-                                    let mut peak_idx = 0;
-                                    let mut collected = Vec::with_capacity(pairs.len());
-                                    for (i, (cs, _)) in pairs.iter().enumerate() {
-                                        if cs.extinction > peak_ext_xyz {
-                                            peak_ext_xyz = cs.extinction;
-                                            peak_idx = i;
-                                        }
-                                        collected.push(cs.clone());
-                                    }
-                                    let n_failed = collected.iter()
-                                        .filter(|cs| cs.extinction.is_nan()).count();
-                                    spectra = collected;
-                                    peak_wl_xyz = wavelengths[peak_idx];
-                                    peak_dipoles_xyz = pairs.into_iter().nth(peak_idx)
-                                        .map(|(_, d)| d).unwrap_or_default();
-                                    if n_failed > 0 {
-                                        let _ = tx.send(SimulationMessage::DebugLog(format!(
-                                            "WARNING: {}/{} wavelengths did not converge. \
-                                             These points appear as NaN in the spectra. \
-                                             Try reducing dipole spacing or increasing solver iterations.",
-                                            n_failed, num_wl
-                                        )));
-                                    }
-                                }
-                                Err(e) => {
-                                    let _ = tx.send(SimulationMessage::Error(e));
-                                    return;
-                                }
-                            }
-
-                            dbg(format!(
-                                "Spectra complete: {:.2}s total, peak C_ext at λ={:.1} nm",
-                                sim_start.elapsed().as_secs_f64(),
-                                peak_wl_xyz
-                            ));
-
-                            // Near/far-field at peak
-                            let mut near_field = None;
-                            let mut far_field = None;
-                            if !peak_dipoles_xyz.is_empty() {
-                                if let Ok(response) = solver_xyz.solve_dipoles(&peak_dipoles_xyz, peak_wl_xyz, &params) {
-                                    let plane = NearFieldPlane {
-                                        centre: [0.0, 0.0, 0.0],
-                                        normal: [0.0, 0.0, 1.0],
-                                        half_width: shape_half_extent_xyz,
-                                        half_height: shape_half_extent_xyz,
-                                        nx: 40, ny: 40,
-                                    };
-                                    if let Ok(nf_map) = solver_xyz.compute_near_field(&peak_dipoles_xyz, &response, &plane) {
-                                        near_field = Some(nf_map);
-                                    }
-                                    far_field = Some(solver_xyz.compute_far_field(&peak_dipoles_xyz, &response, 36, 72));
-                                }
-                            }
-
-                            let _ = tx.send(SimulationMessage::Complete { spectra, near_field, far_field });
-                            return;
-                        }
-                        None => {
-                            let _ = tx.send(SimulationMessage::Error(
-                                "No .xyz file loaded. Use the Geometry panel to import one.".to_string(),
-                            ));
-                            return;
-                        }
-                    }
-                }
-            };
-
-            let lattice = discretise_primitive(&primitive, spacing);
-            let positions: Vec<[f64; 3]> = lattice.iter().map(|p| p.position).collect();
-
-            let n = positions.len();
-            let dim = 3 * n;
-            let solver_method = if n <= 1000 { "Direct (LU)" } else { "GMRES" };
-            dbg(format!("Geometry: {:?}, {} dipoles, matrix {}×{}", shape, n, dim, dim));
-            dbg(format!("Solver: {}, FCD: on, spacing: {:.2} nm", solver_method, spacing));
-
-            // Build incident fields
+            // ── Incident fields ──────────────────────────────────────────────
             let incident_x = IncidentField {
                 direction: [0.0, 0.0, 1.0],
                 polarisation: [1.0, 0.0, 0.0],
@@ -452,62 +204,60 @@ impl LuminaApp {
                 polarisation: [0.0, 1.0, 0.0],
                 amplitude: 1.0,
             };
-
-            // Select primary incident field
-            let primary_incident = match polarisation {
+            let primary = match polarisation {
                 IncidentPolarisation::X | IncidentPolarisation::Circular => incident_x.clone(),
                 IncidentPolarisation::Y => incident_y.clone(),
             };
 
-            let mut solver = CdaSolver::with_incident(1000, true, spacing, primary_incident.clone());
-            solver.backend = Arc::clone(&backend);
-            let mut solver_y = CdaSolver::with_incident(1000, true, spacing, incident_y.clone());
+            // Each solver carries its own Arc<backend>.
+            let mut solver_x = CdaSolver::with_incident(
+                1000, true, geom.spacings[0], primary,
+            );
+            solver_x.backend = Arc::clone(&backend);
+
+            let mut solver_y = CdaSolver::with_incident(
+                1000, true, geom.spacings[0], incident_y.clone(),
+            );
             solver_y.backend = Arc::clone(&backend);
 
+            // ── Wavelength sweep ─────────────────────────────────────────────
             let wavelengths: Vec<f64> = (0..num_wl)
                 .map(|i| wl_start + (wl_end - wl_start) * i as f64 / (num_wl - 1).max(1) as f64)
                 .collect();
 
-            let epsilon_m = env_n * env_n;
-            let passes = if compute_cd { 2 } else { 1 };
-            let sim_start = std::time::Instant::now();
             let tx_par = Mutex::new(tx.clone());
             let progress_counter = AtomicUsize::new(0);
+            let passes = if compute_cd { 2 } else { 1 };
+            let sim_start = std::time::Instant::now();
 
-            dbg("Solving wavelengths in parallel (rayon)...".to_string());
+            dbg("Solving wavelengths in parallel (rayon)…".to_string());
 
             let results: Result<Vec<(CrossSections, Vec<Dipole>)>, String> = wavelengths
                 .par_iter()
                 .map(|&wl| {
-                    let wl_start_time = std::time::Instant::now();
-                    let k = 2.0 * std::f64::consts::PI * env_n / wl;
+                    let t0 = std::time::Instant::now();
+                    let k = k_of(wl);
 
-                    let epsilon = if let Some(ref mat) = dyn_material {
-                        mat.dielectric_function(wl).map_err(|e| format!(
-                            "Material out of range at {:.1} nm: {}", wl, e
-                        ))?
-                    } else {
-                        custom_eps
-                    };
+                    // Build per-dipole polarisabilities for this wavelength.
+                    let mut dipoles = Vec::with_capacity(n);
+                    for i in 0..n {
+                        let eps = resolve_eps(&geom.materials[i], wl).map_err(|e| {
+                            format!("Material error at λ={wl:.1} nm: {e}")
+                        })?;
+                        let alpha_cm = clausius_mossotti(
+                            geom.spacings[i].powi(3), eps, epsilon_m,
+                        );
+                        let alpha = radiative_correction(alpha_cm, k);
+                        dipoles.push(Dipole::isotropic(geom.positions[i], alpha));
+                    }
 
-                    let dipoles: Vec<Dipole> = positions
-                        .iter()
-                        .map(|&pos| {
-                            let alpha_cm = clausius_mossotti(spacing.powi(3), epsilon, epsilon_m);
-                            let alpha = radiative_correction(alpha_cm, k);
-                            Dipole::isotropic(pos, alpha)
-                        })
-                        .collect();
-
-                    let mut cs = match solver.compute_cross_sections(&dipoles, wl, &params) {
+                    let mut cs = match solver_x.compute_cross_sections(&dipoles, wl, &params) {
                         Ok(cs) => cs,
                         Err(SolverError::ConvergenceFailure { max_iter, residual }) => {
-                            if let Ok(tx_lock) = tx_par.lock() {
-                                let _ = tx_lock.send(SimulationMessage::DebugLog(format!(
-                                    "WARNING: λ={:.1} nm did not converge after {} iterations \
-                                     (residual: {:.2e}). Consider increasing max_iterations, \
-                                     refining dipole spacing, or checking the material at this wavelength.",
-                                    wl, max_iter, residual
+                            if let Ok(lock) = tx_par.lock() {
+                                let _ = lock.send(SimulationMessage::DebugLog(format!(
+                                    "WARNING: λ={wl:.1} nm did not converge after {max_iter} iterations \
+                                     (residual: {residual:.2e}).",
                                 )));
                             }
                             CrossSections {
@@ -518,31 +268,29 @@ impl LuminaApp {
                                 circular_dichroism: None,
                             }
                         }
-                        Err(e) => return Err(format!("Solver error at {:.1} nm: {}", wl, e)),
+                        Err(e) => return Err(format!("Solver error at λ={wl:.1} nm: {e}")),
                     };
 
-                    // Optionally compute CD (skip if cross-sections failed to converge)
+                    // Optional CD pass.
                     if compute_cd && !cs.extinction.is_nan() {
-                        let resp_x = solver.solve_dipoles(&dipoles, wl, &params);
-                        let resp_y = solver_y.solve_dipoles(&dipoles, wl, &params);
-                        if let (Ok(rx), Ok(ry)) = (resp_x, resp_y) {
+                        let rx = solver_x.solve_dipoles(&dipoles, wl, &params);
+                        let ry = solver_y.solve_dipoles(&dipoles, wl, &params);
+                        if let (Ok(rx), Ok(ry)) = (rx, ry) {
                             cs.circular_dichroism = Some(compute_circular_dichroism(&rx, &ry, k));
                         }
                     }
 
                     let done = progress_counter.fetch_add(1, Ordering::Relaxed) + 1;
-                    if let Ok(tx_lock) = tx_par.lock() {
-                        let _ = tx_lock.send(SimulationMessage::Progress {
+                    if let Ok(lock) = tx_par.lock() {
+                        let _ = lock.send(SimulationMessage::Progress {
                             done: done * passes,
                             total: num_wl * passes,
                         });
                         if debug {
-                            let elapsed = wl_start_time.elapsed();
-                            let _ = tx_lock.send(SimulationMessage::DebugLog(format!(
-                                "[{}/{}] λ={:.1} nm  ε=({:.2},{:.2})  C_ext={:.3e}  C_abs={:.3e}  {:.1}ms",
-                                done, num_wl, wl, epsilon.re, epsilon.im,
-                                cs.extinction, cs.absorption,
-                                elapsed.as_secs_f64() * 1000.0
+                            let elapsed_ms = t0.elapsed().as_secs_f64() * 1e3;
+                            let _ = lock.send(SimulationMessage::DebugLog(format!(
+                                "[{done}/{num_wl}] λ={wl:.1} nm  C_ext={:.3e}  {elapsed_ms:.1} ms",
+                                cs.extinction,
                             )));
                         }
                     }
@@ -551,79 +299,59 @@ impl LuminaApp {
                 })
                 .collect();
 
-            let spectra;
-            let peak_wl_idx;
-            let all_dipoles_at_peak: Vec<Dipole>;
-
-            match results {
+            // ── Collect results ──────────────────────────────────────────────
+            let (spectra, peak_dipoles, peak_wl) = match results {
                 Ok(pairs) => {
                     let mut peak_ext = 0.0_f64;
-                    let mut p_idx = 0;
+                    let mut peak_idx = 0;
                     let mut collected = Vec::with_capacity(pairs.len());
                     for (i, (cs, _)) in pairs.iter().enumerate() {
                         if cs.extinction > peak_ext {
                             peak_ext = cs.extinction;
-                            p_idx = i;
+                            peak_idx = i;
                         }
                         collected.push(cs.clone());
                     }
-                    let n_failed = collected.iter()
-                        .filter(|cs| cs.extinction.is_nan()).count();
-                    spectra = collected;
-                    peak_wl_idx = p_idx;
-                    all_dipoles_at_peak = pairs.into_iter().nth(p_idx)
-                        .map(|(_, d)| d).unwrap_or_default();
-                    if n_failed > 0 {
+                    let n_nan = collected.iter().filter(|cs| cs.extinction.is_nan()).count();
+                    if n_nan > 0 {
                         let _ = tx.send(SimulationMessage::DebugLog(format!(
-                            "WARNING: {}/{} wavelengths did not converge. \
-                             These points appear as NaN in the spectra. \
-                             Try reducing dipole spacing or increasing solver iterations.",
-                            n_failed, num_wl
+                            "WARNING: {n_nan}/{num_wl} wavelengths did not converge (NaN in output).",
                         )));
                     }
+                    let pw = wavelengths[peak_idx];
+                    let pd = pairs.into_iter().nth(peak_idx).map(|(_, d)| d).unwrap_or_default();
+                    (collected, pd, pw)
                 }
                 Err(e) => {
                     let _ = tx.send(SimulationMessage::Error(e));
                     return;
                 }
-            }
+            };
 
             dbg(format!(
-                "Spectra complete: {:.2}s total, peak C_ext at λ={:.1} nm",
+                "Spectra complete: {:.2} s, peak C_ext at λ={peak_wl:.1} nm",
                 sim_start.elapsed().as_secs_f64(),
-                wavelengths[peak_wl_idx]
             ));
 
-            // Compute near-field and far-field at the peak extinction wavelength
+            // ── Near-field + far-field at peak wavelength ────────────────────
             let mut near_field = None;
             let mut far_field = None;
 
-            if !all_dipoles_at_peak.is_empty() && !spectra.is_empty() {
-                let peak_wl = wavelengths[peak_wl_idx];
-                if let Ok(response) = solver.solve_dipoles(&all_dipoles_at_peak, peak_wl, &params) {
+            if !peak_dipoles.is_empty() {
+                if let Ok(response) = solver_x.solve_dipoles(&peak_dipoles, peak_wl, &params) {
+                    let plane_half = (half_extent * 2.0).max(20.0);
                     let plane = NearFieldPlane {
                         centre: [0.0, 0.0, 0.0],
                         normal: [0.0, 0.0, 1.0],
-                        half_width: shape_half_extent * 2.0,
-                        half_height: shape_half_extent * 2.0,
+                        half_width: plane_half,
+                        half_height: plane_half,
                         nx: 40,
                         ny: 40,
                     };
-                    if let Ok(nf_map) = solver.compute_near_field(
-                        &all_dipoles_at_peak,
-                        &response,
-                        &plane,
-                    ) {
-                        near_field = Some(nf_map);
+                    if let Ok(nf) = solver_x.compute_near_field(&peak_dipoles, &response, &plane) {
+                        near_field = Some(nf);
                     }
-
-                    let ff_map = solver.compute_far_field(
-                        &all_dipoles_at_peak,
-                        &response,
-                        36,
-                        72,
-                    );
-                    far_field = Some(ff_map);
+                    far_field = Some(solver_x.compute_far_field(&peak_dipoles, &response, 36, 72));
                 }
             }
 
@@ -634,7 +362,7 @@ impl LuminaApp {
 
 impl eframe::App for LuminaApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Poll for simulation results
+        // Poll for simulation results.
         if let Some(rx) = &self.result_rx {
             while let Ok(msg) = rx.try_recv() {
                 match msg {
@@ -662,30 +390,27 @@ impl eframe::App for LuminaApp {
             }
         }
 
-        // Request repaint while simulation is running
+        // Request repaint while simulation is running.
         if self.simulation_state.is_running {
             ctx.request_repaint();
         }
 
-        // Sidebar navigation
+        // Sidebar navigation.
         egui::SidePanel::left("nav_panel")
             .resizable(false)
-            .default_width(160.0)
+            .default_width(140.0)
             .show(ctx, |ui| {
                 ui.heading("Lumina");
                 ui.separator();
-
-                ui.selectable_value(&mut self.active_panel, Panel::Geometry, "Geometry");
-                ui.selectable_value(&mut self.active_panel, Panel::Materials, "Materials");
+                ui.selectable_value(&mut self.active_panel, Panel::Scene, "Scene");
                 ui.selectable_value(&mut self.active_panel, Panel::Simulation, "Simulation");
                 ui.selectable_value(&mut self.active_panel, Panel::Results, "Results");
             });
 
-        // Main content area
+        // Main content area.
         let should_launch = std::cell::Cell::new(false);
         egui::CentralPanel::default().show(ctx, |ui| match self.active_panel {
-            Panel::Geometry => self.geometry_state.ui(ui),
-            Panel::Materials => self.materials_state.ui(ui),
+            Panel::Scene => self.scene_panel.ui(ui),
             Panel::Simulation => {
                 self.simulation_state.ui(ui);
                 if self.simulation_state.launch_requested {

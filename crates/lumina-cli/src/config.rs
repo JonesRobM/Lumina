@@ -1,12 +1,14 @@
 //! TOML configuration deserialisation for simulation jobs.
 
+use lumina_geometry::scene::SceneSpec;
 use serde::Deserialize;
 
 /// Top-level job configuration.
 #[derive(Debug, Deserialize)]
 pub struct JobConfig {
     pub simulation: SimulationConfig,
-    pub geometry: GeometryConfig,
+    /// Multi-object scene: deserialises `[[geometry.object]]` arrays.
+    pub geometry: SceneSpec,
     #[serde(default)]
     pub output: OutputConfig,
 }
@@ -53,39 +55,6 @@ pub enum WavelengthSpec {
     },
 }
 
-/// Geometry configuration from TOML.
-#[derive(Debug, Deserialize)]
-pub struct GeometryConfig {
-    pub object: Vec<ObjectConfig>,
-}
-
-/// A single geometric object in the simulation.
-#[derive(Debug, Deserialize)]
-pub struct ObjectConfig {
-    pub name: String,
-    /// Material identifier (e.g. "Au_JC", "Ag_JC", "custom").
-    pub material: String,
-    /// Dipole spacing in nm.
-    pub dipole_spacing: f64,
-    /// Shape specification (inline primitive or file path).
-    #[serde(flatten)]
-    pub shape: ShapeConfig,
-}
-
-/// Shape specification: either a primitive or a file import.
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-pub enum ShapeConfig {
-    Primitive {
-        #[serde(rename = "type")]
-        shape_type: String,
-        #[serde(flatten)]
-        params: toml::Value,
-    },
-    File {
-        geometry_file: String,
-    },
-}
 
 /// Output configuration.
 #[derive(Debug, Deserialize)]

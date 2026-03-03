@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use num_complex::Complex64;
 use rayon::prelude::*;
 
@@ -14,15 +14,11 @@ use lumina_core::solver::{NearFieldPlane, OpticalSolver, SolverError};
 use lumina_core::types::{
     clausius_mossotti, radiative_correction, CrossSections, Dipole, NearFieldMap, SimulationParams,
 };
-use lumina_geometry::discretise::discretise_primitive;
-use lumina_geometry::primitives::{
-    Cuboid, Cylinder, Ellipsoid, Helix, Primitive, Sphere,
-};
 use lumina_materials::johnson_christy::JohnsonChristyMaterial;
 use lumina_materials::palik::PalikMaterial;
 use lumina_materials::provider::MaterialProvider;
 
-use crate::config::{JobConfig, ShapeConfig, WavelengthSpec};
+use crate::config::{JobConfig, WavelengthSpec};
 
 /// Results from a simulation run.
 pub struct SimulationOutput {
@@ -55,31 +51,17 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
         max_iterations: job.simulation.max_iterations,
     };
 
-    // Build dipoles from all geometry objects
-    let mut all_positions: Vec<[f64; 3]> = Vec::new();
-    let mut all_materials: Vec<String> = Vec::new();
-    let mut all_spacings: Vec<f64> = Vec::new();
+    // Build dipoles from the scene specification.
+    let geom = job.geometry.build_geometry()
+        .map_err(|e| anyhow::anyhow!("Geometry error: {}", e))?;
 
-    for obj in &job.geometry.object {
-        let primitive = build_primitive(&obj.shape, &obj.name)?;
-        let lattice = discretise_primitive(&primitive, obj.dipole_spacing);
-
+    for obj in &job.geometry.objects {
         println!(
-            "  Object '{}': {} dipoles (spacing={} nm, material={})",
-            obj.name,
-            lattice.len(),
-            obj.dipole_spacing,
-            obj.material
+            "  Object '{}': material={}, spacing={} nm",
+            obj.name, obj.material, obj.dipole_spacing
         );
-
-        for point in &lattice {
-            all_positions.push(point.position);
-            all_materials.push(obj.material.clone());
-            all_spacings.push(obj.dipole_spacing);
-        }
     }
-
-    let total_dipoles = all_positions.len();
+    let total_dipoles = geom.positions.len();
     println!("Total dipoles: {}", total_dipoles);
     if total_dipoles == 0 {
         anyhow::bail!("No dipoles generated — check geometry configuration");
@@ -115,13 +97,13 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
             let mut dipoles = Vec::with_capacity(total_dipoles);
             for i in 0..total_dipoles {
                 let epsilon = resolve_material_epsilon(
-                    &all_materials[i], wl, &gold, &silver, &copper, &tio2, &sio2,
+                    &geom.materials[i], wl, &gold, &silver, &copper, &tio2, &sio2,
                 )
                 .map_err(|e| anyhow::anyhow!("{}", e))?;
-                let volume = all_spacings[i].powi(3);
+                let volume = geom.spacings[i].powi(3);
                 let alpha_cm = clausius_mossotti(volume, epsilon, epsilon_m);
                 let alpha = radiative_correction(alpha_cm, k);
-                dipoles.push(Dipole::isotropic(all_positions[i], alpha));
+                dipoles.push(Dipole::isotropic(geom.positions[i], alpha));
             }
 
             let cs = match solver.compute_cross_sections(&dipoles, wl, &params) {
@@ -185,22 +167,20 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
         let mut peak_dipoles = Vec::with_capacity(total_dipoles);
         for i in 0..total_dipoles {
             let epsilon = resolve_material_epsilon(
-                &all_materials[i], peak_wl, &gold, &silver, &copper, &tio2, &sio2,
+                &geom.materials[i], peak_wl, &gold, &silver, &copper, &tio2, &sio2,
             )?;
-            let volume = all_spacings[i].powi(3);
+            let volume = geom.spacings[i].powi(3);
             let alpha_cm = clausius_mossotti(volume, epsilon, epsilon_m);
             let alpha = radiative_correction(alpha_cm, k_peak);
-            peak_dipoles.push(Dipole::isotropic(all_positions[i], alpha));
+            peak_dipoles.push(Dipole::isotropic(geom.positions[i], alpha));
         }
 
         match solver.solve_dipoles(&peak_dipoles, peak_wl, &params) {
             Ok(response) => {
                 // Estimate bounding radius of the structure for the observation plane
-                let half_extent = all_positions
+                let half_extent = geom.positions
                     .iter()
-                    .map(|p| {
-                        (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt()
-                    })
+                    .map(|p| (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt())
                     .fold(0.0_f64, f64::max);
                 let plane_half = (half_extent * 2.0).max(20.0);
 
@@ -232,99 +212,6 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
     Ok(SimulationOutput { spectra: all_spectra, near_field })
 }
 
-/// Build a Primitive from the TOML shape configuration.
-fn build_primitive(shape: &ShapeConfig, name: &str) -> Result<Primitive> {
-    match shape {
-        ShapeConfig::Primitive { shape_type, params } => match shape_type.as_str() {
-            "sphere" => {
-                let centre = extract_f64_array(params, "centre").unwrap_or([0.0, 0.0, 0.0]);
-                let radius = params
-                    .get("radius")
-                    .and_then(|v| v.as_float())
-                    .context(format!("Object '{}': sphere requires 'radius'", name))?;
-                Ok(Primitive::Sphere(Sphere { centre, radius }))
-            }
-            "cylinder" => {
-                let base_centre = extract_f64_array(params, "base_centre")
-                    .unwrap_or([0.0, 0.0, 0.0]);
-                let axis = extract_f64_array(params, "axis").unwrap_or([0.0, 0.0, 1.0]);
-                let radius = params
-                    .get("radius")
-                    .and_then(|v| v.as_float())
-                    .context(format!("Object '{}': cylinder requires 'radius'", name))?;
-                let length = params
-                    .get("length")
-                    .and_then(|v| v.as_float())
-                    .context(format!("Object '{}': cylinder requires 'length'", name))?;
-                Ok(Primitive::Cylinder(Cylinder { base_centre, axis, radius, length }))
-            }
-            "cuboid" => {
-                let centre = extract_f64_array(params, "centre").unwrap_or([0.0, 0.0, 0.0]);
-                let half_extents = extract_f64_array(params, "half_extents")
-                    .context(format!("Object '{}': cuboid requires 'half_extents = [hx, hy, hz]'", name))?;
-                Ok(Primitive::Cuboid(Cuboid { centre, half_extents }))
-            }
-            "ellipsoid" => {
-                let centre = extract_f64_array(params, "centre").unwrap_or([0.0, 0.0, 0.0]);
-                let semi_axes = extract_f64_array(params, "semi_axes")
-                    .context(format!("Object '{}': ellipsoid requires 'semi_axes = [a, b, c]'", name))?;
-                Ok(Primitive::Ellipsoid(Ellipsoid { centre, semi_axes }))
-            }
-            "helix" => {
-                let base_centre = extract_f64_array(params, "base_centre")
-                    .unwrap_or([0.0, 0.0, 0.0]);
-                let axis = extract_f64_array(params, "axis").unwrap_or([0.0, 0.0, 1.0]);
-                let radius = params
-                    .get("radius")
-                    .and_then(|v| v.as_float())
-                    .context(format!("Object '{}': helix requires 'radius'", name))?;
-                let pitch = params
-                    .get("pitch")
-                    .and_then(|v| v.as_float())
-                    .context(format!("Object '{}': helix requires 'pitch'", name))?;
-                let turns = params
-                    .get("turns")
-                    .and_then(|v| v.as_float())
-                    .context(format!("Object '{}': helix requires 'turns'", name))?;
-                let wire_radius = params
-                    .get("wire_radius")
-                    .and_then(|v| v.as_float())
-                    .context(format!("Object '{}': helix requires 'wire_radius'", name))?;
-                Ok(Primitive::Helix(Helix {
-                    base_centre,
-                    axis,
-                    radius,
-                    pitch,
-                    turns,
-                    wire_radius,
-                }))
-            }
-            other => anyhow::bail!(
-                "Unsupported shape type '{}' for object '{}'. Valid types: sphere, cylinder, cuboid, ellipsoid, helix",
-                other, name
-            ),
-        },
-        ShapeConfig::File { geometry_file } => {
-            anyhow::bail!(
-                "File-based geometry ('{}') not yet implemented for object '{}'",
-                geometry_file,
-                name
-            )
-        }
-    }
-}
-
-fn extract_f64_array(params: &toml::Value, key: &str) -> Option<[f64; 3]> {
-    let arr = params.get(key)?.as_array()?;
-    if arr.len() != 3 {
-        return None;
-    }
-    Some([
-        arr[0].as_float()?,
-        arr[1].as_float()?,
-        arr[2].as_float()?,
-    ])
-}
 
 /// Resolve the dielectric function for a material identifier at a given wavelength.
 fn resolve_material_epsilon(
@@ -372,7 +259,7 @@ pub fn write_spectra_csv(
     writeln!(file, "# environment_n: {}", job.simulation.environment_n)?;
 
     // List object materials and spacings
-    for obj in &job.geometry.object {
+    for obj in &job.geometry.objects {
         writeln!(
             file,
             "# object '{}': material={}, dipole_spacing={} nm",

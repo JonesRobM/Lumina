@@ -14,4 +14,5 @@
 pub mod discretise;
 pub mod parsers;
 pub mod primitives;
+pub mod scene;
 pub mod transform;
