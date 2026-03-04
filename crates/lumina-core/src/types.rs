@@ -86,6 +86,10 @@ pub struct SimulationParams {
     pub solver_tolerance: f64,
     /// Maximum iterations for iterative solvers.
     pub max_iterations: usize,
+    /// Bloch wavevector **k**∥ in nm⁻¹ (in-plane, for periodic structures).
+    /// Use `[0.0, 0.0, 0.0]` for the Γ point (normal incidence).
+    #[serde(default)]
+    pub k_bloch: [f64; 3],
 }
 
 impl Default for SimulationParams {
@@ -96,6 +100,7 @@ impl Default for SimulationParams {
             environment_n: 1.0,
             solver_tolerance: 1e-6,
             max_iterations: 1000,
+            k_bloch: [0.0, 0.0, 0.0],
         }
     }
 }
@@ -114,6 +119,41 @@ pub struct CrossSections {
     /// Circular dichroism ΔC_ext = C_ext(LCP) − C_ext(RCP) (nm²).
     /// `None` unless CD mode is enabled.
     pub circular_dichroism: Option<f64>,
+}
+
+/// Optical cross-sections at a single (wavelength, **k**∥) point.
+///
+/// Extends [`CrossSections`] with the in-plane Bloch wavevector for
+/// periodic-array dispersion calculations.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlochCrossSections {
+    /// Wavelength (nm).
+    pub wavelength_nm: f64,
+    /// In-plane Bloch wavevector **k**∥ (nm⁻¹).
+    pub k_parallel: [f64; 3],
+    /// Extinction cross-section (nm²).
+    pub extinction: f64,
+    /// Absorption cross-section (nm²).
+    pub absorption: f64,
+    /// Scattering cross-section (nm²).
+    pub scattering: f64,
+    /// Circular dichroism ΔC_ext (nm²). `None` unless CD mode is active.
+    pub circular_dichroism: Option<f64>,
+}
+
+/// Full dispersion map: cross-sections sampled on a 2D (ω, **k**∥) grid.
+///
+/// # Layout
+/// `data[i * k_points.len() + j]` is the response at
+/// `wavelengths_nm[i]` and `k_points[j]`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DispersionMap {
+    /// Wavelength grid (nm).
+    pub wavelengths_nm: Vec<f64>,
+    /// In-plane **k**∥ points (nm⁻¹).
+    pub k_points: Vec<[f64; 3]>,
+    /// Flattened array of cross-sections; length = wavelengths × k_points.
+    pub data: Vec<BlochCrossSections>,
 }
 
 /// Far-field radiation pattern sampled on the unit sphere.

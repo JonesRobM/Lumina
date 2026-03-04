@@ -14,6 +14,8 @@ use num_complex::Complex64;
 use rayon::prelude::*;
 
 use crate::types::{Dipole, IncidentField};
+use crate::solver::ewald::EwaldGreens;
+use lumina_geometry::lattice::LatticeSpec;
 
 /// Assemble the full $3N \times 3N$ interaction matrix.
 ///
@@ -22,12 +24,16 @@ use crate::types::{Dipole, IncidentField};
 /// since they are cheap.
 ///
 /// # Arguments
-/// * `dipoles` - Slice of dipoles with positions and polarisabilities.
-/// * `k` - Wavenumber in the medium (nm^{-1}).
-/// * `use_fcd` - If true, use the Filtered Coupled Dipole (volume-averaged)
-///   Green's function for near-field interactions. Requires `cell_size`.
-/// * `cell_size` - Dipole lattice spacing (nm). Used by FCD for the
-///   integration volume. Ignored if `use_fcd` is false.
+/// * `dipoles`  - Slice of dipoles with positions and polarisabilities.
+/// * `k`        - Wavenumber in the medium (nm⁻¹).
+/// * `use_fcd`  - If true, use the FCD volume-averaged Green's function for
+///   near-field interactions. Ignored for periodic assemblies.
+/// * `cell_size` - Dipole lattice spacing (nm). Used by FCD. Ignored if
+///   `use_fcd` is false.
+/// * `lattice`  - If `Some`, uses the periodic Ewald Green's function instead
+///   of the free-space Green's function.
+/// * `k_bloch`  - In-plane Bloch wavevector **k**∥ (nm⁻¹). Used only when
+///   `lattice` is `Some`. Pass `[0;3]` for the Γ point.
 ///
 /// # Returns
 /// The interaction matrix $\mathbf{A}$ such that $\mathbf{A}\mathbf{p} = \mathbf{E}_{\text{inc}}$.
@@ -36,12 +42,16 @@ pub fn assemble_interaction_matrix(
     k: f64,
     use_fcd: bool,
     cell_size: f64,
+    lattice: Option<&LatticeSpec>,
+    k_bloch: [f64; 3],
 ) -> Array2<Complex64> {
     let n = dipoles.len();
     let dim = 3 * n;
     let mut matrix = Array2::<Complex64>::zeros((dim, dim));
 
-    // Diagonal blocks: inverse polarisability (cheap, sequential)
+    // Diagonal blocks: inverse polarisability (cheap, sequential).
+    // For periodic arrays, the Ewald self-image sum (R≠0) is added to the
+    // diagonal in the off-diagonal loop below (i==j, R≠0 lattice images).
     for i in 0..n {
         let inv_alpha = invert_3x3(&dipoles[i].polarisability);
         for row in 0..3 {
@@ -51,20 +61,37 @@ pub fn assemble_interaction_matrix(
         }
     }
 
-    // Off-diagonal blocks: -G(r_i, r_j), computed in parallel.
+    // Off-diagonal blocks: −G(r_i, r_j), computed in parallel.
+    // For periodic systems, each off-diagonal block also includes the sum
+    // over lattice images via EwaldGreens.
     //
-    // Each dipole i owns rows [3i, 3i+2] which are disjoint from all other
-    // dipoles, so we can write directly into the matrix from parallel threads
-    // using raw pointer arithmetic (no data races).
-    //
-    // The pointer is cast to usize for Send+Sync capture in the closure.
+    // SAFETY: each Rayon thread handles a unique row-block i, so writes to
+    // rows [3i..3i+2] are data-race-free.
     let matrix_ptr = matrix.as_mut_ptr() as usize;
-    let stride = dim; // row-major stride for C-contiguous ndarray
+    let stride = dim;
+
+    // Wrap the optional lattice in an Arc so the Rayon closure can share it.
+    let ewald: Option<std::sync::Arc<EwaldGreens>> = lattice
+        .map(|lat| std::sync::Arc::new(EwaldGreens::new(lat.clone())));
 
     (0..n).into_par_iter().for_each(|i| {
+        // Clone the Arc for this thread (cheap — increments ref-count only).
+        let ewald_ref = ewald.as_ref().map(std::sync::Arc::as_ref);
+
         for j in 0..n {
-            if i == j { continue; }
-            let g = if use_fcd {
+            let g = if let Some(eg) = ewald_ref {
+                // Periodic: sum over all lattice images of j.
+                // When i==j, the R=0 self-interaction is excluded inside EwaldGreens
+                // (only the non-zero image contributions are included).
+                let r = [
+                    dipoles[i].position[0] - dipoles[j].position[0],
+                    dipoles[i].position[1] - dipoles[j].position[1],
+                    dipoles[i].position[2] - dipoles[j].position[2],
+                ];
+                eg.evaluate(r, k_bloch, k)
+            } else if i == j {
+                continue; // free-space: skip self-interaction
+            } else if use_fcd {
                 super::greens::dyadic_greens_tensor_filtered(
                     &dipoles[i].position,
                     &dipoles[j].position,
@@ -78,14 +105,15 @@ pub fn assemble_interaction_matrix(
                     k,
                 )
             };
-            // Write -G block directly into rows [3i..3i+2], columns [3j..3j+2].
-            // SAFETY: each thread handles a unique i, so row groups are disjoint.
-            // The matrix is C-contiguous (row-major), so element [r,c] is at r*dim+c.
+
+            // For periodic i==j, g contains only lattice-image contributions
+            // (no R=0 term). Write as −G into the matrix.
+            // For free-space i≠j, this is the usual −G(r_i,r_j).
             for (row, g_row) in g.iter().enumerate() {
                 for (col, &g_val) in g_row.iter().enumerate() {
                     unsafe {
                         let offset = (3 * i + row) * stride + (3 * j + col);
-                        *(matrix_ptr as *mut Complex64).add(offset) = -g_val;
+                        *(matrix_ptr as *mut Complex64).add(offset) -= g_val;
                     }
                 }
             }

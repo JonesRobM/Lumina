@@ -12,6 +12,7 @@
 //!   mirror operations.
 
 pub mod discretise;
+pub mod lattice;
 pub mod parsers;
 pub mod primitives;
 pub mod scene;

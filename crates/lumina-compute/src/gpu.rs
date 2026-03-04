@@ -233,10 +233,22 @@ impl GpuBackend {
     /// the bind group, then releases the lock. All subsequent GPU operations
     /// on the session take the lock only for the duration of each matvec.
     pub fn new_session(&self, n: usize) -> Result<GpuSession, ComputeError> {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
 
         let vec_size = (n * std::mem::size_of::<[f32; 2]>()) as u64;
         let mat_size = (n * n * std::mem::size_of::<[f32; 2]>()) as u64;
+
+        // Guard against exceeding the GPU's max buffer size before allocating.
+        // Returning Err here causes create_session to return None, falling back to CPU.
+        let max_buf = state.device.limits().max_buffer_size;
+        if mat_size > max_buf {
+            return Err(ComputeError::DeviceError(format!(
+                "Matrix buffer ({} MB) exceeds GPU limit ({} MB) for n={}; using CPU GMRES",
+                mat_size / 1_048_576,
+                max_buf / 1_048_576,
+                n,
+            )));
+        }
 
         let matrix_buf = state.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("session_matrix"),
@@ -328,7 +340,7 @@ impl MatvecSession for GpuSession {
             )));
         }
         let data = matrix_to_f32(matrix);
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         state.queue.write_buffer(&self.matrix_buf, 0, bytemuck::cast_slice(&data));
         Ok(())
     }
@@ -351,7 +363,7 @@ impl MatvecSession for GpuSession {
         let vec_size = (self.dim * std::mem::size_of::<[f32; 2]>()) as u64;
 
         // Lock for the entire GPU operation — serialises concurrent wavelength threads.
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
 
         // Write input vector (reuses pre-allocated buffer).
         state.queue.write_buffer(&self.input_buf, 0, bytemuck::cast_slice(&input_data));

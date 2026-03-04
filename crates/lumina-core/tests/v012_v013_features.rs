@@ -39,6 +39,7 @@ fn default_params() -> SimulationParams {
         environment_n: 1.0,
         solver_tolerance: 1e-8,
         max_iterations: 500,
+        k_bloch: [0.0, 0.0, 0.0],
     }
 }
 

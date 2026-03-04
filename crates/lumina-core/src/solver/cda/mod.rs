@@ -25,6 +25,7 @@ use num_complex::Complex64;
 use super::{NearFieldPlane, OpticalSolver, SolverError};
 use crate::types::{CrossSections, Dipole, DipoleResponse, FarFieldMap, IncidentField, NearFieldMap, SimulationParams};
 use lumina_compute::{ComputeBackend, CpuBackend};
+use lumina_geometry::lattice::LatticeSpec;
 
 /// The CDA solver, holding configuration for the numerical method.
 pub struct CdaSolver {
@@ -35,12 +36,15 @@ pub struct CdaSolver {
     /// Whether to use the Filtered Coupled Dipole (FCD) Green's function.
     /// FCD volume-averages the Green's tensor over each source cell, smoothing
     /// the 1/R³ near-field singularity that causes staircase artefacts for
-    /// metallic particles.
+    /// metallic particles. Ignored for periodic assemblies.
     pub use_fcd: bool,
     /// Dipole lattice spacing (nm). Required for FCD integration volume.
     pub cell_size: f64,
     /// Compute backend for matrix-vector products and parallel operations.
     pub backend: Arc<dyn ComputeBackend>,
+    /// Periodic lattice specification. When `Some`, the Ewald periodic
+    /// Green's function replaces the free-space dyadic Green's function.
+    pub lattice: Option<LatticeSpec>,
 }
 
 impl Default for CdaSolver {
@@ -51,6 +55,7 @@ impl Default for CdaSolver {
             use_fcd: true,
             cell_size: 3.0,
             backend: Arc::new(CpuBackend::new()),
+            lattice: None,
         }
     }
 }
@@ -63,6 +68,7 @@ impl CdaSolver {
             use_fcd: true,
             cell_size: 3.0,
             backend: Arc::new(CpuBackend::new()),
+            lattice: None,
         }
     }
 
@@ -74,6 +80,7 @@ impl CdaSolver {
             use_fcd,
             cell_size,
             backend: Arc::new(CpuBackend::new()),
+            lattice: None,
         }
     }
 
@@ -85,6 +92,7 @@ impl CdaSolver {
             use_fcd,
             cell_size,
             backend: Arc::new(CpuBackend::new()),
+            lattice: None,
         }
     }
 
@@ -96,6 +104,7 @@ impl CdaSolver {
             use_fcd,
             cell_size,
             backend,
+            lattice: None,
         }
     }
 
@@ -183,7 +192,14 @@ impl OpticalSolver for CdaSolver {
         let n = dipoles.len();
 
         // Assemble the interaction matrix
-        let matrix = assembly::assemble_interaction_matrix(dipoles, k, self.use_fcd, self.cell_size);
+        let matrix = assembly::assemble_interaction_matrix(
+            dipoles,
+            k,
+            self.use_fcd,
+            self.cell_size,
+            self.lattice.as_ref(),
+            params.k_bloch,
+        );
 
         // Build the RHS (incident field at each dipole)
         let rhs = assembly::build_incident_field_vector(dipoles, &self.incident_field, k);

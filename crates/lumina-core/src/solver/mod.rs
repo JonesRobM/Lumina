@@ -6,6 +6,7 @@
 //! the same trait.
 
 pub mod cda;
+pub mod ewald;
 
 use crate::types::{CrossSections, Dipole, DipoleResponse, FarFieldMap, NearFieldMap, SimulationParams};
 use thiserror::Error;

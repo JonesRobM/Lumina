@@ -18,7 +18,7 @@
 //! - [`fields`] — Near-field and far-field computation.
 //! - [`mie`] — Analytical Mie theory for validation.
 //! - [`nonlinear`] — SHG/THG source terms (stub).
-//! - [`periodic`] — Ewald summation for periodic structures (stub).
+//! - [`solver::ewald`] — Ewald-accelerated periodic Green's function.
 //! - [`time_domain`] — Time-domain field reconstruction (stub).
 
 pub mod fields;
@@ -28,3 +28,7 @@ pub mod periodic;
 pub mod solver;
 pub mod time_domain;
 pub mod types;
+
+// Re-export frequently used periodic-array types for convenience.
+pub use solver::ewald::EwaldGreens;
+pub use types::{BlochCrossSections, DispersionMap};

@@ -49,6 +49,7 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
         environment_n: job.simulation.environment_n,
         solver_tolerance: job.simulation.solver_tolerance,
         max_iterations: job.simulation.max_iterations,
+        k_bloch: [0.0, 0.0, 0.0],
     };
 
     // Build dipoles from the scene specification.
