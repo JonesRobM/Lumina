@@ -1,94 +1,89 @@
 
 <p align="center">
-  <img src="docs/images/Logo.png" alt="PhysBound" width="400">
+  <img src="docs/images/Logo.png" alt="Lumina" width="400">
 </p>
 
 <h1 align="center">Lumina</h1>
 
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-86%20passing-brightgreen.svg)](https://github.com/jonesrobm/lumina)
+[![Tests](https://img.shields.io/badge/tests-71%20passing-brightgreen.svg)](https://github.com/jonesrobm/lumina)
 [![Documentation](https://img.shields.io/badge/docs-mdBook-blue.svg)](docs/)
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20Development-ff5e5b?logo=ko-fi&logoColor=white)](https://ko-fi.com/jonesrobm)
 
 > High-performance electromagnetic simulations for nanophotonics using the Coupled Dipole Approximation
 
-Lumina is a Rust-based framework for computing the linear and nonlinear optical response of nanostructured materials. It implements the Coupled Dipole Approximation (CDA) with state-of-the-art numerical methods, providing accurate extinction, absorption, and scattering cross-sections for metallic and dielectric nanoparticles.
+Lumina is a Rust framework for computing the linear optical response of nanostructured materials. It implements the Coupled Dipole Approximation (CDA) with state-of-the-art numerical methods and GPU acceleration, providing accurate extinction, absorption, and scattering cross-sections for metallic and dielectric nanoparticles — from simple spheres to complex multi-shell assemblies on substrates.
 
 <p align="center">
   <img src="docs/images/gui_overview.svg" alt="Lumina GUI" width="800"/>
 </p>
 
 <p align="center">
-  <em>Interactive GUI dashboard with real-time parameter updates and dipole lattice preview</em>
+  <em>Interactive GUI dashboard with real-time spectra, near-field heatmaps, and dipole lattice preview</em>
 </p>
+
+---
+
+## What's New in v0.3.0
+
+- **CoreShell geometry** — concentric shell nanoparticles with independent materials per layer
+- **Anisotropic ellipsoid dipoles** — per-dipole 3×3 polarisability tensors from depolarisation factors; correctly captures orientation-dependent plasmon resonances of prolate/oblate particles
+- **Substrate image-dipole** — model nanostructures on a flat dielectric substrate (Fresnel quasi-static approximation), available in both CLI and GUI
+- **Periodic structures** — 1D chain and 2D planar lattice sums with Bloch boundary conditions for metasurfaces and gratings
+- **Complex scene assembly** — multi-object TOML scenes with per-object transforms (position, rotation, scale)
+- **Persistent GPU session buffers** — matrix uploaded once per wavelength; per-matvec allocations eliminated
 
 ---
 
 ## Features
 
-### v0.2.1 (Current)
+### Physics
 
-- **Accurate Physics**
-  - Full dyadic Green's function for electromagnetic interactions
-  - Clausius-Mossotti polarisability with radiative reaction correction (RRCM)
-  - Filtered Coupled Dipole (FCD) for improved metallic particle accuracy
-  - Far-field radiation patterns (E-plane / H-plane polar plots)
-  - Circular dichroism ΔC_ext computation
-  - Validated against Mie theory (<15% error for dielectrics, <30% for Au interband region)
+- Full dyadic Green's function with Filtered Coupled Dipole (FCD) near-field correction
+- Clausius–Mossotti polarisability with radiative reaction correction (RRCM)
+- Anisotropic 3×3 polarisability tensors for ellipsoidal particles (depolarisation factors via 16-point Gauss–Legendre quadrature)
+- CoreShell geometry with arbitrary concentric layers, each with independent material
+- Substrate image-dipole correction (quasi-static Fresnel: Δε = (ε_sub − ε_env)/(ε_sub + ε_env))
+- Periodic lattice sums (1D chain, 2D planar) with Bloch wavevector support
+- Far-field radiation patterns (E-plane / H-plane polar plots)
+- Circular dichroism ΔC_ext for chiral structures
+- Near-field |E|² maps on arbitrary observation planes
+- Validated against Mie theory: < 15% for dielectrics, < 30% for Au interband region
 
-- **Scalable Solvers**
-  - Direct LU decomposition (LAPACK via `faer`) for N ≤ 1000 dipoles
-  - GMRES(m) iterative solver for N > 1000 (agrees with direct to 10⁻¹³ relative error)
-  - Automatic solver selection based on system size
-  - GPU-accelerated GMRES matvec via wgpu compute shaders (optional `--features gpu`)
+### Solvers
 
-- **High Performance** (new in v0.2.1)
-  - Parallel wavelength sweep in both GUI and CLI (rayon)
-  - Stack-allocated Green's tensors (zero heap allocation in the inner N² loop)
-  - Direct-write matrix assembly (eliminates intermediate buffer allocation)
-  - Auto-detected nearest-neighbour distance for XYZ imports (correct FCD cell size)
+- Direct LU decomposition (`faer`) for N ≤ 1000 dipoles
+- GMRES(m=30) iterative solver for N > 1000 (agrees with direct to 10⁻¹³ relative error)
+- GPU-accelerated GMRES matvec via wgpu compute shaders (optional, `--features gpu`)
+- Persistent GPU session buffers — matrix uploaded once per wavelength solve
+- Rayon-parallel wavelength sweep across all CPU cores (GUI and CLI)
 
-- **Materials Library**
-  - Johnson & Christy (1972) optical data for Au, Ag, Cu (188–892 nm, 43 data points)
-  - Palik handbook data for TiO₂ and SiO₂ (300–1000 nm)
-  - Cubic spline interpolation for smooth ε(λ) curves
-  - Custom material support (constant n + ik)
+### Materials
 
-- **Geometry**
-  - Primitives: sphere, cylinder, cuboid, ellipsoid, helix
-  - Centred cubic lattice discretisation (critical for metallic accuracy)
-  - .xyz file import for atomistic structures (e.g. nanoparticle coordinates from DFT or MD)
-  - OBJ mesh import (volume-filling dipole lattice via ray-casting)
-  - Supplied example: Au Mackay icosahedron (k=6, 923 atoms)
+- Johnson & Christy (1972): Au, Ag, Cu — 43 data points, 188–892 nm
+- Palik handbook: TiO₂, SiO₂ — 300–1000 nm
+- Cubic spline interpolation for smooth ε(λ)
 
-- **Interactive GUI** (`lumina-gui`)
-  - Real-time spectra plotting (C_ext, C_abs, C_sca vs λ)
-  - Far-field polar plots and circular dichroism spectra
-  - Dielectric function ε(λ) visualisation
-  - Near-field |E|² heatmaps on observation planes
-  - 2D dipole lattice scatter preview (XY/XZ/YZ projections)
-  - File dialog export (CSV/JSON) with metadata headers
-  - Incident polarisation selector (x-pol / y-pol / circular)
-  - Directory-scoped file browser for .xyz/.obj import (new in v0.2.1)
-  - Debug output toggle with per-wavelength solver diagnostics (new in v0.2.1)
+### Geometry
 
-- **Command-Line Interface** (`lumina-cli`)
-  - TOML-based configuration for batch processing
-  - All geometry types and materials supported
-  - HPC-ready for cluster environments
-  - CSV and JSON export with metadata
+- Primitives: sphere, cylinder, cuboid, ellipsoid, helix
+- CoreShell: sphere/cylinder/cuboid/ellipsoid core with any number of shell layers
+- `.xyz` import — treat each atom as a dipole (Å→nm auto-conversion, nearest-neighbour auto-detection)
+- `.obj` mesh import — volume-filling dipole lattice via ray-casting
+- Multi-object scenes: independent position, rotation (Euler XYZ), and scale per object
+- Supplied example: Au Mackay icosahedron (k=6, 923 atoms, `examples/au_icosahedron_k6.xyz`)
 
 ---
 
-## Quick Start
+## Installation
 
 ### Prerequisites
 
-- Rust 1.75 or later ([Install Rust](https://www.rust-lang.org/tools/install))
-- (Optional) A BLAS library for accelerated linear algebra
+- Rust 1.75 or later ([rustup.rs](https://rustup.rs))
+- (GPU only) A Vulkan/Metal/DX12-capable GPU driver — no additional SDK required
 
-### Installation
+### Build (CPU only)
 
 ```bash
 git clone https://github.com/JonesRobM/lumina.git
@@ -96,277 +91,355 @@ cd lumina
 cargo build --release
 ```
 
-### Run the GUI
+### Build with GPU acceleration
 
 ```bash
-cargo run --release --bin lumina-gui
+cargo build --release --features gpu
 ```
 
-### Run a CLI Simulation
+The `gpu` feature enables wgpu compute shaders for GMRES matrix-vector products. The build otherwise identical — no CUDA toolkit, no separate driver installation. GPU is used automatically when available; falls back to CPU otherwise.
+
+---
+
+## Quick Start: GUI
 
 ```bash
-cargo run --release --bin lumina-cli -- examples/gold_sphere.toml
+cargo run --release -p lumina-gui
+# with GPU:
+cargo run --release -p lumina-gui --features gpu
 ```
 
-Example TOML configuration:
+The GUI has three panels:
+
+| Panel | Purpose |
+|-------|---------|
+| **Scene** | Define geometry objects, materials, file imports, and transforms |
+| **Simulation** | Set wavelength range, environment, polarisation, substrate, and compute backend |
+| **Results** | View spectra (C_ext/C_abs/C_sca), near-field heatmap, far-field polar plot, export CSV/JSON |
+
+**Typical workflow:**
+1. **Scene panel** — add an object (`+`), choose shape type, set radius/semi-axes/etc., choose material, set dipole spacing
+2. **Simulation panel** — set wavelength range (e.g. 400–900 nm, 100 points), environment refractive index
+3. Optionally enable **Substrate** (material + interface z-position) or **GPU**
+4. Click **Run Simulation** — progress bar tracks the parallel wavelength sweep
+5. **Results panel** appears automatically on completion
+
+---
+
+## Quick Start: CLI
+
+Create a TOML configuration file and pass it to `lumina-cli`:
+
+```bash
+cargo run --release -p lumina-cli -- run job.toml
+# with GPU:
+cargo run --release -p lumina-cli --features gpu -- run job.toml
+```
+
+### Minimal example — gold nanosphere
+
+Save as `gold_sphere.toml`:
 
 ```toml
 [simulation]
-wavelength_start = 400.0  # nm
-wavelength_end = 800.0
-num_wavelengths = 50
-environment_n = 1.0       # vacuum
+wavelengths = { range = [400.0, 900.0], points = 100 }
+environment_n = 1.0
 
-[geometry]
-type = "Sphere"
-radius = 10.0             # nm
-dipole_spacing = 2.0      # nm
-
-[material]
-type = "GoldJC"           # Johnson & Christy Au data
-
-[solver]
-use_fcd = true            # Filtered Coupled Dipole
-iterative_threshold = 1000
+[[geometry.object]]
+name = "Au_sphere"
+type = "sphere"
+radius = 20.0
+material = "Au_JC"
+dipole_spacing = 2.0
 
 [output]
-path = "output/gold_sphere.csv"
+directory = "./output"
+save_spectra = true
 ```
 
----
+Run:
 
-## Example: Gold Nanosphere
-
-<p align="center">
-  <img src="docs/images/spectra_plot.svg" alt="Spectra Plot" width="700"/>
-</p>
-
-```rust
-use lumina_core::solver::cda::CdaSolver;
-use lumina_core::solver::OpticalSolver;
-use lumina_core::types::{clausius_mossotti, radiative_correction, Dipole, SimulationParams};
-use lumina_geometry::discretise::discretise_primitive;
-use lumina_geometry::primitives::{Primitive, Sphere};
-use lumina_materials::johnson_christy::JohnsonChristyMaterial;
-use lumina_materials::provider::MaterialProvider;
-
-fn main() {
-    // Define geometry
-    let sphere = Primitive::Sphere(Sphere {
-        centre: [0.0, 0.0, 0.0],
-        radius: 10.0, // nm
-    });
-    let spacing = 2.0;
-    let lattice = discretise_primitive(&sphere, spacing);
-
-    // Material: Johnson & Christy gold
-    let gold = JohnsonChristyMaterial::gold();
-    let wavelength = 520.0; // nm
-    let epsilon = gold.dielectric_function(wavelength).unwrap();
-
-    // Build dipoles with RRCM polarisability
-    let k = 2.0 * std::f64::consts::PI / wavelength;
-    let dipoles: Vec<Dipole> = lattice
-        .iter()
-        .map(|p| {
-            let alpha_cm = clausius_mossotti(spacing.powi(3), epsilon, 1.0);
-            let alpha = radiative_correction(alpha_cm, k);
-            Dipole::isotropic(p.position, alpha)
-        })
-        .collect();
-
-    // Solve with FCD
-    let solver = CdaSolver::with_fcd(1000, true, spacing);
-    let params = SimulationParams::default();
-    let cs = solver.compute_cross_sections(&dipoles, wavelength, &params).unwrap();
-
-    println!("Extinction: {:.2e} nm²", cs.extinction);
-    println!("Absorption: {:.2e} nm²", cs.absorption);
-    println!("Scattering: {:.2e} nm²", cs.scattering);
-}
+```bash
+cargo run --release -p lumina-cli -- run gold_sphere.toml
 ```
 
-**Output:**
-```
-Extinction: 1.19e2 nm²
-Absorption: 1.02e2 nm²
-Scattering: 1.73e1 nm²
-```
-
----
-
-## Example: Au Icosahedron from XYZ File
-
-Lumina can treat each atom in an `.xyz` file as an interacting dipole, allowing direct simulation of atomistic nanoparticle geometries from DFT relaxations, MD snapshots, or crystallographic generators.
-
-A 923-atom Au Mackay icosahedron (k=6 shells) is included at `examples/au_icosahedron_k6.xyz`:
+Output in `./output/spectra.csv`:
 
 ```
-923
-Au Mackay icosahedron, k=6 shells, 923 atoms, nn=2.884 A
-Au 0.000000 0.000000 0.000000
-Au 0.000000 1.515988 2.452921
-Au 0.000000 1.515988 -2.452921
+# Lumina v0.3.0 | object: Au_sphere | material: Au_JC | spacing: 2.0 nm
+wavelength_nm,extinction_nm2,absorption_nm2,scattering_nm2
+400.0,3.21e2,2.87e2,3.40e1
+...
+520.0,1.19e2,1.02e2,1.73e1
 ...
 ```
 
-**GUI workflow:**
-1. Launch `cargo run --release -p lumina-gui`
-2. Geometry panel → select **Import File** → **Set folder...** → pick the `examples/` directory
-3. Select `au_icosahedron_k6.xyz` from the dropdown
-4. Materials panel → select **Gold (J&C)**
-5. Simulation panel → set wavelength range (e.g. 400–800 nm), enable **Debug output** to monitor per-wavelength progress
-6. Click **Run Simulation** — wavelengths are solved in parallel across all CPU cores
+---
 
-**CLI workflow:**
+## Worked Example: Au–SiO₂ Core-Shell on a Glass Substrate
 
-```bash
-# The CLI currently supports primitive geometry. For XYZ files, use the GUI.
-# CLI XYZ import is planned for v0.3.0.
+This example demonstrates three v0.3.0 features together: CoreShell geometry, a dielectric substrate, and multi-object transforms.
+
+Save as `coreshell_on_substrate.toml`:
+
+```toml
+[simulation]
+wavelengths = { range = [400.0, 900.0], points = 150 }
+environment_n = 1.33   # water
+
+[simulation.substrate]
+material = "SiO2_Palik"
+z_interface = -22.0    # nm — structure sits just above the glass surface
+
+[[geometry.object]]
+name = "Au-SiO2_core-shell"
+type = "coreshell"
+dipole_spacing = 2.0
+
+[geometry.object.core_shape]
+type = "sphere"
+radius = 15.0          # nm Au core
+
+core_material = "Au_JC"
+
+[[geometry.object.shells]]
+thickness = 5.0        # nm SiO2 shell
+material = "SiO2_Palik"
+
+[geometry.object.transform]
+position = [0.0, 0.0, 0.0]
+
+[output]
+directory = "./output/coreshell"
+save_spectra = true
+save_near_field = true
 ```
 
-**Key details:**
-- Coordinates in the `.xyz` file are in Angstroms; Lumina converts to nm automatically (1 A = 0.1 nm)
-- The nearest-neighbour distance is auto-detected from the atomic positions and used as the FCD cell size and Clausius-Mossotti volume
-- For the k=6 Au icosahedron: nn = 0.288 nm, particle diameter ~ 1.6 nm, 923 dipoles → 2769 x 2769 system
-- With debug output enabled, the log shows per-wavelength ε, C_ext, and solve time
+Run:
+
+```bash
+cargo run --release -p lumina-cli -- run coreshell_on_substrate.toml
+```
+
+The simulation will:
+1. Discretise a 15 nm Au sphere surrounded by a 5 nm SiO₂ shell (dipole spacing 2 nm → ~2800 dipoles)
+2. Add the SiO₂ substrate image-dipole correction at z = −22 nm
+3. Solve 150 wavelengths in parallel across all CPU cores
+4. Write `spectra.csv` and a near-field heatmap at peak extinction
 
 ---
 
-## Documentation
+## Advanced Features
 
-Comprehensive documentation is available in the `docs/` directory (built with mdBook):
+### Anisotropic Ellipsoids
 
-```bash
-cd docs
-mdbook serve --open
+Ellipsoidal objects automatically use a per-dipole 3×3 polarisability tensor. Set semi-axes and an Euler rotation to orient the particle in the lab frame:
+
+```toml
+[[geometry.object]]
+name = "Au_nanorod"
+type = "ellipsoid"
+semi_axes = [30.0, 8.0, 8.0]   # prolate: long axis along x
+material = "Au_JC"
+dipole_spacing = 2.0
+
+[geometry.object.transform]
+rotation_deg = [0.0, 45.0, 0.0]   # tilt 45° around y
 ```
 
-Key sections:
-- [Theory](docs/src/theory/): CDA formulation, Green's functions, polarisability prescriptions
-- [Validation](docs/src/theory/validation.md): Mie theory benchmarks, accuracy analysis
-- [Architecture](docs/src/developer/architecture.md): Crate structure, trait design
-- [Roadmap](docs/src/roadmap/versions.md): Version history and future plans
+Depolarisation factors L_x, L_y, L_z are computed analytically via 16-point Gauss–Legendre quadrature (exact for spheres, ~1 ppm accuracy for aspect ratios up to 20:1).
+
+### Periodic Structures
+
+Model a 1D grating or 2D metasurface using lattice sums with Bloch boundary conditions:
+
+```toml
+[simulation]
+wavelengths = { range = [400.0, 900.0], points = 100 }
+k_bloch = [0.005, 0.0, 0.0]   # nm⁻¹, oblique incidence
+
+[lattice]
+type = "planar"
+a1 = [50.0, 0.0, 0.0]   # nm
+a2 = [0.0, 50.0, 0.0]
+
+[[geometry.object]]
+name = "Au_disk"
+type = "cylinder"
+length = 20.0
+radius = 15.0
+material = "Au_JC"
+dipole_spacing = 2.0
+```
+
+### Multi-Object Dimers
+
+Assemble a dimer with precise inter-particle separation:
+
+```toml
+[[geometry.object]]
+name = "particle_A"
+type = "sphere"
+radius = 15.0
+material = "Au_JC"
+dipole_spacing = 2.0
+[geometry.object.transform]
+position = [-20.0, 0.0, 0.0]
+
+[[geometry.object]]
+name = "particle_B"
+type = "sphere"
+radius = 15.0
+material = "Au_JC"
+dipole_spacing = 2.0
+[geometry.object.transform]
+position = [20.0, 0.0, 0.0]
+```
+
+### XYZ Atomistic Import
+
+```toml
+[[geometry.object]]
+name = "Au_icosahedron"
+type = "file"
+path = "examples/au_icosahedron_k6.xyz"
+material = "Au_JC"
+dipole_spacing = 0.0   # 0 = auto-detect nearest-neighbour distance
+
+[species_map]
+Au = "Au_JC"
+```
+
+---
+
+## GPU Acceleration
+
+Build and run with GPU support:
+
+```bash
+# GUI
+cargo run --release -p lumina-gui --features gpu
+
+# CLI
+cargo run --release -p lumina-cli --features gpu -- run job.toml
+```
+
+In the GUI, toggle **GPU** in the Simulation panel. In the CLI TOML:
+
+```toml
+[simulation]
+backend = "gpu"    # "auto" (default) | "cpu" | "gpu"
+```
+
+**Implementation details:**
+- wgpu compute shaders (Vulkan/Metal/DX12 — no CUDA required)
+- Matrix assembled on CPU (Rayon), matvec offloaded to GPU for all GMRES iterations
+- Persistent session buffers: matrix written to GPU once per wavelength, reused for all ~300 GMRES iterations
+- GPU uses f32 arithmetic; Arnoldi vectors and Givens rotations stay f64 on CPU
+- GMRES residual floor on GPU: ~1e-7 (use `solver_tolerance = 1e-6`)
+- At N ≤ 3000, GPU is slower than CPU due to transfer overhead; speedup expected at N > 5000
 
 ---
 
 ## Validation
 
-<p align="center">
-  <img src="docs/images/nearfield_heatmap.svg" alt="Near-field Map" width="450"/>
-</p>
-
-<p align="center">
-  <em>Near-field intensity distribution around a 10nm gold sphere at resonance</em>
-</p>
-
-Lumina is rigorously validated against analytical Mie theory:
+Lumina is benchmarked against analytical Mie theory:
 
 <p align="center">
   <img src="docs/images/mie_comparison.svg" alt="Mie Theory Comparison" width="800"/>
 </p>
 
-<p align="center">
-  <em>Validation against Mie theory showing excellent agreement in the interband region (420–510 nm)</em>
-</p>
+| Material | Wavelength range | CDA error |
+|----------|-----------------|-----------|
+| Dielectric (TiO₂-like, ε = 4 + 0i) | 500–700 nm | < 15% |
+| Lossy dielectric (ε = 4 + 0.5i) | 500–700 nm | < 16% |
+| Au interband (FCD, d = 2 nm) | 420–510 nm | < 25% |
+| Au Drude (> 550 nm) | 550+ nm | > 80%* |
 
-| Material | ε | Wavelength Range | CDA Error |
-|----------|---|------------------|-----------|
-| **Dielectric (TiO₂-like)** | 4.0 + 0.0i | 500–700 nm | < 15% |
-| **Lossy dielectric** | 4.0 + 0.5i | 500–700 nm | < 16% |
-| **Au (interband)** | Complex | 420–510 nm | < 25% |
-| **Au (Drude, FCD)** | Complex | 550+ nm | 80–300%* |
-
-*The Drude region requires d < 1 nm or surface-averaging methods (planned for v0.3.0).
+*The Drude region error is a known limitation of the point-dipole staircase approximation on coarse grids. Surface averaging is planned for a future release.
 
 Run the full test suite:
 
 ```bash
-cargo test --workspace --release
+cargo test --workspace
 ```
 
 ---
 
 ## Roadmap
 
-### v0.1.x — Foundation
-- **v0.1.0**: Direct LU solver, GUI, CLI, Mie validation
-- **v0.1.1**: GMRES iterative solver, FCD Green's function, cylinder/helix geometry
-- **v0.1.2**: egui_plot spectra, ε(λ) curves, near-field heatmaps, dipole scatter preview
-- **v0.1.3**: Far-field radiation, circular dichroism, CSV/JSON export, Palik TiO₂/SiO₂, OBJ mesh parser
+### Released
 
-### v0.2.x — GPU & Performance
-- **v0.2.0**: wgpu compute shaders for GMRES matvec, GPU/CPU backend abstraction
-- **v0.2.1** (current): Parallel wavelength sweep (GUI + CLI), stack-allocated Green's tensors, XYZ import workflow, debug output, directory-scoped file browser
+| Version | Highlights |
+|---------|-----------|
+| v0.1.0 | Linear solver, GUI, CLI, Mie validation |
+| v0.1.1 | GMRES, FCD Green's function, cylinder/helix geometry |
+| v0.1.2 | Spectra plots, near-field heatmaps, dipole scatter preview |
+| v0.1.3 | Far-field patterns, circular dichroism, CSV/JSON export, Palik data, OBJ/XYZ import |
+| v0.2.0 | GPU compute engine (wgpu), matrix-free GMRES, Rayon parallel assembly |
+| v0.2.1 | Parallel wavelength sweep, stack-allocated Green's tensors, XYZ workflow, debug output |
+| v0.2.2 | Persistent GPU session buffers, SceneSpec multi-object assembly |
+| v0.3.0 | CoreShell geometry, anisotropic ellipsoid dipoles, substrate image-dipole, periodic lattice sums |
 
-### v0.3.0 — Nonlinear Optics & Periodicity (Next)
-- SHG/THG source terms
-- Ewald summation for periodic structures
-- MPI distributed computing
+### Planned
 
-### v1.0.0 — Multi-Method Framework
-- Boundary Element Method (BEM)
-- T-matrix solver
-- FDTD time-domain solver
-- CUDA/Metal GPU backends
-
----
-
-## Performance
-
-<p align="center">
-  <img src="docs/images/performance_scaling.svg" alt="Performance Scaling" width="700"/>
-</p>
-
-Lumina automatically selects the optimal solver based on system size:
-
-- **Direct LU** (N ≤ 1000): Fast and exact, ideal for interactive GUI work
-- **GMRES(30)** (N > 1000): Scales to 10⁴–10⁵ dipoles with linear memory growth
-- **FCD overhead**: ~15% additional cost for improved accuracy
-
-**Benchmark** (Intel i7-12700K, 12 threads):
-- N = 500: 0.05s (direct)
-- N = 2,000: 2.1s (GMRES)
-- N = 10,000: 18.3s (GMRES)
-- N = 50,000: 156s (GMRES)
-
-**Memory scaling**:
-- Direct: O(N²) — ~10 GB for N=10⁴
-- GMRES: O(N) — ~0.5 GB for N=10⁴
+| Version | Highlights |
+|---------|-----------|
+| v0.4.0 | Full Ewald summation (Faddeeva w(z)), SHG/THG nonlinear source terms, DFT tensor import |
+| v1.0.0 | BEM solver, T-matrix solver, FDTD, CUDA/Metal backends, MPI |
 
 ---
 
 ## Architecture
 
-Lumina is structured as a Rust workspace with six crates:
+Lumina is a Rust workspace with six crates:
 
 ```
 lumina/
-├── lumina-core        # Solvers, Green's functions, cross-sections
-├── lumina-compute     # CPU/GPU backend abstraction (rayon, wgpu)
-├── lumina-geometry    # Primitives, discretisation, transforms
-├── lumina-materials   # Optical data, interpolation, χ(n) tensors
+├── lumina-core        # CDA solver, Green's functions, cross-sections, substrate, Ewald
+├── lumina-compute     # ComputeBackend trait: CPU (Rayon) and GPU (wgpu)
+├── lumina-geometry    # Scene assembly, primitives, discretisation, OBJ/XYZ parsers
+├── lumina-materials   # MaterialProvider trait: J&C, Palik, spline interpolation
 ├── lumina-gui         # egui/eframe interactive dashboard
 └── lumina-cli         # TOML-based batch processing
 ```
 
-Key design principles:
-- **Trait-based abstraction**: `OpticalSolver`, `MaterialProvider`, `ComputeBackend`
-- **Type safety**: Newtypes for physical quantities (wavelength, cross-section)
-- **Zero-cost abstractions**: Compile-time dispatch, no heap allocations in hot loops
-- **Reproducibility**: All results are deterministic and platform-independent
+Key abstractions:
+- `OpticalSolver` — CDA today; BEM/FDTD/T-matrix plug in via the same trait
+- `ComputeBackend` — CPU (Rayon) default; GPU (wgpu) feature-gated
+- `MaterialProvider` — returns ε(λ) for any material source
+- `SceneSpec` — unified GUI/CLI scene description, serialisable to/from TOML
+
+---
+
+## Documentation
+
+Full documentation is built with mdBook:
+
+```bash
+cd docs && mdbook serve --open
+```
+
+Key sections:
+- [Theory](docs/src/theory/cda.md) — CDA formulation, polarisability prescriptions, anisotropic dipoles
+- [Periodic Structures](docs/src/theory/periodic.md) — Ewald summation, Bloch conditions
+- [Geometry & Shapes](docs/src/user-guide/geometry.md) — all shape types, CoreShell, transforms
+- [Configuration](docs/src/user-guide/configuration.md) — full TOML reference
+- [Validation](docs/src/theory/validation.md) — Mie benchmarks and accuracy analysis
+- [Roadmap](docs/src/roadmap/versions.md) — version history and future plans
 
 ---
 
 ## Contributing
 
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-Areas where help is needed:
-- **Physics**: Surface-averaging methods, BEM/T-matrix implementations
-- **Performance**: GPU kernels, FFT convolution for Toeplitz matrices
-- **Materials**: Palik library integration, DFT polarisability import
-- **Documentation**: Tutorials, Jupyter notebook examples
+Priority areas:
+- Surface-averaging methods for improved metallic convergence
+- Full Ewald acceleration (Faddeeva w(z) for reciprocal sum)
+- SHG/THG nonlinear source terms
+- Extended Palik library (Al₂O₃, Si, GaAs)
+- GPU matrix assembly shader (currently CPU only)
 
 ---
 
@@ -375,40 +448,39 @@ Areas where help is needed:
 If you use Lumina in your research, please cite:
 
 ```bibtex
-@software{lumina2025,
-  author = {Jones, Robert M.},
-  title = {Lumina: Coupled Dipole Approximation for Nanophotonics},
-  year = {2025},
-  url = {https://github.com/jonesrobm/lumina},
-  version = {0.2.1}
+@software{lumina2026,
+  author  = {Jones, Robert M.},
+  title   = {Lumina: Coupled Dipole Approximation for Nanophotonics},
+  year    = {2026},
+  url     = {https://github.com/jonesrobm/lumina},
+  version = {0.3.0}
 }
 ```
 
 Key references:
+- Purcell, E. M. & Pennypacker, C. R., *Astrophys. J.* **186**, 705 (1973) — original DDA
 - Draine, B. T. & Flatau, P. J., *J. Opt. Soc. Am. A* **11**, 1491 (1994) — DDSCAT
-- Yurkin, M. A. & Hoekstra, A. G., *J. Quant. Spectrosc. Radiat. Transf.* **106**, 558 (2007) — ADDA
 - Johnson, P. B. & Christy, R. W., *Phys. Rev. B* **6**, 4370 (1972) — Au/Ag/Cu optical data
 
 ---
 
 ## License
 
-Lumina is licensed under the Apache License 2.0. See [LICENSE](LICENSE) for details.
+Apache License 2.0. See [LICENSE](LICENSE) for details.
 
 ---
 
 ## Support Development
-
-If you find Lumina useful, consider supporting development:
 
 [![Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/jonesrobm)
 
 ---
 
 ## Acknowledgements
+
 - The King's College London [Photonics & Nanotechnology Group](https://www.kcl.ac.uk/research/photonics-nanotechnology)
-- **DDSCAT** (Draine & Flatau) and **ADDA** (Yurkin & Hoekstra) for pioneering the DDA/CDA method
-- The Rust community for exceptional tooling and libraries
+- **DDSCAT** (Draine & Flatau) and **ADDA** (Yurkin & Hoekstra) for pioneering the CDA/DDA method
+- The Rust community for exceptional tooling and the `egui`, `wgpu`, `rayon`, and `faer` crates
 - Johnson & Christy for the gold standard in optical constants
 
 ---
