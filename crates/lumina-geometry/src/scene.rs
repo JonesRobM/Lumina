@@ -31,6 +31,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::discretise::{discretise_mesh, discretise_primitive};
+use crate::ellipsoid::ellipsoid_depol_factors;
 use crate::parsers::xyz::parse_xyz;
 use crate::parsers::obj::parse_obj;
 use crate::primitives::{Cuboid, Cylinder, Ellipsoid, Helix, Primitive, Sphere};
@@ -57,6 +58,38 @@ pub enum SceneError {
 
 fn default_z_axis() -> [f64; 3] {
     [0.0, 0.0, 1.0]
+}
+
+/// One concentric shell in a [`ShapeSpec::CoreShell`] particle.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShellLayer {
+    /// Shell thickness in nm (measured radially outward from the previous surface).
+    pub thickness: f64,
+    /// Material identifier for this shell (e.g. `"Ag_JC"`, `"SiO2_Palik"`).
+    pub material: String,
+}
+
+/// Core shape variants supported in a core-shell particle.
+///
+/// Helices are excluded because shell membership is geometrically ill-defined
+/// for a coiled wire. File imports are also excluded.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum CoreShapeSpec {
+    /// Spherical core of the given radius (nm).
+    Sphere { radius: f64 },
+    /// Cylindrical core.
+    Cylinder {
+        radius: f64,
+        length: f64,
+        /// Axis direction (normalised internally). Default: [0, 0, 1].
+        #[serde(default = "default_z_axis")]
+        axis: [f64; 3],
+    },
+    /// Cuboid core with given half-extents (nm).
+    Cuboid { half_extents: [f64; 3] },
+    /// Ellipsoidal core with given semi-axes (nm).
+    Ellipsoid { semi_axes: [f64; 3] },
 }
 
 /// Shape of one object in a scene, always expressed in object-local coordinates
@@ -90,19 +123,75 @@ pub enum ShapeSpec {
     },
     /// Import geometry from a `.xyz` or `.obj` file.
     File { path: String },
+    /// Concentric multi-shell particle (e.g. Au@Ag, Au@SiO₂).
+    ///
+    /// The core shape and material define the innermost region. The `shells`
+    /// list ordered from innermost to outermost; each adds `thickness` nm to
+    /// every surface.
+    ///
+    /// # TOML example (Au@Ag sphere):
+    /// ```toml
+    /// [geometry.object.shape]
+    /// type          = "coreshell"
+    /// core_material = "Au_JC"
+    ///
+    /// [geometry.object.shape.base]
+    /// type   = "sphere"
+    /// radius = 15.0
+    ///
+    /// [[geometry.object.shape.shells]]
+    /// thickness = 5.0
+    /// material  = "Ag_JC"
+    /// ```
+    CoreShell {
+        /// Core shape geometry.
+        base: CoreShapeSpec,
+        /// Material of the innermost core region.
+        core_material: String,
+        /// Shells listed from innermost to outermost.
+        shells: Vec<ShellLayer>,
+    },
 }
 
 impl ShapeSpec {
     /// Discretise this shape into object-local positions centred at the origin.
     ///
-    /// Returns `(positions, labels)` where `labels[i]` is the atom-type string
-    /// from an XYZ file, or `None` for primitive shapes and OBJ meshes.
+    /// Returns `(positions, labels)` where:
+    /// - For XYZ imports: `labels[i]` is the atom-type string (e.g. `"Au"`).
+    /// - For [`ShapeSpec::CoreShell`]: `labels[i]` is the **resolved material name**
+    ///   (e.g. `"Au_JC"`, `"Ag_JC"`) and should be used directly without
+    ///   `species_map` lookup.
+    /// - For all other shapes: `labels[i]` is `None`.
     fn discretise_local(
         &self,
         spacing: f64,
         obj_name: &str,
     ) -> Result<(Vec<[f64; 3]>, Vec<Option<String>>), SceneError> {
         match self {
+            ShapeSpec::CoreShell { base, core_material, shells } => {
+                let outer = core_shell_outer_primitive(base, shells);
+                let (bb_min, bb_max) = outer.bounding_box();
+                let cx = 0.5 * (bb_min[0] + bb_max[0]);
+                let cy = 0.5 * (bb_min[1] + bb_max[1]);
+                let cz = 0.5 * (bb_min[2] + bb_max[2]);
+                let pts = discretise_primitive(&outer, spacing);
+                if pts.is_empty() {
+                    return Err(SceneError::EmptyObject { name: obj_name.to_string() });
+                }
+                let mut positions = Vec::with_capacity(pts.len());
+                let mut labels = Vec::with_capacity(pts.len());
+                for pt in &pts {
+                    let local = [
+                        pt.position[0] - cx,
+                        pt.position[1] - cy,
+                        pt.position[2] - cz,
+                    ];
+                    let mat = shell_material_at(&local, base, core_material, shells);
+                    positions.push(local);
+                    labels.push(Some(mat));
+                }
+                Ok((positions, labels))
+            }
             ShapeSpec::File { path } => {
                 let p = std::path::Path::new(path);
                 let ext = p
@@ -218,6 +307,7 @@ impl ShapeSpec {
                 })
             }
             ShapeSpec::File { .. } => panic!("File shapes must be handled separately"),
+            ShapeSpec::CoreShell { .. } => panic!("CoreShell must be handled separately"),
         }
     }
 }
@@ -350,11 +440,31 @@ impl Default for SceneSpec {
 
 // ─── SceneDipoles ────────────────────────────────────────────────────────────
 
+/// Wavelength-independent polarisability geometry data for a dipole in an
+/// ellipsoidal object.
+///
+/// Carries the depolarisation factors and orientation computed at scene-build
+/// time, used by the per-wavelength solver loop to build the full 3×3
+/// polarisability tensor instead of calling the isotropic Clausius-Mossotti.
+///
+/// Only populated for [`ShapeSpec::Ellipsoid`] objects. All other shapes
+/// produce `None` in [`SceneDipoles::hints`].
+#[derive(Debug, Clone)]
+pub struct DipolePolarisabilityHint {
+    /// Depolarisation factors $[L_x, L_y, L_z]$ in the object-local
+    /// principal-axis frame. Computed from the ellipsoid semi-axes.
+    pub depol_factors: [f64; 3],
+    /// 3×3 rotation matrix (row-major) mapping the object-local frame to
+    /// the world (lab) frame: $\boldsymbol{\alpha} = R\,\text{diag}(\alpha_x,\alpha_y,\alpha_z)\,R^T$.
+    pub rotation: [f64; 9],
+}
+
 /// Geometry-only output of [`SceneSpec::build_geometry`].
 ///
 /// Contains the world-space dipole positions, per-dipole material labels,
-/// and dipole spacings. Material resolution (ε(ω) → Clausius-Mossotti) is
-/// performed per-wavelength by the caller using the material strings.
+/// dipole spacings, and optional anisotropy hints for ellipsoidal objects.
+/// Material resolution (ε(ω) → Clausius-Mossotti) is performed per-wavelength
+/// by the caller.
 pub struct SceneDipoles {
     /// World-space dipole positions in nm.
     pub positions: Vec<[f64; 3]>,
@@ -362,6 +472,10 @@ pub struct SceneDipoles {
     pub materials: Vec<String>,
     /// Dipole lattice spacing for each dipole in nm.
     pub spacings: Vec<f64>,
+    /// Per-dipole anisotropy hint. `Some` only for dipoles belonging to
+    /// [`ShapeSpec::Ellipsoid`] objects; `None` for all other shapes.
+    /// Length always equals `positions.len()`.
+    pub hints: Vec<Option<DipolePolarisabilityHint>>,
 }
 
 impl SceneSpec {
@@ -382,6 +496,7 @@ impl SceneSpec {
         let mut positions = Vec::new();
         let mut materials = Vec::new();
         let mut spacings = Vec::new();
+        let mut hints: Vec<Option<DipolePolarisabilityHint>> = Vec::new();
 
         for obj in &self.objects {
             let (local_pos, labels) =
@@ -389,26 +504,178 @@ impl SceneSpec {
 
             let world_pos = obj.transform.apply(&local_pos);
 
+            // Compute anisotropy hint for ellipsoidal objects only.
+            let hint_for_obj: Option<DipolePolarisabilityHint> =
+                if let ShapeSpec::Ellipsoid { semi_axes } = &obj.shape {
+                    let s = obj.transform.scale;
+                    let scaled = [semi_axes[0] * s, semi_axes[1] * s, semi_axes[2] * s];
+                    let depol_factors = ellipsoid_depol_factors(scaled);
+                    let rotation = rotation_matrix_row_major(obj.transform.rotation_deg);
+                    Some(DipolePolarisabilityHint { depol_factors, rotation })
+                } else {
+                    None
+                };
+
+            // CoreShell shapes return pre-resolved material names in `labels`;
+            // they bypass species_map (which is irrelevant for primitive shells).
+            let is_core_shell = matches!(obj.shape, ShapeSpec::CoreShell { .. });
+
             for (pos, label) in world_pos.into_iter().zip(labels.into_iter()) {
                 positions.push(pos);
-                let mat = match label {
-                    Some(ref lbl) => obj
-                        .species_map
-                        .get(lbl.as_str())
-                        .cloned()
-                        .unwrap_or_else(|| obj.material.clone()),
-                    None => obj.material.clone(),
+                let mat = if is_core_shell {
+                    label.unwrap_or_else(|| obj.material.clone())
+                } else {
+                    match label {
+                        Some(ref lbl) => obj
+                            .species_map
+                            .get(lbl.as_str())
+                            .cloned()
+                            .unwrap_or_else(|| obj.material.clone()),
+                        None => obj.material.clone(),
+                    }
                 };
                 materials.push(mat);
                 spacings.push(obj.dipole_spacing);
+                hints.push(hint_for_obj.clone());
             }
         }
 
-        Ok(SceneDipoles { positions, materials, spacings })
+        Ok(SceneDipoles { positions, materials, spacings, hints })
     }
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/// Build a 3×3 rotation matrix (row-major) from ZYX Euler angles in degrees.
+///
+/// Convention: $R = R_z(\text{rz}) \cdot R_y(\text{ry}) \cdot R_x(\text{rx})$,
+/// consistent with [`ObjectTransform::apply`].
+fn rotation_matrix_row_major(rotation_deg: [f64; 3]) -> [f64; 9] {
+    let rx = rotation_deg[0].to_radians();
+    let ry = rotation_deg[1].to_radians();
+    let rz = rotation_deg[2].to_radians();
+    let rot = Rotation3::from_euler_angles(rx, ry, rz);
+    let m = rot.matrix();
+    [
+        m[(0, 0)], m[(0, 1)], m[(0, 2)],
+        m[(1, 0)], m[(1, 1)], m[(1, 2)],
+        m[(2, 0)], m[(2, 1)], m[(2, 2)],
+    ]
+}
+
+/// Returns the outer bounding [`Primitive`] for a core-shell particle.
+///
+/// Each surface of the core shape is extended by the total cumulative shell
+/// thickness, enclosing all shell regions in a single primitive that can be
+/// passed to [`discretise_primitive`].
+fn core_shell_outer_primitive(base: &CoreShapeSpec, shells: &[ShellLayer]) -> Primitive {
+    let total: f64 = shells.iter().map(|s| s.thickness).sum();
+    match base {
+        CoreShapeSpec::Sphere { radius } => Primitive::Sphere(Sphere {
+            centre: [0.0, 0.0, 0.0],
+            radius: radius + total,
+        }),
+        CoreShapeSpec::Cylinder { radius, length, axis } => Primitive::Cylinder(Cylinder {
+            base_centre: [0.0, 0.0, 0.0],
+            axis: *axis,
+            length: length + 2.0 * total,
+            radius: radius + total,
+        }),
+        CoreShapeSpec::Cuboid { half_extents } => Primitive::Cuboid(Cuboid {
+            centre: [0.0, 0.0, 0.0],
+            half_extents: [
+                half_extents[0] + total,
+                half_extents[1] + total,
+                half_extents[2] + total,
+            ],
+        }),
+        CoreShapeSpec::Ellipsoid { semi_axes } => Primitive::Ellipsoid(Ellipsoid {
+            centre: [0.0, 0.0, 0.0],
+            semi_axes: [
+                semi_axes[0] + total,
+                semi_axes[1] + total,
+                semi_axes[2] + total,
+            ],
+        }),
+    }
+}
+
+/// Determine the material label for a dipole at `local` in a core-shell particle.
+///
+/// Returns `core_material` for points inside the core. For exterior points,
+/// walks the shell list (innermost to outermost) and returns the material
+/// whose accumulated thickness first encompasses the point. Points at floating-
+/// point boundaries or at non-spherical corners where the Euclidean SDF exceeds
+/// the total shell thickness are assigned the outermost shell material.
+fn shell_material_at(
+    local: &[f64; 3],
+    base: &CoreShapeSpec,
+    core_material: &str,
+    shells: &[ShellLayer],
+) -> String {
+    let dist = core_surface_distance(local, base);
+    if dist == 0.0 {
+        return core_material.to_string();
+    }
+    let mut boundary = 0.0;
+    for shell in shells {
+        boundary += shell.thickness;
+        if dist <= boundary {
+            return shell.material.clone();
+        }
+    }
+    // Fallback: handles FP boundary cases and corners of non-spherical shapes
+    // where the Euclidean SDF slightly exceeds the nominal total thickness.
+    shells
+        .last()
+        .map(|s| s.material.clone())
+        .unwrap_or_else(|| core_material.to_string())
+}
+
+/// Euclidean unsigned distance from `local` to the nearest point on the core
+/// surface. Returns 0.0 for points on or inside the core.
+fn core_surface_distance(local: &[f64; 3], base: &CoreShapeSpec) -> f64 {
+    match base {
+        CoreShapeSpec::Sphere { radius } => {
+            let r = (local[0] * local[0] + local[1] * local[1] + local[2] * local[2]).sqrt();
+            (r - radius).max(0.0)
+        }
+        CoreShapeSpec::Cylinder { radius, length, axis } => {
+            let ax = normalise3(axis);
+            let dot = local[0] * ax[0] + local[1] * ax[1] + local[2] * ax[2];
+            let perp = [
+                local[0] - dot * ax[0],
+                local[1] - dot * ax[1],
+                local[2] - dot * ax[2],
+            ];
+            let r_xy =
+                (perp[0] * perp[0] + perp[1] * perp[1] + perp[2] * perp[2]).sqrt();
+            let z_abs = dot.abs();
+            let half_len = 0.5 * length;
+            let de_r = (r_xy - radius).max(0.0);
+            let de_z = (z_abs - half_len).max(0.0);
+            (de_r * de_r + de_z * de_z).sqrt()
+        }
+        CoreShapeSpec::Cuboid { half_extents } => {
+            let dx = (local[0].abs() - half_extents[0]).max(0.0);
+            let dy = (local[1].abs() - half_extents[1]).max(0.0);
+            let dz = (local[2].abs() - half_extents[2]).max(0.0);
+            (dx * dx + dy * dy + dz * dz).sqrt()
+        }
+        CoreShapeSpec::Ellipsoid { semi_axes } => {
+            let [a, b, c] = *semi_axes;
+            let u = (local[0] / a).powi(2) + (local[1] / b).powi(2) + (local[2] / c).powi(2);
+            let min_axis = a.min(b).min(c);
+            (u.sqrt() - 1.0).max(0.0) * min_axis
+        }
+    }
+}
+
+/// Normalise a 3-vector; returns [0, 0, 1] for near-zero inputs.
+fn normalise3(v: &[f64; 3]) -> [f64; 3] {
+    let len = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+    if len < 1e-12 { [0.0, 0.0, 1.0] } else { [v[0] / len, v[1] / len, v[2] / len] }
+}
 
 /// Shift a set of positions so their bounding-box centroid is at the origin.
 fn centre_positions(positions: Vec<[f64; 3]>) -> Vec<[f64; 3]> {
@@ -577,6 +844,140 @@ mod tests {
 
         assert_eq!(count_dimer, count_a + count_b,
             "Dimer count {count_dimer} ≠ sum {}", count_a + count_b);
+    }
+
+    /// Au@Ag sphere: core dipoles must be Au_JC, shell dipoles must be Ag_JC.
+    #[test]
+    fn test_coreshell_sphere_materials() {
+        let scene = SceneSpec {
+            objects: vec![ObjectSpec {
+                name: "cs".to_string(),
+                shape: ShapeSpec::CoreShell {
+                    base: CoreShapeSpec::Sphere { radius: 10.0 },
+                    core_material: "Au_JC".to_string(),
+                    shells: vec![ShellLayer {
+                        thickness: 5.0,
+                        material: "Ag_JC".to_string(),
+                    }],
+                },
+                material: "Au_JC".to_string(),
+                dipole_spacing: 2.0,
+                transform: ObjectTransform::default(),
+                species_map: HashMap::new(),
+            }],
+        };
+
+        let geom = scene.build_geometry().unwrap();
+        assert!(!geom.positions.is_empty(), "must produce dipoles");
+
+        let mut n_core = 0usize;
+        let mut n_shell = 0usize;
+        for (pos, mat) in geom.positions.iter().zip(geom.materials.iter()) {
+            let r = (pos[0] * pos[0] + pos[1] * pos[1] + pos[2] * pos[2]).sqrt();
+            match mat.as_str() {
+                "Au_JC" => {
+                    assert!(r <= 10.0 + 1.5, "core dipole at r={r:.2} > core radius + half-spacing");
+                    n_core += 1;
+                }
+                "Ag_JC" => {
+                    assert!(r >= 8.0, "shell dipole at r={r:.2} unexpectedly close to centre");
+                    n_shell += 1;
+                }
+                other => panic!("unexpected material: {other}"),
+            }
+        }
+        assert!(n_core > 0, "no core dipoles generated");
+        assert!(n_shell > 0, "no shell dipoles generated");
+    }
+
+    /// CoreShell with two shells: verify all dipoles get one of the three materials.
+    #[test]
+    fn test_coreshell_two_shells_all_assigned() {
+        let shapes: &[(ShapeSpec, &[&str])] = &[
+            (
+                ShapeSpec::CoreShell {
+                    base: CoreShapeSpec::Cuboid { half_extents: [8.0, 8.0, 8.0] },
+                    core_material: "Au_JC".to_string(),
+                    shells: vec![ShellLayer { thickness: 3.0, material: "Ag_JC".to_string() }],
+                },
+                &["Au_JC", "Ag_JC"],
+            ),
+            (
+                ShapeSpec::CoreShell {
+                    base: CoreShapeSpec::Ellipsoid { semi_axes: [10.0, 7.0, 5.0] },
+                    core_material: "Au_JC".to_string(),
+                    shells: vec![
+                        ShellLayer { thickness: 2.0, material: "Ag_JC".to_string() },
+                        ShellLayer { thickness: 3.0, material: "TiO2_Palik".to_string() },
+                    ],
+                },
+                &["Au_JC", "Ag_JC", "TiO2_Palik"],
+            ),
+        ];
+        for (shape, allowed) in shapes {
+            let geom = SceneSpec {
+                objects: vec![ObjectSpec {
+                    name: "t".to_string(),
+                    shape: shape.clone(),
+                    material: "Au_JC".to_string(),
+                    dipole_spacing: 2.0,
+                    transform: ObjectTransform::default(),
+                    species_map: HashMap::new(),
+                }],
+            }
+            .build_geometry()
+            .unwrap();
+            assert!(!geom.positions.is_empty());
+            for mat in &geom.materials {
+                assert!(
+                    allowed.contains(&mat.as_str()),
+                    "unexpected material '{mat}'"
+                );
+            }
+        }
+    }
+
+    /// CoreShell must survive a TOML round-trip without data loss.
+    #[test]
+    fn test_coreshell_toml_round_trip() {
+        let scene = SceneSpec {
+            objects: vec![ObjectSpec {
+                name: "Au_Ag_sphere".to_string(),
+                shape: ShapeSpec::CoreShell {
+                    base: CoreShapeSpec::Sphere { radius: 15.0 },
+                    core_material: "Au_JC".to_string(),
+                    shells: vec![
+                        ShellLayer { thickness: 3.0, material: "Ag_JC".to_string() },
+                        ShellLayer { thickness: 4.0, material: "SiO2_Palik".to_string() },
+                    ],
+                },
+                material: "Au_JC".to_string(),
+                dipole_spacing: 2.0,
+                transform: ObjectTransform::default(),
+                species_map: HashMap::new(),
+            }],
+        };
+
+        #[derive(Serialize, Deserialize)]
+        struct Wrapper { geometry: SceneSpec }
+        let toml_str = toml::to_string(&Wrapper { geometry: scene }).expect("serialise failed");
+        let w2: Wrapper = toml::from_str(&toml_str).expect("deserialise failed");
+        let obj = &w2.geometry.objects[0];
+
+        if let ShapeSpec::CoreShell { base, core_material, shells } = &obj.shape {
+            assert_eq!(core_material, "Au_JC");
+            assert_eq!(shells.len(), 2);
+            assert!((shells[0].thickness - 3.0).abs() < 1e-12);
+            assert_eq!(shells[0].material, "Ag_JC");
+            assert_eq!(shells[1].material, "SiO2_Palik");
+            if let CoreShapeSpec::Sphere { radius } = base {
+                assert!((radius - 15.0).abs() < 1e-12);
+            } else {
+                panic!("expected Sphere core");
+            }
+        } else {
+            panic!("expected CoreShell shape");
+        }
     }
 
     /// Species map must correctly assign different materials to different labels.

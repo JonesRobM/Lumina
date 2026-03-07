@@ -1,21 +1,45 @@
 # Geometry & Shapes
 
+## Multi-Object Scenes (v0.2.2+)
+
+Simulations are defined as a collection of named objects. Each object has an independent shape, material, dipole spacing, and transform:
+
+```toml
+[[geometry.object]]
+name = "Core"
+type = "sphere"
+radius = 15.0
+material = "Au_JC"
+dipole_spacing = 2.0
+
+[geometry.object.transform]
+position = [0.0, 0.0, 0.0]
+rotation_deg = [0.0, 0.0, 0.0]
+scale = 1.0
+
+[[geometry.object]]
+name = "Shell"
+type = "sphere"
+radius = 20.0
+material = "SiO2_Palik"
+dipole_spacing = 2.0
+```
+
+All objects are merged into a single flat dipole list before solving. Overlapping volumes are handled by the order of definition (later objects overwrite earlier ones at shared sites).
+
 ## Parametric Primitives
 
-Define shapes directly in the TOML configuration. All dimensions are in nanometres.
+Define shapes in the TOML configuration. All dimensions are in nanometres.
 
 ### Sphere
 ```toml
 type = "sphere"
-centre = [0.0, 0.0, 0.0]
 radius = 20.0
 ```
 
 ### Cylinder
 ```toml
 type = "cylinder"
-base_centre = [0.0, 0.0, 0.0]
-axis = [0.0, 0.0, 1.0]
 length = 60.0
 radius = 10.0
 ```
@@ -23,27 +47,50 @@ radius = 10.0
 ### Cuboid
 ```toml
 type = "cuboid"
-centre = [0.0, 0.0, 0.0]
 half_extents = [20.0, 10.0, 5.0]
 ```
 
 ### Ellipsoid
+
 ```toml
 type = "ellipsoid"
-centre = [0.0, 0.0, 0.0]
 semi_axes = [20.0, 15.0, 10.0]
 ```
+
+> **Anisotropic polarisability (v0.3.0):** Ellipsoidal objects automatically use a per-dipole 3×3 polarisability tensor computed from the depolarisation factors \\([L_x, L_y, L_z]\\) of the specified semi-axes. The anisotropic Clausius–Mossotti formula is applied independently along each principal axis before rotating to the lab frame via the object's Euler transform. This correctly captures the orientation-dependent plasmon resonance of prolate or oblate nanoparticles.
 
 ### Helix
 ```toml
 type = "helix"
-centre = [0.0, 0.0, 0.0]
 helix_radius = 15.0
 wire_radius = 4.0
 pitch = 20.0
 turns = 3
 handedness = "right"
 ```
+
+### CoreShell (v0.2.2+)
+
+A CoreShell object consists of a solid core surrounded by one or more concentric shell layers, each with its own material. The core geometry is specified by `core_shape` (same parameters as a standalone primitive), and each shell adds thickness in nm:
+
+```toml
+[[geometry.object]]
+name = "Au-SiO2 Core-Shell"
+type = "coreshell"
+dipole_spacing = 2.0
+
+[geometry.object.core_shape]
+type = "sphere"
+radius = 15.0
+
+core_material = "Au_JC"
+
+[[geometry.object.shells]]
+thickness = 5.0
+material = "SiO2_Palik"
+```
+
+Multiple shells are listed in order from innermost to outermost. Each dipole is assigned the material of the layer it falls within, determined by the signed distance to the core surface.
 
 ## File Import
 

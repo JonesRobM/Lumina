@@ -81,6 +81,56 @@ where \\(b_1 = -1.8915316\\), \\(b_2 = 0.1648469\\), \\(b_3 = -1.7700004\\), and
 
 > **Note:** In Lumina's convention, the LDR lattice correction term includes a \\(1/(4\pi)\\) factor relative to the original Draine & Goodman coefficients, because those coefficients were derived for the DDSCAT convention where \\(\alpha_{\text{DD}} = \alpha / (4\pi)\\). In practice, the LDR correction is numerically negligible for the particle sizes tested in v0.1 (the correction terms are \\(\sim 10^{-6}\\) of \\(\alpha^{-1}\\)). Both RRCM and LDR give equivalent results.
 
+## Anisotropic Dipoles (v0.3.0)
+
+For ellipsoidal objects, each dipole carries a full 3×3 polarisability tensor rather than a scalar. The tensor is constructed in three steps:
+
+### 1. Depolarisation Factors
+
+The depolarisation factors \\([L_x, L_y, L_z]\\) are computed from the ellipsoid semi-axes \\([a, b, c]\\) via:
+
+\\[
+L_i = \frac{abc}{2} \int_0^\infty
+  \frac{ds}{(a_i^2 + s)\sqrt{(a^2+s)(b^2+s)(c^2+s)}}
+\\]
+
+where \\(a_x = a\\), \\(a_y = b\\), \\(a_z = c\\). They satisfy \\(L_x + L_y + L_z = 1\\) and reduce to \\(L_i = 1/3\\) for a sphere.
+
+Lumina evaluates each integral using the substitution \\(s = a_i^2(1-u^2)/u^2\\), which transforms the integrand to:
+
+\\[
+h_i(u) = \frac{2u^2}{\sqrt{q_a(u)\,q_b(u)\,q_c(u)}},\quad
+q_j(u) = a_i^2 + (a_j^2 - a_i^2)\,u^2
+\\]
+
+For a sphere this reduces to a polynomial \\(2u^2/a^3\\), so 16-point Gauss–Legendre quadrature is exact. For general ellipsoids the integrand is smooth and convergence is rapid (~1 ppm accuracy for aspect ratios up to 20:1).
+
+### 2. Anisotropic Clausius–Mossotti
+
+Each principal-axis polarisability is:
+
+\\[
+\alpha_i^{\text{CM}} = V \frac{\epsilon - \epsilon_m}{\epsilon_m + L_i(\epsilon - \epsilon_m)}
+\\]
+
+where \\(V = d^3\\) is the dipole cell volume (not the full ellipsoid volume). Radiative reaction correction is applied independently to each component:
+
+\\[
+\alpha_i^{\text{RRCM}} = \frac{\alpha_i^{\text{CM}}}{1 - \frac{ik^3}{6\pi}\,\alpha_i^{\text{CM}}}
+\\]
+
+### 3. Rotation to Lab Frame
+
+The diagonal tensor \\(\text{diag}(\alpha_x, \alpha_y, \alpha_z)\\) is rotated to the lab frame using the object's Euler rotation matrix \\(\mathbf{R}\\):
+
+\\[
+\boldsymbol{\alpha} = \mathbf{R}\,\text{diag}(\alpha_x, \alpha_y, \alpha_z)\,\mathbf{R}^\top
+\\]
+
+This 3×3 complex tensor replaces the scalar polarisability \\(\alpha\\) in the diagonal blocks of the system matrix \\(\mathbf{A}_{ii} = \boldsymbol{\alpha}_i^{-1}\\), and in the cross-section formulas.
+
+> **Physical consequence:** Prolate (\\(a > b = c\\)) and oblate (\\(a = b > c\\)) nanoparticles have multiple plasmon resonances at wavelengths corresponding to \\(L_i\\) for each axis. The orientation of the object in the lab frame determines which resonance couples to a given incident polarisation.
+
 ## Cross-Section Computation
 
 From the solved dipole moments, the optical cross-sections are:

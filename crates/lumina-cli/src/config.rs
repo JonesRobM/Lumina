@@ -1,5 +1,6 @@
 //! TOML configuration deserialisation for simulation jobs.
 
+use lumina_core::solver::substrate::SubstrateSpec;
 use lumina_geometry::scene::SceneSpec;
 use serde::Deserialize;
 
@@ -26,6 +27,12 @@ pub struct SimulationConfig {
     /// Compute backend: "auto", "cpu", or "gpu". Default: "auto".
     #[serde(default = "default_backend")]
     pub backend: String,
+    /// Optional planar substrate below the nanostructure.
+    ///
+    /// Example: `[simulation.substrate]` with `z_interface = 0.0` and
+    /// `material = "SiO2_Palik"`.
+    #[serde(default)]
+    pub substrate: Option<SubstrateSpec>,
 }
 
 fn default_backend() -> String {

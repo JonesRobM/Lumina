@@ -6,7 +6,8 @@
 
 use egui::Ui;
 
-use lumina_geometry::scene::{ObjectSpec, SceneSpec, ShapeSpec};
+use lumina_geometry::scene::{CoreShapeSpec, ObjectSpec, SceneSpec, ShapeSpec, ShellLayer};
+use super::AVAILABLE_MATERIALS;
 
 /// Colors used to distinguish objects in the scatter preview.
 const OBJECT_COLORS: &[egui::Color32] = &[
@@ -142,6 +143,7 @@ impl ScenePanel {
                 if ui.selectable_label(prev_tag == 3, "Ellipsoid").clicked() { new_tag = 3; }
                 if ui.selectable_label(prev_tag == 4, "Helix").clicked()     { new_tag = 4; }
                 if ui.selectable_label(prev_tag == 5, "File").clicked()      { new_tag = 5; }
+                if ui.selectable_label(prev_tag == 6, "Core-Shell").clicked() { new_tag = 6; }
                 if new_tag != prev_tag {
                     obj.shape = default_shape(new_tag);
                     self.cache_dirty = true;
@@ -163,7 +165,7 @@ impl ScenePanel {
                 egui::ComboBox::from_id_salt(("mat", self.selected))
                     .selected_text(&obj.material)
                     .show_ui(ui, |ui| {
-                        for &mat in &["Au_JC", "Ag_JC", "Cu_JC", "TiO2_Palik", "SiO2_Palik"] {
+                        for &mat in AVAILABLE_MATERIALS {
                             ui.selectable_value(&mut obj.material, mat.to_string(), mat);
                         }
                     });
@@ -296,6 +298,7 @@ fn shape_tag(shape: &ShapeSpec) -> u8 {
         ShapeSpec::Ellipsoid { .. } => 3,
         ShapeSpec::Helix { .. }     => 4,
         ShapeSpec::File { .. }      => 5,
+        ShapeSpec::CoreShell { .. } => 6,
     }
 }
 
@@ -309,6 +312,12 @@ fn default_shape(tag: u8) -> ShapeSpec {
         4 => ShapeSpec::Helix {
             radius: 15.0, pitch: 20.0, turns: 3.0,
             wire_radius: 4.0, axis: [0.0, 0.0, 1.0],
+        },
+        5 => ShapeSpec::File { path: String::new() },
+        6 => ShapeSpec::CoreShell {
+            base: CoreShapeSpec::Sphere { radius: 12.0 },
+            core_material: "Au_JC".to_string(),
+            shells: vec![ShellLayer { thickness: 4.0, material: "Ag_JC".to_string() }],
         },
         _ => ShapeSpec::File { path: String::new() },
     }
@@ -338,6 +347,15 @@ fn shape_params_ui(ui: &mut Ui, shape: &mut ShapeSpec) -> bool {
             d |= slider_changed(ui, &mut semi_axes[0], 1.0..=200.0, "Semi-axis a (nm)");
             d |= slider_changed(ui, &mut semi_axes[1], 1.0..=200.0, "Semi-axis b (nm)");
             d |= slider_changed(ui, &mut semi_axes[2], 1.0..=200.0, "Semi-axis c (nm)");
+            ui.label(
+                egui::RichText::new(
+                    "Anisotropic polarisability: uses ellipsoidal CM with depolarisation \
+                     factors $[L_x, L_y, L_z]$ computed from semi-axes. \
+                     Orientation follows the object rotation above.",
+                )
+                .weak()
+                .small(),
+            );
             d
         }
         ShapeSpec::Helix { radius, pitch, turns, wire_radius, .. } => {
@@ -375,6 +393,115 @@ fn shape_params_ui(ui: &mut Ui, shape: &mut ShapeSpec) -> bool {
                 .weak()
                 .small(),
             );
+            changed
+        }
+        ShapeSpec::CoreShell { base, core_material, shells } => {
+            let mut changed = false;
+
+            // Core material
+            ui.horizontal(|ui| {
+                ui.label("Core material:");
+                egui::ComboBox::from_id_salt("cs_core_mat")
+                    .selected_text(core_material.as_str())
+                    .show_ui(ui, |ui| {
+                        for &mat in AVAILABLE_MATERIALS {
+                            if ui.selectable_value(core_material, mat.to_string(), mat).changed() {
+                                changed = true;
+                            }
+                        }
+                    });
+            });
+
+            // Core shape type
+            let prev_base_tag: u8 = match base {
+                CoreShapeSpec::Sphere { .. }    => 0,
+                CoreShapeSpec::Cylinder { .. }  => 1,
+                CoreShapeSpec::Cuboid { .. }    => 2,
+                CoreShapeSpec::Ellipsoid { .. } => 3,
+            };
+            ui.horizontal(|ui| {
+                ui.label("Core shape:");
+                let mut new_base_tag = prev_base_tag;
+                if ui.selectable_label(prev_base_tag == 0, "Sphere").clicked()    { new_base_tag = 0; }
+                if ui.selectable_label(prev_base_tag == 1, "Cylinder").clicked()  { new_base_tag = 1; }
+                if ui.selectable_label(prev_base_tag == 2, "Cuboid").clicked()    { new_base_tag = 2; }
+                if ui.selectable_label(prev_base_tag == 3, "Ellipsoid").clicked() { new_base_tag = 3; }
+                if new_base_tag != prev_base_tag {
+                    *base = match new_base_tag {
+                        0 => CoreShapeSpec::Sphere { radius: 12.0 },
+                        1 => CoreShapeSpec::Cylinder { radius: 8.0, length: 24.0, axis: [0.0, 0.0, 1.0] },
+                        2 => CoreShapeSpec::Cuboid { half_extents: [8.0, 8.0, 8.0] },
+                        _ => CoreShapeSpec::Ellipsoid { semi_axes: [12.0, 8.0, 6.0] },
+                    };
+                    changed = true;
+                }
+            });
+
+            // Core geometry sliders
+            changed |= match base {
+                CoreShapeSpec::Sphere { radius } => {
+                    slider_changed(ui, radius, 1.0..=200.0, "Core radius (nm)")
+                }
+                CoreShapeSpec::Cylinder { radius, length, .. } => {
+                    let mut d = slider_changed(ui, radius, 1.0..=200.0, "Core radius (nm)");
+                    d |= slider_changed(ui, length, 1.0..=500.0, "Core length (nm)");
+                    d
+                }
+                CoreShapeSpec::Cuboid { half_extents } => {
+                    let mut d = slider_changed(ui, &mut half_extents[0], 1.0..=200.0, "Core half-x (nm)");
+                    d |= slider_changed(ui, &mut half_extents[1], 1.0..=200.0, "Core half-y (nm)");
+                    d |= slider_changed(ui, &mut half_extents[2], 1.0..=200.0, "Core half-z (nm)");
+                    d
+                }
+                CoreShapeSpec::Ellipsoid { semi_axes } => {
+                    let mut d = slider_changed(ui, &mut semi_axes[0], 1.0..=200.0, "Core a (nm)");
+                    d |= slider_changed(ui, &mut semi_axes[1], 1.0..=200.0, "Core b (nm)");
+                    d |= slider_changed(ui, &mut semi_axes[2], 1.0..=200.0, "Core c (nm)");
+                    d
+                }
+            };
+
+            // Shell layers
+            ui.add_space(4.0);
+            ui.label(egui::RichText::new("Shells (inner → outer):").strong());
+
+            let mut remove_idx: Option<usize> = None;
+            for (idx, shell) in shells.iter_mut().enumerate() {
+                ui.horizontal(|ui| {
+                    ui.label(format!("{}:", idx + 1));
+                    if ui.add(
+                        egui::DragValue::new(&mut shell.thickness)
+                            .speed(0.5)
+                            .range(0.5..=200.0)
+                            .suffix(" nm"),
+                    ).changed() { changed = true; }
+                    egui::ComboBox::from_id_salt(("cs_shell_mat", idx))
+                        .selected_text(&shell.material)
+                        .width(110.0)
+                        .show_ui(ui, |ui| {
+                            for &mat in AVAILABLE_MATERIALS {
+                                if ui.selectable_value(&mut shell.material, mat.to_string(), mat).changed() {
+                                    changed = true;
+                                }
+                            }
+                        });
+                    if ui.small_button("×").on_hover_text("Remove this shell").clicked() {
+                        remove_idx = Some(idx);
+                    }
+                });
+            }
+            if let Some(idx) = remove_idx {
+                shells.remove(idx);
+                changed = true;
+            }
+            if ui.small_button("+ Add shell").clicked() {
+                let mat = shells.last()
+                    .map(|s| s.material.clone())
+                    .unwrap_or_else(|| "Ag_JC".to_string());
+                shells.push(ShellLayer { thickness: 3.0, material: mat });
+                changed = true;
+            }
+
             changed
         }
     }

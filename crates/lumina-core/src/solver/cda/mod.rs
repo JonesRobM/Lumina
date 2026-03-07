@@ -23,6 +23,7 @@ use ndarray::Array2;
 use num_complex::Complex64;
 
 use super::{NearFieldPlane, OpticalSolver, SolverError};
+use super::substrate::SubstrateSpec;
 use crate::types::{CrossSections, Dipole, DipoleResponse, FarFieldMap, IncidentField, NearFieldMap, SimulationParams};
 use lumina_compute::{ComputeBackend, CpuBackend};
 use lumina_geometry::lattice::LatticeSpec;
@@ -45,6 +46,10 @@ pub struct CdaSolver {
     /// Periodic lattice specification. When `Some`, the Ewald periodic
     /// Green's function replaces the free-space dyadic Green's function.
     pub lattice: Option<LatticeSpec>,
+    /// Planar substrate specification. When `Some`, image-dipole corrections
+    /// are added to the interaction matrix at each wavelength using the
+    /// pre-computed Fresnel factor from `SimulationParams::substrate_delta_eps`.
+    pub substrate: Option<SubstrateSpec>,
 }
 
 impl Default for CdaSolver {
@@ -56,6 +61,7 @@ impl Default for CdaSolver {
             cell_size: 3.0,
             backend: Arc::new(CpuBackend::new()),
             lattice: None,
+            substrate: None,
         }
     }
 }
@@ -69,6 +75,7 @@ impl CdaSolver {
             cell_size: 3.0,
             backend: Arc::new(CpuBackend::new()),
             lattice: None,
+            substrate: None,
         }
     }
 
@@ -81,6 +88,7 @@ impl CdaSolver {
             cell_size,
             backend: Arc::new(CpuBackend::new()),
             lattice: None,
+            substrate: None,
         }
     }
 
@@ -93,6 +101,7 @@ impl CdaSolver {
             cell_size,
             backend: Arc::new(CpuBackend::new()),
             lattice: None,
+            substrate: None,
         }
     }
 
@@ -105,6 +114,7 @@ impl CdaSolver {
             cell_size,
             backend,
             lattice: None,
+            substrate: None,
         }
     }
 
@@ -191,6 +201,12 @@ impl OpticalSolver for CdaSolver {
         let k = Self::wavenumber(wavelength_nm, params.environment_n);
         let n = dipoles.len();
 
+        // Build substrate runtime params: combine z_interface from solver config
+        // with the wavelength-resolved delta_eps from SimulationParams.
+        let substrate = self.substrate.as_ref().and_then(|sub| {
+            params.substrate_delta_eps.map(|de| (sub.z_interface, de))
+        });
+
         // Assemble the interaction matrix
         let matrix = assembly::assemble_interaction_matrix(
             dipoles,
@@ -199,6 +215,7 @@ impl OpticalSolver for CdaSolver {
             self.cell_size,
             self.lattice.as_ref(),
             params.k_bloch,
+            substrate,
         );
 
         // Build the RHS (incident field at each dipole)

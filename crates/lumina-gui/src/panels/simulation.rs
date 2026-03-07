@@ -1,6 +1,7 @@
 //! Simulation panel: wavelength range, solver parameters, and run controls.
 
 use egui::Ui;
+use super::AVAILABLE_MATERIALS;
 
 /// Incident field polarisation direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,6 +37,12 @@ pub struct SimulationPanel {
     pub compute_cd: bool,
     /// Whether to use GPU acceleration for GMRES matvec (requires `gpu` feature).
     pub use_gpu: bool,
+    /// Whether a planar substrate is present below the nanostructure.
+    pub enable_substrate: bool,
+    /// z-coordinate of the substrate interface in nm.
+    pub substrate_z_interface: f64,
+    /// Material identifier for the substrate (e.g. "SiO2_Palik").
+    pub substrate_material: String,
     /// Whether to show debug-level output during simulation.
     pub debug_output: bool,
     /// Whether a simulation is currently running.
@@ -59,6 +66,9 @@ impl Default for SimulationPanel {
             environment_n: 1.0,
             polarisation: IncidentPolarisation::X,
             compute_cd: false,
+            enable_substrate: false,
+            substrate_z_interface: 0.0,
+            substrate_material: "SiO2_Palik".to_string(),
             use_gpu: cfg!(feature = "gpu"),
             debug_output: false,
             is_running: false,
@@ -93,6 +103,43 @@ impl SimulationPanel {
             egui::Slider::new(&mut self.environment_n, 1.0..=2.5)
                 .text("Medium refractive index"),
         );
+
+        ui.add_space(8.0);
+
+        // Substrate
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut self.enable_substrate, "Substrate");
+        });
+        if self.enable_substrate {
+            ui.indent("substrate_opts", |ui| {
+                ui.add(
+                    egui::Slider::new(&mut self.substrate_z_interface, -200.0..=200.0)
+                        .text("z interface (nm)"),
+                );
+                ui.horizontal(|ui| {
+                    ui.label("Material:");
+                    egui::ComboBox::from_id_salt("sub_mat")
+                        .selected_text(&self.substrate_material)
+                        .show_ui(ui, |ui| {
+                            for &mat in AVAILABLE_MATERIALS {
+                                ui.selectable_value(
+                                    &mut self.substrate_material,
+                                    mat.to_string(),
+                                    mat,
+                                );
+                            }
+                        });
+                });
+                ui.label(
+                    egui::RichText::new(
+                        "Image-dipole correction (quasi-static Fresnel). \
+                         All dipoles must lie above the interface.",
+                    )
+                    .weak()
+                    .small(),
+                );
+            });
+        }
 
         ui.add_space(12.0);
         ui.separator();

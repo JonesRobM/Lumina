@@ -29,6 +29,7 @@ pub mod solver;
 pub mod time_domain;
 pub mod types;
 
-// Re-export frequently used periodic-array types for convenience.
+// Re-export frequently used types for convenience.
 pub use solver::ewald::EwaldGreens;
+pub use solver::substrate::SubstrateSpec;
 pub use types::{BlochCrossSections, DispersionMap};

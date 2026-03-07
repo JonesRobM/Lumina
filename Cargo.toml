@@ -10,7 +10,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
 authors = ["Lumina Contributors"]
 license = "Apache-2.0"
@@ -61,3 +61,5 @@ lumina-core = { path = "crates/lumina-core" }
 lumina-compute = { path = "crates/lumina-compute" }
 lumina-geometry = { path = "crates/lumina-geometry" }
 lumina-materials = { path = "crates/lumina-materials" }
+lumina-gui = { path = "crates/lumina-gui" }
+lumina-cli = { path = "crates/lumina-cli" }

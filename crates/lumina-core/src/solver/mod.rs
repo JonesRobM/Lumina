@@ -7,6 +7,7 @@
 
 pub mod cda;
 pub mod ewald;
+pub mod substrate;
 
 use crate::types::{CrossSections, Dipole, DipoleResponse, FarFieldMap, NearFieldMap, SimulationParams};
 use thiserror::Error;

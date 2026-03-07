@@ -12,8 +12,11 @@
 //!   mirror operations.
 
 pub mod discretise;
+pub mod ellipsoid;
 pub mod lattice;
 pub mod parsers;
 pub mod primitives;
 pub mod scene;
 pub mod transform;
+
+pub use ellipsoid::ellipsoid_depol_factors;

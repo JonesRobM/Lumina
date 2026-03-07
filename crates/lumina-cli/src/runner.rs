@@ -10,9 +10,11 @@ use rayon::prelude::*;
 
 use lumina_compute::ComputeBackend;
 use lumina_core::solver::cda::CdaSolver;
+use lumina_core::solver::substrate::fresnel_delta_eps;
 use lumina_core::solver::{NearFieldPlane, OpticalSolver, SolverError};
 use lumina_core::types::{
-    clausius_mossotti, radiative_correction, CrossSections, Dipole, NearFieldMap, SimulationParams,
+    clausius_mossotti, ellipsoid_polarisability_tensor, radiative_correction, CrossSections,
+    Dipole, NearFieldMap, SimulationParams,
 };
 use lumina_materials::johnson_christy::JohnsonChristyMaterial;
 use lumina_materials::palik::PalikMaterial;
@@ -50,6 +52,11 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
         solver_tolerance: job.simulation.solver_tolerance,
         max_iterations: job.simulation.max_iterations,
         k_bloch: [0.0, 0.0, 0.0],
+        substrate_z_interface: job.simulation.substrate
+            .as_ref()
+            .map(|s| s.z_interface)
+            .unwrap_or(0.0),
+        substrate_delta_eps: None, // resolved per-wavelength below
     };
 
     // Build dipoles from the scene specification.
@@ -81,6 +88,7 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
     // Run simulation across wavelengths — parallel via Rayon.
     let solver = CdaSolver {
         backend,
+        substrate: job.simulation.substrate.clone(),
         ..Default::default()
     };
 
@@ -95,6 +103,15 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
             let k = 2.0 * std::f64::consts::PI * params.environment_n / wl;
             let epsilon_m = params.environment_n * params.environment_n;
 
+            // Resolve substrate Fresnel factor for this wavelength.
+            let mut params_wl = params.clone();
+            if let Some(sub) = &job.simulation.substrate {
+                let eps_sub = resolve_material_epsilon(
+                    &sub.material, wl, &gold, &silver, &copper, &tio2, &sio2,
+                ).map_err(|e| anyhow::anyhow!("{}", e))?;
+                params_wl.substrate_delta_eps = Some(fresnel_delta_eps(eps_sub, epsilon_m));
+            }
+
             let mut dipoles = Vec::with_capacity(total_dipoles);
             for i in 0..total_dipoles {
                 let epsilon = resolve_material_epsilon(
@@ -102,12 +119,22 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
                 )
                 .map_err(|e| anyhow::anyhow!("{}", e))?;
                 let volume = geom.spacings[i].powi(3);
-                let alpha_cm = clausius_mossotti(volume, epsilon, epsilon_m);
-                let alpha = radiative_correction(alpha_cm, k);
-                dipoles.push(Dipole::isotropic(geom.positions[i], alpha));
+                let dipole = if let Some(hint) = &geom.hints[i] {
+                    // Anisotropic path: ellipsoidal depolarisation factors.
+                    let tensor = ellipsoid_polarisability_tensor(
+                        volume, hint.depol_factors, epsilon, epsilon_m, k, hint.rotation,
+                    );
+                    Dipole { position: geom.positions[i], polarisability: tensor }
+                } else {
+                    // Isotropic path: standard spherical CM.
+                    let alpha_cm = clausius_mossotti(volume, epsilon, epsilon_m);
+                    let alpha = radiative_correction(alpha_cm, k);
+                    Dipole::isotropic(geom.positions[i], alpha)
+                };
+                dipoles.push(dipole);
             }
 
-            let cs = match solver.compute_cross_sections(&dipoles, wl, &params) {
+            let cs = match solver.compute_cross_sections(&dipoles, wl, &params_wl) {
                 Ok(cs) => cs,
                 Err(SolverError::ConvergenceFailure { max_iter, residual }) => {
                     eprintln!(
@@ -165,18 +192,33 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
         // Rebuild dipoles at the peak wavelength
         let k_peak = 2.0 * std::f64::consts::PI * params.environment_n / peak_wl;
         let epsilon_m = params.environment_n * params.environment_n;
+        let mut peak_params = params.clone();
+        if let Some(sub) = &job.simulation.substrate {
+            let eps_sub = resolve_material_epsilon(
+                &sub.material, peak_wl, &gold, &silver, &copper, &tio2, &sio2,
+            )?;
+            peak_params.substrate_delta_eps = Some(fresnel_delta_eps(eps_sub, epsilon_m));
+        }
         let mut peak_dipoles = Vec::with_capacity(total_dipoles);
         for i in 0..total_dipoles {
             let epsilon = resolve_material_epsilon(
                 &geom.materials[i], peak_wl, &gold, &silver, &copper, &tio2, &sio2,
             )?;
             let volume = geom.spacings[i].powi(3);
-            let alpha_cm = clausius_mossotti(volume, epsilon, epsilon_m);
-            let alpha = radiative_correction(alpha_cm, k_peak);
-            peak_dipoles.push(Dipole::isotropic(geom.positions[i], alpha));
+            let dipole = if let Some(hint) = &geom.hints[i] {
+                let tensor = ellipsoid_polarisability_tensor(
+                    volume, hint.depol_factors, epsilon, epsilon_m, k_peak, hint.rotation,
+                );
+                Dipole { position: geom.positions[i], polarisability: tensor }
+            } else {
+                let alpha_cm = clausius_mossotti(volume, epsilon, epsilon_m);
+                let alpha = radiative_correction(alpha_cm, k_peak);
+                Dipole::isotropic(geom.positions[i], alpha)
+            };
+            peak_dipoles.push(dipole);
         }
 
-        match solver.solve_dipoles(&peak_dipoles, peak_wl, &params) {
+        match solver.solve_dipoles(&peak_dipoles, peak_wl, &peak_params) {
             Ok(response) => {
                 // Estimate bounding radius of the structure for the observation plane
                 let half_extent = geom.positions

@@ -67,14 +67,17 @@ impl LuminaApp {
         // Capture everything the thread needs by value.
         let scene: SceneSpec = self.scene_panel.scene.clone();
 
-        let wl_start    = self.simulation_state.wavelength_start;
-        let wl_end      = self.simulation_state.wavelength_end;
-        let num_wl      = self.simulation_state.num_wavelengths;
-        let env_n       = self.simulation_state.environment_n;
-        let polarisation = self.simulation_state.polarisation;
-        let compute_cd  = self.simulation_state.compute_cd;
-        let use_gpu     = self.simulation_state.use_gpu;
-        let debug       = self.simulation_state.debug_output;
+        let wl_start         = self.simulation_state.wavelength_start;
+        let wl_end           = self.simulation_state.wavelength_end;
+        let num_wl           = self.simulation_state.num_wavelengths;
+        let env_n            = self.simulation_state.environment_n;
+        let polarisation     = self.simulation_state.polarisation;
+        let compute_cd       = self.simulation_state.compute_cd;
+        let use_gpu          = self.simulation_state.use_gpu;
+        let debug            = self.simulation_state.debug_output;
+        let enable_substrate = self.simulation_state.enable_substrate;
+        let substrate_z      = self.simulation_state.substrate_z_interface;
+        let substrate_mat    = self.simulation_state.substrate_material.clone();
 
         std::thread::spawn(move || {
             use std::sync::Arc;
@@ -85,9 +88,11 @@ impl LuminaApp {
             use lumina_compute::ComputeBackend;
             use lumina_core::fields::compute_circular_dichroism;
             use lumina_core::solver::cda::CdaSolver;
+            use lumina_core::solver::substrate::{fresnel_delta_eps, SubstrateSpec};
             use lumina_core::solver::{NearFieldPlane, OpticalSolver, SolverError};
             use lumina_core::types::{
-                clausius_mossotti, radiative_correction, Dipole, IncidentField, SimulationParams,
+                clausius_mossotti, ellipsoid_polarisability_tensor, radiative_correction,
+                Dipole, IncidentField, SimulationParams,
             };
             use lumina_materials::johnson_christy::JohnsonChristyMaterial;
             use lumina_materials::palik::PalikMaterial;
@@ -182,6 +187,7 @@ impl LuminaApp {
                 wavelength_range: [wl_start, wl_end],
                 num_wavelengths: num_wl,
                 environment_n: env_n,
+                substrate_z_interface: substrate_z,
                 ..Default::default()
             };
 
@@ -210,15 +216,23 @@ impl LuminaApp {
             };
 
             // Each solver carries its own Arc<backend>.
+            let substrate_spec = if enable_substrate {
+                Some(SubstrateSpec { z_interface: substrate_z, material: substrate_mat.clone() })
+            } else {
+                None
+            };
+
             let mut solver_x = CdaSolver::with_incident(
                 1000, true, geom.spacings[0], primary,
             );
             solver_x.backend = Arc::clone(&backend);
+            solver_x.substrate = substrate_spec.clone();
 
             let mut solver_y = CdaSolver::with_incident(
                 1000, true, geom.spacings[0], incident_y.clone(),
             );
             solver_y.backend = Arc::clone(&backend);
+            solver_y.substrate = substrate_spec;
 
             // ── Wavelength sweep ─────────────────────────────────────────────
             let wavelengths: Vec<f64> = (0..num_wl)
@@ -238,20 +252,47 @@ impl LuminaApp {
                     let t0 = std::time::Instant::now();
                     let k = k_of(wl);
 
+                    // Resolve substrate Fresnel factor for this wavelength.
+                    let mut params_wl = params.clone();
+                    if enable_substrate {
+                        match resolve_eps(&substrate_mat, wl) {
+                            Ok(eps_sub) => {
+                                params_wl.substrate_delta_eps =
+                                    Some(fresnel_delta_eps(eps_sub, epsilon_m));
+                            }
+                            Err(e) => {
+                                if let Ok(lock) = tx_par.lock() {
+                                    let _ = lock.send(SimulationMessage::DebugLog(format!(
+                                        "Substrate material error at λ={wl:.1} nm: {e}"
+                                    )));
+                                }
+                            }
+                        }
+                    }
+
                     // Build per-dipole polarisabilities for this wavelength.
                     let mut dipoles = Vec::with_capacity(n);
                     for i in 0..n {
                         let eps = resolve_eps(&geom.materials[i], wl).map_err(|e| {
                             format!("Material error at λ={wl:.1} nm: {e}")
                         })?;
-                        let alpha_cm = clausius_mossotti(
-                            geom.spacings[i].powi(3), eps, epsilon_m,
-                        );
-                        let alpha = radiative_correction(alpha_cm, k);
-                        dipoles.push(Dipole::isotropic(geom.positions[i], alpha));
+                        let volume = geom.spacings[i].powi(3);
+                        let dipole = if let Some(hint) = &geom.hints[i] {
+                            // Anisotropic path: ellipsoidal depolarisation factors.
+                            let tensor = ellipsoid_polarisability_tensor(
+                                volume, hint.depol_factors, eps, epsilon_m, k, hint.rotation,
+                            );
+                            Dipole { position: geom.positions[i], polarisability: tensor }
+                        } else {
+                            // Isotropic path: standard spherical CM.
+                            let alpha_cm = clausius_mossotti(volume, eps, epsilon_m);
+                            let alpha = radiative_correction(alpha_cm, k);
+                            Dipole::isotropic(geom.positions[i], alpha)
+                        };
+                        dipoles.push(dipole);
                     }
 
-                    let mut cs = match solver_x.compute_cross_sections(&dipoles, wl, &params) {
+                    let mut cs = match solver_x.compute_cross_sections(&dipoles, wl, &params_wl) {
                         Ok(cs) => cs,
                         Err(SolverError::ConvergenceFailure { max_iter, residual }) => {
                             if let Ok(lock) = tx_par.lock() {
@@ -273,8 +314,8 @@ impl LuminaApp {
 
                     // Optional CD pass.
                     if compute_cd && !cs.extinction.is_nan() {
-                        let rx = solver_x.solve_dipoles(&dipoles, wl, &params);
-                        let ry = solver_y.solve_dipoles(&dipoles, wl, &params);
+                        let rx = solver_x.solve_dipoles(&dipoles, wl, &params_wl);
+                        let ry = solver_y.solve_dipoles(&dipoles, wl, &params_wl);
                         if let (Ok(rx), Ok(ry)) = (rx, ry) {
                             cs.circular_dichroism = Some(compute_circular_dichroism(&rx, &ry, k));
                         }
@@ -338,7 +379,14 @@ impl LuminaApp {
             let mut far_field = None;
 
             if !peak_dipoles.is_empty() {
-                if let Ok(response) = solver_x.solve_dipoles(&peak_dipoles, peak_wl, &params) {
+                let mut peak_params = params.clone();
+                if enable_substrate {
+                    if let Ok(eps_sub) = resolve_eps(&substrate_mat, peak_wl) {
+                        peak_params.substrate_delta_eps =
+                            Some(fresnel_delta_eps(eps_sub, epsilon_m));
+                    }
+                }
+                if let Ok(response) = solver_x.solve_dipoles(&peak_dipoles, peak_wl, &peak_params) {
                     let plane_half = (half_extent * 2.0).max(20.0);
                     let plane = NearFieldPlane {
                         centre: [0.0, 0.0, 0.0],

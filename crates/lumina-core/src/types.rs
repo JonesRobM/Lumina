@@ -90,6 +90,17 @@ pub struct SimulationParams {
     /// Use `[0.0, 0.0, 0.0]` for the Γ point (normal incidence).
     #[serde(default)]
     pub k_bloch: [f64; 3],
+    /// z-coordinate of the substrate interface in nm. Ignored when
+    /// `substrate_delta_eps` is `None`. Defaults to 0.0.
+    #[serde(default)]
+    pub substrate_z_interface: f64,
+    /// Pre-computed Fresnel reflection factor Δε = (ε_sub − ε_env)/(ε_sub + ε_env)
+    /// at the current wavelength. `None` = free-space (no substrate).
+    ///
+    /// Not parsed from TOML; set per-wavelength by the runner after resolving
+    /// the substrate material's dielectric function.
+    #[serde(skip, default)]
+    pub substrate_delta_eps: Option<Complex64>,
 }
 
 impl Default for SimulationParams {
@@ -101,6 +112,8 @@ impl Default for SimulationParams {
             solver_tolerance: 1e-6,
             max_iterations: 1000,
             k_bloch: [0.0, 0.0, 0.0],
+            substrate_z_interface: 0.0,
+            substrate_delta_eps: None,
         }
     }
 }
@@ -241,6 +254,64 @@ pub fn clausius_mossotti(volume_nm3: f64, epsilon: Complex64, epsilon_m: f64) ->
 pub fn radiative_correction(alpha_cm: Complex64, k: f64) -> Complex64 {
     let correction = Complex64::new(0.0, k.powi(3) / (6.0 * std::f64::consts::PI));
     alpha_cm / (Complex64::from(1.0) - correction * alpha_cm)
+}
+
+/// Compute the full 3×3 polarisability tensor for an ellipsoidal dipole cell.
+///
+/// Uses the generalised Clausius-Mossotti formula with per-axis depolarisation
+/// factors, then applies the Draine radiative reaction correction per component,
+/// and finally rotates the diagonal tensor to the lab (world) frame:
+///
+/// $$\boldsymbol{\alpha} = R\,\text{diag}(\alpha_x, \alpha_y, \alpha_z)\,R^T$$
+///
+/// The per-axis CM polarisability is:
+/// $$\alpha_i^{\text{CM}} = V \frac{\varepsilon - \varepsilon_m}
+///   {\varepsilon_m + L_i(\varepsilon - \varepsilon_m)}$$
+///
+/// Reduces to the standard isotropic formula when $L_i = 1/3$ and $R = I$.
+///
+/// # Arguments
+/// * `volume_nm3`  — Dipole cell volume in nm³ (typically $d^3$ for spacing $d$).
+/// * `depol`       — Depolarisation factors $[L_x, L_y, L_z]$ in the object-local frame.
+/// * `epsilon`     — Complex dielectric function of the material at this wavelength.
+/// * `epsilon_m`   — Surrounding medium dielectric constant $\varepsilon_m = n_m^2$.
+/// * `k`           — Wavenumber in the medium in nm⁻¹.
+/// * `rot`         — 3×3 rotation matrix (row-major `[f64; 9]`) from the
+///                   object-local principal-axis frame to the lab frame.
+///
+/// # Returns
+/// Full 3×3 complex polarisability tensor as `[Complex64; 9]` in row-major order.
+pub fn ellipsoid_polarisability_tensor(
+    volume_nm3: f64,
+    depol: [f64; 3],
+    epsilon: Complex64,
+    epsilon_m: f64,
+    k: f64,
+    rot: [f64; 9],
+) -> [Complex64; 9] {
+    let eps_m = Complex64::from(epsilon_m);
+    let delta_eps = epsilon - eps_m;
+
+    // Compute the three principal-axis polarisabilities.
+    let alphas: [Complex64; 3] = std::array::from_fn(|i| {
+        let denom = eps_m + Complex64::from(depol[i]) * delta_eps;
+        let alpha_cm = volume_nm3 * delta_eps / denom;
+        radiative_correction(alpha_cm, k)
+    });
+
+    // Rotate to lab frame: α = R · diag(αx, αy, αz) · Rᵀ
+    // Element (i,j) = Σ_k rot[i*3+k] * alphas[k] * rot[j*3+k]
+    let mut tensor = [Complex64::from(0.0); 9];
+    for i in 0..3 {
+        for j in 0..3 {
+            let mut s = Complex64::from(0.0);
+            for k in 0..3 {
+                s += alphas[k] * rot[i * 3 + k] * rot[j * 3 + k];
+            }
+            tensor[i * 3 + j] = s;
+        }
+    }
+    tensor
 }
 
 /// Apply the Lattice Dispersion Relation (LDR) correction to the polarisability.

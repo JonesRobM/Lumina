@@ -113,23 +113,62 @@
 
 ### Deferred to v0.2.2+
 
-- [ ] Persistent GPU buffers (eliminate per-matvec allocation overhead)
+- [x] Persistent GPU buffers (eliminate per-matvec allocation overhead)
+- [x] Complex assembly builder (SceneSpec, multi-object scenes)
 - [ ] FFT-accelerated matvec for regular lattices (block-Toeplitz)
 - [ ] GPU matrix assembly shader
 - [ ] Surface averaging for metallic convergence
 
-## v0.3.0 — Nonlinear Optics & Periodicity
+## v0.2.2 — Persistent Buffers & Scene Assembly
 
+### Persistent GPU Session Buffers
+
+- [x] `MatvecSession` trait: `upload_matrix` + `matvec` — matrix uploaded once per wavelength
+- [x] `GpuSession`: 5 pre-allocated WGSL buffers + pre-built bind group, reused across all GMRES iterations
+- [x] `GpuBackend` holds `Arc<Mutex<GpuState>>` — thread-safe across Rayon wavelength workers
+- [x] Per-matvec overhead eliminated: 7 allocations → 0, 300 matrix writes → 1 per wavelength
+
+### SceneSpec — Complex Assembly Builder
+
+- [x] `SceneSpec` in `lumina-geometry`: shared GUI+CLI scene description, serialisable to/from TOML
+- [x] `[[geometry.object]]` arrays: each entry is an `ObjectSpec` with name, shape, material, spacing, transform
+- [x] `ObjectTransform`: position (nm), rotation\_deg (Euler XYZ), scale factor
+- [x] CoreShell geometry: concentric shell layers, each with its own material
+- [x] `SceneSpec::build_geometry()` → flat `SceneDipoles { positions, materials, spacings, hints }`
+- [x] GUI: `ScenePanel` replaces old `GeometryPanel` + `MaterialsPanel`
+- [x] CLI: `JobConfig.geometry: SceneSpec`; per-dipole material resolution in runner
+
+### v0.2.2 Performance Notes
+
+- GPU session buffers eliminate all per-iteration allocation overhead on the GPU path
+- At N = 1000–3000, GPU path now competitive with CPU; speedup expected at N > 5000
+
+## v0.3.0 — Periodic Structures & Extended Geometry
+
+### Periodic Structures
+
+- [x] `LatticeSpec` in `lumina-geometry`: 1D chain or 2D planar lattice specification
+- [x] Direct real-space lattice sum in `EwaldGreens` (finite shell cutoff, exact for small unit cells)
+- [x] `SimulationParams.k_bloch: [f64; 3]` — Bloch wavevector for oblique incidence
+- [x] New result types: `BlochCrossSections`, `DispersionMap` for band structure sweeps
+- [ ] Full Ewald acceleration (erfc real-space + spectral G-sum via Faddeeva w(z)) — deferred to v0.4
+
+### Extended Geometry
+
+- [x] CoreShell (concentric ellipsoidal shells, arbitrary number of layers)
+- [x] Anisotropic ellipsoid dipoles: per-dipole 3×3 polarisability tensor from depolarisation factors
+- [x] Depolarisation factors via 16-point Gauss–Legendre quadrature (`ellipsoid_depol_factors`)
+- [x] `SubstrateSpec`: image-dipole substrate (Fresnel reflection, flat interface below the structure)
+
+### Other
+
+- [x] Palik dielectric data (TiO₂, SiO₂) — shipped in v0.1.3
+- [ ] Extended Palik library (Al₂O₃, Si, GaAs, etc.)
 - [ ] SHG source term computation from local fields
 - [ ] THG source term computation
 - [ ] χ(2) symmetry group handling
-- [ ] Time-domain field reconstruction via inverse FFT
-- [ ] Ewald summation for 1D/2D/3D periodicity
-- [ ] Bloch boundary conditions for oblique incidence
-- [ ] MPI distributed computing backend
-- [x] Palik dielectric data (TiO₂, SiO₂) — shipped in v0.1.3
-- [ ] Extended Palik library (Al₂O₃, Si, GaAs, etc.)
 - [ ] DFT polarisability import (VASP, Gaussian)
+- [ ] MPI distributed computing backend
 
 ## v1.0 — Multi-Method & Cross-Platform
 
