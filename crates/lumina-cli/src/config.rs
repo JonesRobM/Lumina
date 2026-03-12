@@ -12,6 +12,9 @@ pub struct JobConfig {
     pub geometry: SceneSpec,
     #[serde(default)]
     pub output: OutputConfig,
+    /// Optional nonlinear optics configuration. Absent means linear-only.
+    #[serde(default)]
+    pub nonlinear: Option<NonlinearConfig>,
 }
 
 /// Simulation parameters from TOML.
@@ -96,6 +99,61 @@ fn default_output_dir() -> String {
 }
 fn default_true() -> bool {
     true
+}
+
+/// Configuration for nonlinear optical response calculations.
+///
+/// Example `job.toml` section:
+/// ```toml
+/// [nonlinear]
+/// enable_shg = true
+/// symmetry = "isotropic_surface"
+/// chi_zzz = [1.0, 0.0]   # [real, imag] in nm³
+/// chi_zxx = [0.3, 0.0]
+/// far_field = false
+///
+/// enable_thg = true
+/// chi3_symmetry = "isotropic_bulk"
+/// chi3_xxxx = [1.0, 0.0]   # [real, imag] in nm⁶
+/// chi3_xxyy = [0.25, 0.0]
+/// ```
+#[derive(Debug, Deserialize, Default)]
+pub struct NonlinearConfig {
+    /// Enable second-harmonic generation (SHG) calculation. Default: false.
+    #[serde(default)]
+    pub enable_shg: bool,
+    /// χ^(2) symmetry class applied to every dipole.
+    /// Valid values: `"isotropic_surface"` (C_∞v, surface normal along **z**),
+    /// `"zero"` (centrosymmetric, default).
+    #[serde(default = "default_shg_symmetry")]
+    pub symmetry: String,
+    /// χ_zzz component `[real, imag]` in nm³. Required for `isotropic_surface`.
+    pub chi_zzz: Option<[f64; 2]>,
+    /// χ_zxx component `[real, imag]` in nm³. Required for `isotropic_surface`.
+    pub chi_zxx: Option<[f64; 2]>,
+    /// Compute far-field radiation pattern at $2\omega$. Default: false.
+    #[serde(default)]
+    pub far_field: bool,
+    /// Enable third-harmonic generation (THG) calculation. Default: false.
+    #[serde(default)]
+    pub enable_thg: bool,
+    /// χ^(3) symmetry class applied to every dipole.
+    /// Valid values: `"isotropic_bulk"` (Kleinman-symmetric isotropic bulk),
+    /// `"zero"` (default).
+    #[serde(default = "default_chi3_symmetry")]
+    pub chi3_symmetry: String,
+    /// χ_xxxx component `[real, imag]` in nm⁶. Required for `isotropic_bulk`.
+    pub chi3_xxxx: Option<[f64; 2]>,
+    /// χ_xxyy component `[real, imag]` in nm⁶. Required for `isotropic_bulk`.
+    pub chi3_xxyy: Option<[f64; 2]>,
+}
+
+fn default_shg_symmetry() -> String {
+    "zero".into()
+}
+
+fn default_chi3_symmetry() -> String {
+    "zero".into()
 }
 
 /// Load and parse a TOML job configuration file.

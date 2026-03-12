@@ -75,6 +75,18 @@ fn main() -> anyhow::Result<()> {
                 runner::write_near_field_csv(nf, &nf_path)?;
             }
 
+            // SHG spectrum (if nonlinear was enabled)
+            if !result.shg_spectra.is_empty() {
+                let shg_path = out_dir.join("shg_spectrum.csv");
+                runner::write_shg_csv(&result.shg_spectra, &shg_path, &job)?;
+            }
+
+            // THG spectrum (if nonlinear THG was enabled)
+            if !result.thg_spectra.is_empty() {
+                let thg_path = out_dir.join("thg_spectrum.csv");
+                runner::write_thg_csv(&result.thg_spectra, &thg_path, &job)?;
+            }
+
             println!("Simulation complete.");
             Ok(())
         }

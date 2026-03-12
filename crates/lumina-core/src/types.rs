@@ -314,6 +314,241 @@ pub fn ellipsoid_polarisability_tensor(
     tensor
 }
 
+/// Second-order nonlinear susceptibility tensor χ^(2).
+///
+/// A rank-3 tensor with components $\chi^{(2)}_{abc}$, where index $a$ is the
+/// output polarisation direction and $b$, $c$ are the input polarisation
+/// directions of the two fundamental photons.
+///
+/// The nonlinear dipole moment at $2\omega$ is:
+/// $$p_a(2\omega) = \sum_{b,c} \chi^{(2)}_{abc}\,
+///   E_{\text{loc},b}(\omega)\, E_{\text{loc},c}(\omega)$$
+///
+/// In our unit convention (ε₀ absorbed, lengths in nm), χ^(2) has units of nm³.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Chi2Tensor {
+    /// Tensor components in row-major order.
+    /// Component $(a,b,c)$ is at index `a*9 + b*3 + c`.
+    pub components: [Complex64; 27],
+}
+
+impl Chi2Tensor {
+    /// Zero tensor — no second-order response (centrosymmetric material).
+    pub fn zero() -> Self {
+        Self { components: [Complex64::new(0.0, 0.0); 27] }
+    }
+
+    /// Construct from explicit 27 components (row-major).
+    pub fn from_components(components: [Complex64; 27]) -> Self {
+        Self { components }
+    }
+
+    /// Contract with a local field vector: $p_a = \sum_{b,c} \chi_{abc} E_b E_c$.
+    ///
+    /// # Arguments
+    /// * `e` — Local electric field $[E_x, E_y, E_z]$ at frequency $\omega$.
+    ///
+    /// # Returns
+    /// Nonlinear dipole moment $[p_x, p_y, p_z]$ at frequency $2\omega$.
+    pub fn contract(&self, e: &[Complex64; 3]) -> [Complex64; 3] {
+        let mut p = [Complex64::new(0.0, 0.0); 3];
+        for a in 0..3 {
+            for b in 0..3 {
+                for c in 0..3 {
+                    p[a] += self.components[a * 9 + b * 3 + c] * e[b] * e[c];
+                }
+            }
+        }
+        p
+    }
+
+    /// Isotropic surface tensor with surface normal along **z** (symmetry group C_∞v).
+    ///
+    /// The independent non-zero elements are:
+    /// - $\chi_{zzz}$ (normal–normal–normal)
+    /// - $\chi_{zxx} = \chi_{zyy}$ (normal–tangential–tangential)
+    /// - $\chi_{xxz} = \chi_{xzx} = \chi_{yyz} = \chi_{yzy}$ (Kleinman symmetry)
+    ///
+    /// # Arguments
+    /// * `chi_zzz` — Normal–normal–normal component.
+    /// * `chi_zxx` — Normal–tangential–tangential component.
+    ///   Kleinman symmetry gives $\chi_{xxz} = \chi_{zxx}$.
+    pub fn isotropic_surface(chi_zzz: Complex64, chi_zxx: Complex64) -> Self {
+        let mut t = Self::zero();
+        // χ_zzz: (2,2,2)
+        t.components[2 * 9 + 2 * 3 + 2] = chi_zzz;
+        // χ_zxx = χ_zyy: (2,0,0) and (2,1,1)
+        t.components[2 * 9 + 0 * 3 + 0] = chi_zxx;
+        t.components[2 * 9 + 1 * 3 + 1] = chi_zxx;
+        // χ_xxz = χ_xzx: (0,0,2) and (0,2,0)  [Kleinman: χ_xxz = χ_zxx]
+        t.components[0 * 9 + 0 * 3 + 2] = chi_zxx;
+        t.components[0 * 9 + 2 * 3 + 0] = chi_zxx;
+        // χ_yyz = χ_yzy: (1,1,2) and (1,2,1)
+        t.components[1 * 9 + 1 * 3 + 2] = chi_zxx;
+        t.components[1 * 9 + 2 * 3 + 1] = chi_zxx;
+        t
+    }
+}
+
+/// Result from a second-harmonic generation (SHG) calculation.
+///
+/// Produced by [`crate::nonlinear::compute_shg_response`].
+#[derive(Debug, Clone)]
+pub struct ShgResult {
+    /// Fundamental frequency wavelength $\omega$ (nm).
+    pub fundamental_nm: f64,
+    /// Second-harmonic wavelength $\lambda/2$ (nm).
+    pub harmonic_nm: f64,
+    /// Nonlinear source moments at $2\omega$ before inter-dipole coupling,
+    /// shape $(N, 3)$.
+    ///
+    /// $p^{\text{NL}}_{i,a} = \sum_{b,c} \chi^{(2)}_{abc}\,
+    ///   E_{\text{loc},b}(\omega)\, E_{\text{loc},c}(\omega)$
+    pub source_moments: Array2<Complex64>,
+    /// Self-consistently driven dipole moments at $2\omega$, shape $(N, 3)$.
+    ///
+    /// Solution of $\mathbf{A}(2\omega)\,\mathbf{p}(2\omega) = \mathbf{p}^{\text{NL}}$.
+    pub driven_moments: Array2<Complex64>,
+    /// Total SHG intensity $\propto \sum_i |\mathbf{p}_i(2\omega)|^2$ (nm⁶, unnormalised).
+    ///
+    /// Scales as $|E_{\text{inc}}|^4$. Use this for spectral sweeps and
+    /// relative comparisons between structures or wavelengths.
+    pub shg_intensity: f64,
+    /// Far-field radiation pattern at $2\omega$. `None` unless `calc_far_field`
+    /// was `true` when calling [`crate::nonlinear::compute_shg_response`].
+    pub far_field: Option<FarFieldMap>,
+}
+
+/// Third-order nonlinear susceptibility tensor χ^(3).
+///
+/// A rank-4 tensor with components $\chi^{(3)}_{abcd}$, where index $a$ is the
+/// output polarisation direction and $b$, $c$, $d$ are the input polarisation
+/// directions of the three fundamental photons.
+///
+/// The nonlinear dipole moment at $3\omega$ is:
+/// $$p_a(3\omega) = \sum_{b,c,d} \chi^{(3)}_{abcd}\,
+///   E_{\text{loc},b}(\omega)\, E_{\text{loc},c}(\omega)\, E_{\text{loc},d}(\omega)$$
+///
+/// In our unit convention (ε₀ absorbed, lengths in nm), χ^(3) has units of nm⁶.
+#[derive(Debug, Clone)]
+pub struct Chi3Tensor {
+    /// Tensor components in row-major order.
+    /// Component $(a,b,c,d)$ is at index `a*27 + b*9 + c*3 + d`.
+    pub components: [Complex64; 81],
+}
+
+impl Chi3Tensor {
+    /// Zero tensor — no third-order response (e.g. vanishing χ^(3)).
+    pub fn zero() -> Self {
+        Self { components: [Complex64::new(0.0, 0.0); 81] }
+    }
+
+    /// Construct from explicit 81 components (row-major).
+    pub fn from_components(components: [Complex64; 81]) -> Self {
+        Self { components }
+    }
+
+    /// Contract with a local field vector:
+    /// $p_a = \sum_{b,c,d} \chi_{abcd} E_b E_c E_d$.
+    ///
+    /// # Arguments
+    /// * `e` — Local electric field $[E_x, E_y, E_z]$ at frequency $\omega$.
+    ///
+    /// # Returns
+    /// Nonlinear dipole moment $[p_x, p_y, p_z]$ at frequency $3\omega$.
+    pub fn contract(&self, e: &[Complex64; 3]) -> [Complex64; 3] {
+        let mut out = [Complex64::new(0.0, 0.0); 3];
+        for a in 0..3 {
+            for b in 0..3 {
+                for c in 0..3 {
+                    for d in 0..3 {
+                        out[a] += self.components[a * 27 + b * 9 + c * 3 + d]
+                            * e[b]
+                            * e[c]
+                            * e[d];
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Isotropic bulk (centrosymmetric, Kleinman-symmetric) tensor.
+    ///
+    /// For an isotropic medium the independent components are $\chi_{xxxx}$ and
+    /// $\chi_{xxyy}$.  Under Kleinman symmetry
+    /// $\chi_{xyxy} = \chi_{xyyx} = \chi_{xxyy}$.
+    ///
+    /// The full tensor:
+    /// $$\chi_{abcd} = \chi_{xxyy}(\delta_{ab}\delta_{cd}
+    ///   + \delta_{ac}\delta_{bd} + \delta_{ad}\delta_{bc})
+    ///   + (\chi_{xxxx} - 3\chi_{xxyy})\,\delta_{ab}\delta_{ac}\delta_{ad}$$
+    ///
+    /// # Arguments
+    /// * `chi_xxxx` — Diagonal component.
+    /// * `chi_xxyy` — Off-diagonal component (Kleinman: $\chi_{xyxy} = \chi_{xxyy}$).
+    pub fn isotropic_bulk(chi_xxxx: Complex64, chi_xxyy: Complex64) -> Self {
+        let mut t = Self::zero();
+        let extra_diag = chi_xxxx - Complex64::from(3.0) * chi_xxyy;
+        for a in 0..3usize {
+            for b in 0..3usize {
+                for c in 0..3usize {
+                    for d in 0..3usize {
+                        let mut val = Complex64::new(0.0, 0.0);
+                        // δ_ab δ_cd term
+                        if a == b && c == d {
+                            val += chi_xxyy;
+                        }
+                        // δ_ac δ_bd term
+                        if a == c && b == d {
+                            val += chi_xxyy;
+                        }
+                        // δ_ad δ_bc term
+                        if a == d && b == c {
+                            val += chi_xxyy;
+                        }
+                        // Diagonal correction: only when a=b=c=d
+                        if a == b && b == c && c == d {
+                            val += extra_diag;
+                        }
+                        t.components[a * 27 + b * 9 + c * 3 + d] = val;
+                    }
+                }
+            }
+        }
+        t
+    }
+}
+
+/// Result from a third-harmonic generation (THG) calculation.
+///
+/// Produced by [`crate::nonlinear::compute_thg_response`].
+#[derive(Debug, Clone)]
+pub struct ThgResult {
+    /// Fundamental frequency wavelength $\omega$ (nm).
+    pub fundamental_nm: f64,
+    /// Third-harmonic wavelength $\lambda/3$ (nm).
+    pub harmonic_nm: f64,
+    /// Nonlinear source moments at $3\omega$ before inter-dipole coupling,
+    /// shape $(N, 3)$.
+    ///
+    /// $p^{\text{NL}}_{i,a} = \sum_{b,c,d} \chi^{(3)}_{abcd}\,
+    ///   E_{\text{loc},b}(\omega)\, E_{\text{loc},c}(\omega)\, E_{\text{loc},d}(\omega)$
+    pub source_moments: Array2<Complex64>,
+    /// Self-consistently driven dipole moments at $3\omega$, shape $(N, 3)$.
+    ///
+    /// Solution of $\mathbf{A}(3\omega)\,\mathbf{p}(3\omega) = \mathbf{p}^{\text{NL}}$.
+    pub driven_moments: Array2<Complex64>,
+    /// Total THG intensity $\propto \sum_i |\mathbf{p}_i(3\omega)|^2$ (nm⁹, unnormalised).
+    ///
+    /// Scales as $|E_{\text{inc}}|^6$. Use this for spectral sweeps and
+    /// relative comparisons between structures or wavelengths.
+    pub thg_intensity: f64,
+    /// Far-field radiation pattern at $3\omega$. `None` unless `calc_far_field`
+    /// was `true` when calling [`crate::nonlinear::compute_thg_response`].
+    pub far_field: Option<FarFieldMap>,
+}
+
 /// Apply the Lattice Dispersion Relation (LDR) correction to the polarisability.
 ///
 /// The LDR correction (Draine & Goodman, *Astrophys. J.* **405**, 685, 1993)

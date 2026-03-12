@@ -118,6 +118,56 @@ impl CdaSolver {
         }
     }
 
+    /// Compute cross-sections from a pre-solved [`DipoleResponse`].
+    ///
+    /// Avoids re-solving the linear system when the dipole response is already
+    /// available — for example when also computing the SHG response at the same
+    /// wavelength.
+    pub fn cross_sections_from_response(
+        &self,
+        dipoles: &[Dipole],
+        response: &DipoleResponse,
+        params: &SimulationParams,
+    ) -> CrossSections {
+        let k = Self::wavenumber(response.wavelength_nm, params.environment_n);
+        let e0_sq = self.incident_field.amplitude * self.incident_field.amplitude;
+        let n = dipoles.len();
+
+        let mut c_ext = 0.0;
+        for i in 0..n {
+            let e_inc = self.incident_field.at_position(&dipoles[i].position, k);
+            for c in 0..3 {
+                c_ext += (e_inc[c].conj() * response.moments[[i, c]]).im;
+            }
+        }
+        c_ext *= k / e0_sq;
+
+        let mut c_abs = 0.0;
+        let k3 = k.powi(3);
+        for i in 0..n {
+            let inv_alpha = assembly::invert_3x3_pub(&dipoles[i].polarisability);
+            let mut pa_inv_alpha_conj_p = Complex64::from(0.0);
+            for a in 0..3 {
+                for b in 0..3 {
+                    pa_inv_alpha_conj_p += response.moments[[i, a]]
+                        * inv_alpha[3 * a + b].conj()
+                        * response.moments[[i, b]].conj();
+                }
+            }
+            let p_sq: f64 = (0..3).map(|c| response.moments[[i, c]].norm_sqr()).sum();
+            c_abs += pa_inv_alpha_conj_p.im - (2.0 / 3.0) * k3 * p_sq;
+        }
+        c_abs *= k / e0_sq;
+
+        CrossSections {
+            wavelength_nm: response.wavelength_nm,
+            extinction: c_ext,
+            absorption: c_abs,
+            scattering: (c_ext - c_abs).max(0.0),
+            circular_dichroism: None,
+        }
+    }
+
     /// Compute the wavenumber in the medium from wavelength and refractive index.
     fn wavenumber(wavelength_nm: f64, n_medium: f64) -> f64 {
         2.0 * std::f64::consts::PI * n_medium / wavelength_nm

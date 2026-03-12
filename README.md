@@ -7,13 +7,13 @@
 
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-71%20passing-brightgreen.svg)](https://github.com/jonesrobm/lumina)
+[![Tests](https://img.shields.io/badge/tests-90%20passing-brightgreen.svg)](https://github.com/jonesrobm/lumina)
 [![Documentation](https://img.shields.io/badge/docs-mdBook-blue.svg)](docs/)
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20Development-ff5e5b?logo=ko-fi&logoColor=white)](https://ko-fi.com/jonesrobm)
 
 > High-performance electromagnetic simulations for nanophotonics using the Coupled Dipole Approximation
 
-Lumina is a Rust framework for computing the linear optical response of nanostructured materials. It implements the Coupled Dipole Approximation (CDA) with state-of-the-art numerical methods and GPU acceleration, providing accurate extinction, absorption, and scattering cross-sections for metallic and dielectric nanoparticles — from simple spheres to complex multi-shell assemblies on substrates.
+Lumina is a Rust framework for computing the linear and nonlinear optical response of nanostructured materials. It implements the Coupled Dipole Approximation (CDA) with state-of-the-art numerical methods and GPU acceleration, providing accurate cross-sections, near-field maps, and SHG/THG spectra for metallic and dielectric nanoparticles — from simple spheres to complex periodic metasurfaces on substrates.
 
 <p align="center">
   <img src="docs/images/gui_overview.svg" alt="Lumina GUI" width="800"/>
@@ -25,14 +25,12 @@ Lumina is a Rust framework for computing the linear optical response of nanostru
 
 ---
 
-## What's New in v0.3.0
+## What's New in v0.4.0
 
-- **CoreShell geometry** — concentric shell nanoparticles with independent materials per layer
-- **Anisotropic ellipsoid dipoles** — per-dipole 3×3 polarisability tensors from depolarisation factors; correctly captures orientation-dependent plasmon resonances of prolate/oblate particles
-- **Substrate image-dipole** — model nanostructures on a flat dielectric substrate (Fresnel quasi-static approximation), available in both CLI and GUI
-- **Periodic structures** — 1D chain and 2D planar lattice sums with Bloch boundary conditions for metasurfaces and gratings
-- **Complex scene assembly** — multi-object TOML scenes with per-object transforms (position, rotation, scale)
-- **Persistent GPU session buffers** — matrix uploaded once per wavelength; per-matvec allocations eliminated
+- **SHG & THG** — self-consistent second- and third-harmonic generation via χ^(2) and χ^(3) tensors; available in both CLI (`[nonlinear]` TOML section) and GUI (dedicated panel + spectra tab)
+- **Full Ewald acceleration** — erfc-damped real-space sum + 2D spectral reciprocal-space sum for periodic arrays; convergence in ≤ 5 shells regardless of unit cell size
+- **Retarded substrate** — retarded normal-incidence Fresnel amplitude r = (n_sub − n_env)/(n_sub + n_env) replaces the quasi-static Δε; more accurate at optical frequencies (default, backward-compatible)
+- **90 tests passing** — 5 new THG tests, 5 new Ewald/substrate tests
 
 ---
 
@@ -44,9 +42,11 @@ Lumina is a Rust framework for computing the linear optical response of nanostru
 - Clausius–Mossotti polarisability with radiative reaction correction (RRCM)
 - Anisotropic 3×3 polarisability tensors for ellipsoidal particles (depolarisation factors via 16-point Gauss–Legendre quadrature)
 - CoreShell geometry with arbitrary concentric layers, each with independent material
-- Substrate image-dipole correction (quasi-static Fresnel: Δε = (ε_sub − ε_env)/(ε_sub + ε_env))
-- Periodic lattice sums (1D chain, 2D planar) with Bloch wavevector support
-- Far-field radiation patterns (E-plane / H-plane polar plots)
+- **Substrate image-dipole** — retarded normal-incidence Fresnel amplitude (default) or quasi-static Δε
+- **Periodic lattice sums** — full Ewald split: erfc-damped real-space + 2D spectral reciprocal-space sum; Bloch wavevector support
+- **SHG** — χ^(2) tensors (isotropic surface C_∞v or custom); self-consistent solve at 2ω; intensity ∝ |E|⁴
+- **THG** — χ^(3) tensors (isotropic bulk or custom); self-consistent solve at 3ω; intensity ∝ |E|⁶
+- Far-field radiation patterns at ω, 2ω, 3ω (E-plane / H-plane polar plots)
 - Circular dichroism ΔC_ext for chiral structures
 - Near-field |E|² maps on arbitrary observation planes
 - Validated against Mie theory: < 15% for dielectrics, < 30% for Au interband region
@@ -166,7 +166,7 @@ cargo run --release -p lumina-cli -- run gold_sphere.toml
 Output in `./output/spectra.csv`:
 
 ```
-# Lumina v0.3.0 | object: Au_sphere | material: Au_JC | spacing: 2.0 nm
+# Lumina v0.4.0 | object: Au_sphere | material: Au_JC | spacing: 2.0 nm
 wavelength_nm,extinction_nm2,absorption_nm2,scattering_nm2
 400.0,3.21e2,2.87e2,3.40e1
 ...
@@ -178,7 +178,7 @@ wavelength_nm,extinction_nm2,absorption_nm2,scattering_nm2
 
 ## Worked Example: Au–SiO₂ Core-Shell on a Glass Substrate
 
-This example demonstrates three v0.3.0 features together: CoreShell geometry, a dielectric substrate, and multi-object transforms.
+This example demonstrates CoreShell geometry, the retarded substrate correction, and the parallel wavelength sweep.
 
 Save as `coreshell_on_substrate.toml`:
 
@@ -296,6 +296,40 @@ dipole_spacing = 2.0
 position = [20.0, 0.0, 0.0]
 ```
 
+### SHG & THG (Nonlinear Optics)
+
+Compute SHG and THG spectra from a structure with broken inversion symmetry:
+
+```toml
+[simulation]
+wavelengths = { range = [400.0, 900.0], points = 100 }
+environment_n = 1.0
+
+[[geometry.object]]
+name = "Au_sphere"
+type = "sphere"
+radius = 20.0
+material = "Au_JC"
+dipole_spacing = 2.0
+
+[nonlinear]
+enable_shg = true
+symmetry = "isotropic_surface"
+chi_zzz = [1.0, 0.0]   # nm³
+chi_zxx = [0.3, 0.0]
+
+enable_thg = true
+chi3_symmetry = "isotropic_bulk"
+chi3_xxxx = [0.5, 0.0]   # nm⁶
+chi3_xxyy = [0.1, 0.0]
+
+[output]
+directory = "./output"
+save_spectra = true
+```
+
+Outputs: `spectra.csv`, `shg_spectrum.csv` (intensity in nm⁶), `thg_spectrum.csv` (intensity in nm⁹).
+
 ### XYZ Atomistic Import
 
 ```toml
@@ -380,13 +414,14 @@ cargo test --workspace
 | v0.2.1 | Parallel wavelength sweep, stack-allocated Green's tensors, XYZ workflow, debug output |
 | v0.2.2 | Persistent GPU session buffers, SceneSpec multi-object assembly |
 | v0.3.0 | CoreShell geometry, anisotropic ellipsoid dipoles, substrate image-dipole, periodic lattice sums |
+| **v0.4.0** | **Full Ewald acceleration, retarded substrate, SHG (χ^(2)), THG (χ^(3))** |
 
 ### Planned
 
 | Version | Highlights |
 |---------|-----------|
-| v0.4.0 | Full Ewald summation (Faddeeva w(z)), SHG/THG nonlinear source terms, DFT tensor import |
-| v1.0.0 | BEM solver, T-matrix solver, FDTD, CUDA/Metal backends, MPI |
+| v0.5.0 | DFT tensor import (VASP/Gaussian), full Sommerfeld substrate, MPI |
+| v1.0.0 | BEM solver, T-matrix solver, FDTD, CUDA/Metal backends |
 
 ---
 
@@ -436,9 +471,9 @@ Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines
 
 Priority areas:
 - Surface-averaging methods for improved metallic convergence
-- Full Ewald acceleration (Faddeeva w(z) for reciprocal sum)
-- SHG/THG nonlinear source terms
 - Extended Palik library (Al₂O₃, Si, GaAs)
+- DFT polarisability import (VASP WAVEDER, Gaussian)
+- Full Sommerfeld substrate (k∥-dependent Fresnel coefficients)
 - GPU matrix assembly shader (currently CPU only)
 
 ---
@@ -453,7 +488,7 @@ If you use Lumina in your research, please cite:
   title   = {Lumina: Coupled Dipole Approximation for Nanophotonics},
   year    = {2026},
   url     = {https://github.com/jonesrobm/lumina},
-  version = {0.3.0}
+  version = {0.4.0}
 }
 ```
 

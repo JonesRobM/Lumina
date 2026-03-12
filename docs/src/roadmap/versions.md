@@ -151,24 +151,63 @@
 - [x] Direct real-space lattice sum in `EwaldGreens` (finite shell cutoff, exact for small unit cells)
 - [x] `SimulationParams.k_bloch: [f64; 3]` — Bloch wavevector for oblique incidence
 - [x] New result types: `BlochCrossSections`, `DispersionMap` for band structure sweeps
-- [ ] Full Ewald acceleration (erfc real-space + spectral G-sum via Faddeeva w(z)) — deferred to v0.4
 
 ### Extended Geometry
 
 - [x] CoreShell (concentric ellipsoidal shells, arbitrary number of layers)
 - [x] Anisotropic ellipsoid dipoles: per-dipole 3×3 polarisability tensor from depolarisation factors
 - [x] Depolarisation factors via 16-point Gauss–Legendre quadrature (`ellipsoid_depol_factors`)
-- [x] `SubstrateSpec`: image-dipole substrate (Fresnel reflection, flat interface below the structure)
+- [x] `SubstrateSpec`: image-dipole substrate (quasi-static Fresnel reflection, flat interface below the structure)
 
 ### Other
 
 - [x] Palik dielectric data (TiO₂, SiO₂) — shipped in v0.1.3
 - [ ] Extended Palik library (Al₂O₃, Si, GaAs, etc.)
-- [ ] SHG source term computation from local fields
-- [ ] THG source term computation
-- [ ] χ(2) symmetry group handling
-- [ ] DFT polarisability import (VASP, Gaussian)
-- [ ] MPI distributed computing backend
+
+## v0.4.0 — Nonlinear Optics & Accelerated Periodic Solver
+
+### Ewald Acceleration
+
+- [x] `EwaldGreens` upgraded from direct sum to full Ewald split
+- [x] Real-space sum: erfc-damped (`erfc_real(η·|R|)` multiplied per image) — exponential convergence, ≤ 5 shells sufficient
+- [x] Reciprocal-space sum (2D lattices): spectral G-sum `(i/2A)·Σ_G exp(iQ·ρ)·exp(-q|z|)/q · M(Q,q)`
+- [x] `csqrt_positive_imag`: Im≥0 branch selection for evanescent vs. propagating wave convention
+- [x] Combined sum: `evaluate()` = `real_space() + recip_space()` (API unchanged)
+
+### Retarded Substrate
+
+- [x] `fresnel_reflection_amplitude(eps_sub, eps_env)` — retarded normal-incidence reflection coefficient r = (n_sub − n_env)/(n_sub + n_env)
+- [x] `substrate_reflection_factor(..., use_retarded)` dispatcher
+- [x] `SubstrateSpec.use_retarded: bool` (default `true`, backward-compatible TOML)
+- [x] GUI and CLI updated to use retarded coefficient by default
+
+### Second-Harmonic Generation (SHG)
+
+- [x] `Chi2Tensor` in `lumina-core::types`: rank-3 [Complex64; 27], `zero()`, `isotropic_surface(chi_zzz, chi_zxx)`, `contract()`
+- [x] `compute_shg_sources(local_fields, chi2_tensors)` — χ²:EE source term per dipole
+- [x] `compute_shg_response(solver, omega_response, dipoles_2omega, chi2_tensors, params_2omega, calc_far_field)` — full self-consistent SHG solve
+- [x] `ShgResult`: source_moments, driven_moments, shg_intensity (nm⁶, ∝|E|⁴), optional far-field pattern
+- [x] `CdaSolver::cross_sections_from_response` — avoids double-solve when SHG is also computed
+- [x] CLI: `[nonlinear]` TOML section; `shg_spectrum.csv` output
+- [x] GUI: SHG panel with symmetry selector, χ DragValue inputs, SHG spectra tab in results
+- [x] 5 unit tests covering zero χ², χ_xxx contraction, C∞v tensor structure, end-to-end solve, E⁴ scaling
+
+### Third-Harmonic Generation (THG)
+
+- [x] `Chi3Tensor` in `lumina-core::types`: rank-4 [Complex64; 81], index a*27+b*9+c*3+d, `zero()`, `isotropic_bulk(chi_xxxx, chi_xxyy)`, `contract()`
+- [x] `compute_thg_sources(local_fields, chi3_tensors)` — χ^(3):EEE triple contraction per dipole
+- [x] `compute_thg_response(solver, omega_response, dipoles_3omega, chi3_tensors, params_3omega, calc_far_field)` — self-consistent THG solve at λ/3
+- [x] `ThgResult`: source_moments, driven_moments, thg_intensity (nm⁹, ∝|E|⁶), optional far-field
+- [x] CLI: `enable_thg`, `chi3_symmetry`, `chi3_xxxx`, `chi3_xxyy` in `[nonlinear]`; `thg_spectrum.csv` output
+- [x] GUI: THG panel alongside SHG; ThgSpectra tab in results
+- [x] 5 unit tests: zero χ^(3), χ_xxxx contraction, isotropic_bulk tensor structure, end-to-end solve, E⁶ scaling
+
+### Deferred to v0.5
+
+- [ ] Full Sommerfeld integral substrate (k∥-dependent Fresnel coefficients)
+- [ ] 1D reciprocal Ewald sum
+- [ ] DFT polarisability import (VASP WAVEDER, Gaussian)
+- [ ] MPI distributed wavelength sweep
 
 ## v1.0 — Multi-Method & Cross-Platform
 

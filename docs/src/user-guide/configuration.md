@@ -81,17 +81,54 @@ See [Periodic Structures](../theory/periodic.md) for the underlying theory.
 
 ### `[simulation.substrate]` (v0.3.0+)
 
-Models a flat dielectric substrate below the structure using the image-dipole (Fresnel) approximation. Omit this section for a free-standing structure.
+Models a flat dielectric substrate below the structure using an image-dipole approximation. Omit this section for a free-standing structure.
 
 ```toml
 [simulation.substrate]
-material = "SiO2_Palik"   # substrate material identifier
-z_interface = -25.0       # z-coordinate of the interface in nm (structure is above)
+material     = "SiO2_Palik"   # substrate material identifier
+z_interface  = -25.0          # z-coordinate of the interface in nm (structure is above)
+use_retarded = true           # optional — default true (v0.4.0+)
 ```
 
 The substrate is also available in the GUI via the **Substrate** checkbox in the Simulation panel.
 
-Each real dipole **p**_j induces an image dipole at its mirror position below the interface. The image contribution to the interaction matrix is scaled by the quasi-static Fresnel factor Δε = (ε_sub − ε_env)/(ε_sub + ε_env). All dipoles must satisfy z > z_interface.
+Each real dipole **p**_j induces an image dipole at its mirror position below the interface. The image contribution is scaled by the reflection factor:
+
+- `use_retarded = true` (default, v0.4.0+): retarded normal-incidence Fresnel amplitude r = (n_sub − n_env)/(n_sub + n_env), where n = √ε is the complex refractive index.
+- `use_retarded = false` (quasi-static, v0.3.0 behaviour): Δε = (ε_sub − ε_env)/(ε_sub + ε_env).
+
+For a glass substrate (n = 1.5) in air, these give r = 0.20 vs Δε = 0.385 — a factor of ~2. The retarded form is physically correct for optical-frequency calculations.
+
+All dipoles must satisfy z > z_interface.
+
+### `[nonlinear]` (v0.4.0+)
+
+Enables second-harmonic generation (SHG) computation. Omit this section for linear-only simulations.
+
+```toml
+[nonlinear]
+enable_shg = true
+symmetry   = "isotropic_surface"   # "isotropic_surface" | "zero"
+chi_zzz    = [1.0, 0.0]           # χ_zzz [real, imag] in nm³
+chi_zxx    = [0.3, 0.0]           # χ_zxx [real, imag] in nm³
+far_field  = false                 # compute far-field pattern at 2ω
+```
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `enable_shg` | bool | `false` | Enable SHG calculation |
+| `symmetry` | string | `"zero"` | χ^(2) symmetry class: `"isotropic_surface"` or `"zero"` |
+| `chi_zzz` | `[float; 2]` | — | χ_zzz = [real, imag] in nm³ (required for isotropic_surface) |
+| `chi_zxx` | `[float; 2]` | — | χ_zxx = [real, imag] in nm³ (required for isotropic_surface) |
+| `far_field` | bool | `false` | Compute far-field radiation pattern at 2ω |
+| `enable_thg` | bool | `false` | Enable THG calculation |
+| `chi3_symmetry` | string | `"zero"` | χ^(3) symmetry class: `"isotropic_bulk"` or `"zero"` |
+| `chi3_xxxx` | `[float; 2]` | — | χ_xxxx = [real, imag] in nm⁶ (required for isotropic_bulk) |
+| `chi3_xxyy` | `[float; 2]` | — | χ_xxyy = [real, imag] in nm⁶ (required for isotropic_bulk) |
+
+Outputs: `output/shg_spectrum.csv` (`fundamental_nm`, `harmonic_nm`, `shg_intensity_nm6`) and/or `output/thg_spectrum.csv` (`fundamental_nm`, `harmonic_nm`, `thg_intensity_nm9`).
+
+See [Nonlinear Optics](../theory/nonlinear.md) for the underlying theory.
 
 ### `[output]`
 

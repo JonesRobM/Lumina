@@ -30,6 +30,7 @@ pub mod time_domain;
 pub mod types;
 
 // Re-export frequently used types for convenience.
+pub use nonlinear::{compute_shg_response, compute_thg_response};
 pub use solver::ewald::EwaldGreens;
 pub use solver::substrate::SubstrateSpec;
-pub use types::{BlochCrossSections, DispersionMap};
+pub use types::{BlochCrossSections, Chi2Tensor, Chi3Tensor, DispersionMap, ShgResult, ThgResult};

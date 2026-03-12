@@ -7,8 +7,9 @@
 Lumina bridges the gap between ab initio material properties and macroscopic electromagnetic observables. Given a nanostructure geometry and its material properties, it computes:
 
 - **Extinction, absorption, and scattering cross-sections** as a function of wavelength.
+- **SHG and THG spectra** — self-consistent second- and third-harmonic generation via χ^(2) and χ^(3) tensors.
 - **Near-field intensity maps** showing the electric field enhancement around the structure.
-- **Far-field radiation patterns** on the unit sphere.
+- **Far-field radiation patterns** at ω, 2ω, and 3ω.
 - **Circular dichroism** (differential extinction for left/right circularly polarised light).
 - **Dipole moment distributions** for detailed analysis of the optical response.
 

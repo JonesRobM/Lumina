@@ -43,6 +43,30 @@ pub struct SimulationPanel {
     pub substrate_z_interface: f64,
     /// Material identifier for the substrate (e.g. "SiO2_Palik").
     pub substrate_material: String,
+    /// Whether to compute the SHG spectrum.
+    pub enable_shg: bool,
+    /// χ^(2) symmetry class applied to every dipole.
+    pub shg_symmetry: String,
+    /// χ_zzz real part (nm³).
+    pub chi_zzz_re: f64,
+    /// χ_zzz imaginary part (nm³).
+    pub chi_zzz_im: f64,
+    /// χ_zxx real part (nm³).
+    pub chi_zxx_re: f64,
+    /// χ_zxx imaginary part (nm³).
+    pub chi_zxx_im: f64,
+    /// Whether to compute the THG spectrum.
+    pub enable_thg: bool,
+    /// χ^(3) symmetry class applied to every dipole.
+    pub thg_symmetry: String,
+    /// χ_xxxx real part (nm⁶).
+    pub chi3_xxxx_re: f64,
+    /// χ_xxxx imaginary part (nm⁶).
+    pub chi3_xxxx_im: f64,
+    /// χ_xxyy real part (nm⁶).
+    pub chi3_xxyy_re: f64,
+    /// χ_xxyy imaginary part (nm⁶).
+    pub chi3_xxyy_im: f64,
     /// Whether to show debug-level output during simulation.
     pub debug_output: bool,
     /// Whether a simulation is currently running.
@@ -70,6 +94,18 @@ impl Default for SimulationPanel {
             substrate_z_interface: 0.0,
             substrate_material: "SiO2_Palik".to_string(),
             use_gpu: cfg!(feature = "gpu"),
+            enable_shg: false,
+            shg_symmetry: "isotropic_surface".to_string(),
+            chi_zzz_re: 1.0,
+            chi_zzz_im: 0.0,
+            chi_zxx_re: 0.3,
+            chi_zxx_im: 0.0,
+            enable_thg: false,
+            thg_symmetry: "isotropic_bulk".to_string(),
+            chi3_xxxx_re: 1.0,
+            chi3_xxxx_im: 0.0,
+            chi3_xxyy_re: 0.25,
+            chi3_xxyy_im: 0.0,
             debug_output: false,
             is_running: false,
             progress: 0.0,
@@ -168,6 +204,136 @@ impl SimulationPanel {
                     .weak()
                     .small(),
             );
+        }
+
+        ui.add_space(8.0);
+
+        // SHG
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut self.enable_shg, "Second-harmonic generation (SHG)");
+        });
+        if self.enable_shg {
+            ui.indent("shg_opts", |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Symmetry:");
+                    egui::ComboBox::from_id_salt("shg_sym")
+                        .selected_text(&self.shg_symmetry)
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut self.shg_symmetry,
+                                "isotropic_surface".to_string(),
+                                "Isotropic surface (C\u{221e}v)",
+                            );
+                            ui.selectable_value(
+                                &mut self.shg_symmetry,
+                                "zero".to_string(),
+                                "Zero (centrosymmetric)",
+                            );
+                        });
+                });
+                if self.shg_symmetry == "isotropic_surface" {
+                    ui.horizontal(|ui| {
+                        ui.label("\u{03c7}_zzz:");
+                        ui.add(
+                            egui::DragValue::new(&mut self.chi_zzz_re)
+                                .speed(0.05)
+                                .prefix("re="),
+                        );
+                        ui.add(
+                            egui::DragValue::new(&mut self.chi_zzz_im)
+                                .speed(0.05)
+                                .prefix("im="),
+                        );
+                        ui.label("nm\u{00b3}");
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("\u{03c7}_zxx:");
+                        ui.add(
+                            egui::DragValue::new(&mut self.chi_zxx_re)
+                                .speed(0.05)
+                                .prefix("re="),
+                        );
+                        ui.add(
+                            egui::DragValue::new(&mut self.chi_zxx_im)
+                                .speed(0.05)
+                                .prefix("im="),
+                        );
+                        ui.label("nm\u{00b3}");
+                    });
+                }
+                ui.label(
+                    egui::RichText::new(
+                        "SHG requires a second solver pass per wavelength (~2\u{00d7} runtime).",
+                    )
+                    .weak()
+                    .small(),
+                );
+            });
+        }
+
+        ui.add_space(8.0);
+
+        // THG
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut self.enable_thg, "Third-harmonic generation (THG)");
+        });
+        if self.enable_thg {
+            ui.indent("thg_opts", |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Symmetry:");
+                    egui::ComboBox::from_id_salt("thg_sym")
+                        .selected_text(&self.thg_symmetry)
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut self.thg_symmetry,
+                                "isotropic_bulk".to_string(),
+                                "Isotropic bulk (Kleinman)",
+                            );
+                            ui.selectable_value(
+                                &mut self.thg_symmetry,
+                                "zero".to_string(),
+                                "Zero (centrosymmetric)",
+                            );
+                        });
+                });
+                if self.thg_symmetry == "isotropic_bulk" {
+                    ui.horizontal(|ui| {
+                        ui.label("\u{03c7}_xxxx:");
+                        ui.add(
+                            egui::DragValue::new(&mut self.chi3_xxxx_re)
+                                .speed(0.05)
+                                .prefix("re="),
+                        );
+                        ui.add(
+                            egui::DragValue::new(&mut self.chi3_xxxx_im)
+                                .speed(0.05)
+                                .prefix("im="),
+                        );
+                        ui.label("nm\u{2076}");
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("\u{03c7}_xxyy:");
+                        ui.add(
+                            egui::DragValue::new(&mut self.chi3_xxyy_re)
+                                .speed(0.05)
+                                .prefix("re="),
+                        );
+                        ui.add(
+                            egui::DragValue::new(&mut self.chi3_xxyy_im)
+                                .speed(0.05)
+                                .prefix("im="),
+                        );
+                        ui.label("nm\u{2076}");
+                    });
+                }
+                ui.label(
+                    egui::RichText::new(
+                        "THG requires a second solver pass per wavelength (~2\u{00d7} runtime).",
+                    )
+                    .weak()
+                    .small(),
+                );
+            });
         }
 
         ui.add_space(8.0);

@@ -1,6 +1,6 @@
 # Periodic Structures & Ewald Summation
 
-> **Status (v0.3.0):** Direct real-space lattice sum implemented. Full Ewald acceleration (reciprocal-space sum via Faddeeva function) is deferred to v0.4.
+> **Status (v0.4.0):** Full Ewald acceleration implemented — erfc-damped real-space sum + 2D spectral reciprocal-space sum.
 
 ## Motivation
 
@@ -62,9 +62,25 @@ a2 = [0.0, 50.0, 0.0]
 
 ### EwaldGreens
 
-`lumina-core::solver::ewald::EwaldGreens` implements the periodic interaction tensor. In v0.3.0, the real-space sum is used directly with a finite shell cutoff. For small-to-moderate unit cells (period ≲ 100 nm, a few shells), this converges adequately.
+`lumina-core::solver::ewald::EwaldGreens` implements the full Ewald-accelerated periodic interaction tensor. The evaluate method returns:
 
-The full Ewald acceleration — erfc-screened real-space sum plus spectral reciprocal-space sum via the Faddeeva function \\(w(z)\\) — is planned for v0.4. This is required for large unit cells and oblique incidence at arbitrary \\(\mathbf{k}_\parallel\\).
+\\[
+\mathbf{G}_{\text{per}} = \mathbf{G}_{\text{real}} + \mathbf{G}_{\text{recip}}
+\\]
+
+**Real-space part**: Each free-space Green's tensor term is multiplied by `erfc(η·|r−R|)`, which exponentially damps distant images. With the auto-selected η = √(π/A), 5 shells are sufficient for < 0.01 % error.
+
+**Reciprocal-space part** (2D lattices): Evaluates the spectral sum
+
+\\[
+\mathbf{G}^{\text{spec}}_{ab} = \frac{i}{2A} \sum_{\mathbf{G}}
+    \frac{e^{i\mathbf{Q}\cdot\boldsymbol{\rho}}\,e^{-q|z|}}{q}\,
+    M_{ab}(\mathbf{Q}, q)
+\\]
+
+where **Q** = **k**∥ + **G**, \\(q = \sqrt{Q^2 - k^2}\\) with Im(q) ≥ 0, and \\(M_{ab} = k^2\delta_{ab} - \tilde{k}_a\tilde{k}_b\\).
+
+For 1D chains the reciprocal sum returns zero (the erfc-damped direct sum converges adequately).
 
 ### Bloch Boundary Conditions
 
@@ -87,12 +103,12 @@ When sweeping over multiple \\(\mathbf{k}_\parallel\\) values, the output type i
 | `k_points` | \\(k_\parallel\\) grid (nm⁻¹) |
 | `extinction` | C\_ext(λ, k) matrix |
 
-## Known Limitations (v0.3.0)
+## Known Limitations (v0.4.0)
 
 | Scenario | Status |
 |----------|--------|
-| Small unit cell (< 100 nm), normal incidence | ✓ Works |
-| Large unit cell (> 200 nm) | Slow — direct sum requires many shells |
+| 2D periodic array, any unit cell size | ✓ Full Ewald (v0.4) |
+| 1D chain | ✓ erfc-damped real-space sum; reciprocal sum not needed |
 | Oblique incidence (arbitrary \\(\mathbf{k}_\parallel\\)) | ✓ Correct with Bloch phases |
-| 3D periodicity | Not tested |
-| Full Ewald acceleration | Planned v0.4 (requires Faddeeva \\(w(z)\\)) |
+| 3D periodicity | Not supported |
+| Reciprocal sum for 1D chain | Deferred (direct sum adequate) |

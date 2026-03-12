@@ -31,6 +31,10 @@ pub enum SimulationMessage {
         spectra: Vec<CrossSections>,
         near_field: Option<NearFieldMap>,
         far_field: Option<FarFieldMap>,
+        /// SHG spectrum: `(fundamental_nm, shg_intensity)` pairs. Empty if SHG was not computed.
+        shg_spectra: Vec<(f64, f64)>,
+        /// THG spectrum: `(fundamental_nm, thg_intensity)` pairs. Empty if THG was not computed.
+        thg_spectra: Vec<(f64, f64)>,
     },
     Error(String),
     DebugLog(String),
@@ -78,6 +82,18 @@ impl LuminaApp {
         let enable_substrate = self.simulation_state.enable_substrate;
         let substrate_z      = self.simulation_state.substrate_z_interface;
         let substrate_mat    = self.simulation_state.substrate_material.clone();
+        let enable_shg       = self.simulation_state.enable_shg;
+        let shg_symmetry     = self.simulation_state.shg_symmetry.clone();
+        let chi_zzz_re       = self.simulation_state.chi_zzz_re;
+        let chi_zzz_im       = self.simulation_state.chi_zzz_im;
+        let chi_zxx_re       = self.simulation_state.chi_zxx_re;
+        let chi_zxx_im       = self.simulation_state.chi_zxx_im;
+        let enable_thg       = self.simulation_state.enable_thg;
+        let thg_symmetry     = self.simulation_state.thg_symmetry.clone();
+        let chi3_xxxx_re     = self.simulation_state.chi3_xxxx_re;
+        let chi3_xxxx_im     = self.simulation_state.chi3_xxxx_im;
+        let chi3_xxyy_re     = self.simulation_state.chi3_xxyy_re;
+        let chi3_xxyy_im     = self.simulation_state.chi3_xxyy_im;
 
         std::thread::spawn(move || {
             use std::sync::Arc;
@@ -88,7 +104,7 @@ impl LuminaApp {
             use lumina_compute::ComputeBackend;
             use lumina_core::fields::compute_circular_dichroism;
             use lumina_core::solver::cda::CdaSolver;
-            use lumina_core::solver::substrate::{fresnel_delta_eps, SubstrateSpec};
+            use lumina_core::solver::substrate::{substrate_reflection_factor, SubstrateSpec};
             use lumina_core::solver::{NearFieldPlane, OpticalSolver, SolverError};
             use lumina_core::types::{
                 clausius_mossotti, ellipsoid_polarisability_tensor, radiative_correction,
@@ -217,7 +233,7 @@ impl LuminaApp {
 
             // Each solver carries its own Arc<backend>.
             let substrate_spec = if enable_substrate {
-                Some(SubstrateSpec { z_interface: substrate_z, material: substrate_mat.clone() })
+                Some(SubstrateSpec { z_interface: substrate_z, material: substrate_mat.clone(), use_retarded: true })
             } else {
                 None
             };
@@ -258,7 +274,7 @@ impl LuminaApp {
                         match resolve_eps(&substrate_mat, wl) {
                             Ok(eps_sub) => {
                                 params_wl.substrate_delta_eps =
-                                    Some(fresnel_delta_eps(eps_sub, epsilon_m));
+                                    Some(substrate_reflection_factor(eps_sub, epsilon_m, true));
                             }
                             Err(e) => {
                                 if let Ok(lock) = tx_par.lock() {
@@ -383,7 +399,7 @@ impl LuminaApp {
                 if enable_substrate {
                     if let Ok(eps_sub) = resolve_eps(&substrate_mat, peak_wl) {
                         peak_params.substrate_delta_eps =
-                            Some(fresnel_delta_eps(eps_sub, epsilon_m));
+                            Some(substrate_reflection_factor(eps_sub, epsilon_m, true));
                     }
                 }
                 if let Ok(response) = solver_x.solve_dipoles(&peak_dipoles, peak_wl, &peak_params) {
@@ -403,7 +419,185 @@ impl LuminaApp {
                 }
             }
 
-            let _ = tx.send(SimulationMessage::Complete { spectra, near_field, far_field });
+            // ── SHG sweep (optional) ────────────────────────────────────────
+            let shg_spectra: Vec<(f64, f64)> = if enable_shg {
+                use lumina_core::nonlinear::compute_shg_response;
+                use lumina_core::types::Chi2Tensor;
+
+                let chi2 = match shg_symmetry.as_str() {
+                    "isotropic_surface" => Chi2Tensor::isotropic_surface(
+                        num_complex::Complex64::new(chi_zzz_re, chi_zzz_im),
+                        num_complex::Complex64::new(chi_zxx_re, chi_zxx_im),
+                    ),
+                    _ => Chi2Tensor::zero(),
+                };
+                let chi2_tensors = vec![chi2; n];
+
+                dbg("SHG sweep…".to_string());
+
+                let shg_results: Vec<Option<(f64, f64)>> = wavelengths
+                    .par_iter()
+                    .map(|&wl| {
+                        let wl_2omega = wl / 2.0;
+                        let k_omega = k_of(wl);
+                        let k_2omega = k_of(wl_2omega);
+
+                        // Build dipoles at ω.
+                        let mut dipoles_omega = Vec::with_capacity(n);
+                        for i in 0..n {
+                            let eps = resolve_eps(&geom.materials[i], wl).ok()?;
+                            let volume = geom.spacings[i].powi(3);
+                            let dipole = if let Some(hint) = &geom.hints[i] {
+                                let tensor = ellipsoid_polarisability_tensor(
+                                    volume, hint.depol_factors, eps, epsilon_m, k_omega,
+                                    hint.rotation,
+                                );
+                                Dipole { position: geom.positions[i], polarisability: tensor }
+                            } else {
+                                let alpha = radiative_correction(
+                                    clausius_mossotti(volume, eps, epsilon_m),
+                                    k_omega,
+                                );
+                                Dipole::isotropic(geom.positions[i], alpha)
+                            };
+                            dipoles_omega.push(dipole);
+                        }
+
+                        // Build dipoles at 2ω (skip wavelength if material out of range).
+                        let mut dipoles_2omega = Vec::with_capacity(n);
+                        for i in 0..n {
+                            let eps = resolve_eps(&geom.materials[i], wl_2omega).ok()?;
+                            let volume = geom.spacings[i].powi(3);
+                            let dipole = if let Some(hint) = &geom.hints[i] {
+                                let tensor = ellipsoid_polarisability_tensor(
+                                    volume, hint.depol_factors, eps, epsilon_m, k_2omega,
+                                    hint.rotation,
+                                );
+                                Dipole { position: geom.positions[i], polarisability: tensor }
+                            } else {
+                                let alpha = radiative_correction(
+                                    clausius_mossotti(volume, eps, epsilon_m),
+                                    k_2omega,
+                                );
+                                Dipole::isotropic(geom.positions[i], alpha)
+                            };
+                            dipoles_2omega.push(dipole);
+                        }
+
+                        // Linear solve at ω.
+                        let omega_response =
+                            solver_x.solve_dipoles(&dipoles_omega, wl, &params).ok()?;
+
+                        // SHG solve at 2ω.
+                        let shg = compute_shg_response(
+                            &solver_x,
+                            &omega_response,
+                            &dipoles_2omega,
+                            &chi2_tensors,
+                            &params,
+                            false,
+                        )
+                        .ok()?;
+
+                        Some((wl, shg.shg_intensity))
+                    })
+                    .collect();
+
+                shg_results.into_iter().flatten().collect()
+            } else {
+                Vec::new()
+            };
+
+            // ── THG sweep (optional) ────────────────────────────────────────
+            let thg_spectra: Vec<(f64, f64)> = if enable_thg {
+                use lumina_core::nonlinear::compute_thg_response;
+                use lumina_core::types::Chi3Tensor;
+
+                let chi3 = match thg_symmetry.as_str() {
+                    "isotropic_bulk" => Chi3Tensor::isotropic_bulk(
+                        num_complex::Complex64::new(chi3_xxxx_re, chi3_xxxx_im),
+                        num_complex::Complex64::new(chi3_xxyy_re, chi3_xxyy_im),
+                    ),
+                    _ => Chi3Tensor::zero(),
+                };
+                let chi3_tensors = vec![chi3; n];
+
+                dbg("THG sweep…".to_string());
+
+                let thg_results: Vec<Option<(f64, f64)>> = wavelengths
+                    .par_iter()
+                    .map(|&wl| {
+                        let wl_3omega = wl / 3.0;
+                        let k_omega = k_of(wl);
+                        let k_3omega = k_of(wl_3omega);
+
+                        // Build dipoles at ω.
+                        let mut dipoles_omega = Vec::with_capacity(n);
+                        for i in 0..n {
+                            let eps = resolve_eps(&geom.materials[i], wl).ok()?;
+                            let volume = geom.spacings[i].powi(3);
+                            let dipole = if let Some(hint) = &geom.hints[i] {
+                                let tensor = ellipsoid_polarisability_tensor(
+                                    volume, hint.depol_factors, eps, epsilon_m, k_omega,
+                                    hint.rotation,
+                                );
+                                Dipole { position: geom.positions[i], polarisability: tensor }
+                            } else {
+                                let alpha = radiative_correction(
+                                    clausius_mossotti(volume, eps, epsilon_m),
+                                    k_omega,
+                                );
+                                Dipole::isotropic(geom.positions[i], alpha)
+                            };
+                            dipoles_omega.push(dipole);
+                        }
+
+                        // Build dipoles at 3ω (skip wavelength if material out of range).
+                        let mut dipoles_3omega = Vec::with_capacity(n);
+                        for i in 0..n {
+                            let eps = resolve_eps(&geom.materials[i], wl_3omega).ok()?;
+                            let volume = geom.spacings[i].powi(3);
+                            let dipole = if let Some(hint) = &geom.hints[i] {
+                                let tensor = ellipsoid_polarisability_tensor(
+                                    volume, hint.depol_factors, eps, epsilon_m, k_3omega,
+                                    hint.rotation,
+                                );
+                                Dipole { position: geom.positions[i], polarisability: tensor }
+                            } else {
+                                let alpha = radiative_correction(
+                                    clausius_mossotti(volume, eps, epsilon_m),
+                                    k_3omega,
+                                );
+                                Dipole::isotropic(geom.positions[i], alpha)
+                            };
+                            dipoles_3omega.push(dipole);
+                        }
+
+                        // Linear solve at ω.
+                        let omega_response =
+                            solver_x.solve_dipoles(&dipoles_omega, wl, &params).ok()?;
+
+                        // THG solve at 3ω.
+                        let thg = compute_thg_response(
+                            &solver_x,
+                            &omega_response,
+                            &dipoles_3omega,
+                            &chi3_tensors,
+                            &params,
+                            false,
+                        )
+                        .ok()?;
+
+                        Some((wl, thg.thg_intensity))
+                    })
+                    .collect();
+
+                thg_results.into_iter().flatten().collect()
+            } else {
+                Vec::new()
+            };
+
+            let _ = tx.send(SimulationMessage::Complete { spectra, near_field, far_field, shg_spectra, thg_spectra });
         });
     }
 }
@@ -418,10 +612,14 @@ impl eframe::App for LuminaApp {
                         self.simulation_state.progress = done as f32 / total as f32;
                         ctx.request_repaint();
                     }
-                    SimulationMessage::Complete { spectra, near_field, far_field } => {
+                    SimulationMessage::Complete { spectra, near_field, far_field, shg_spectra, thg_spectra } => {
                         self.results_state.spectra = Some(spectra);
                         self.results_state.near_field = near_field;
                         self.results_state.far_field = far_field;
+                        self.results_state.shg_spectra =
+                            if shg_spectra.is_empty() { None } else { Some(shg_spectra) };
+                        self.results_state.thg_spectra =
+                            if thg_spectra.is_empty() { None } else { Some(thg_spectra) };
                         self.results_state.has_results = true;
                         self.simulation_state.is_running = false;
                         self.simulation_state.progress = 1.0;

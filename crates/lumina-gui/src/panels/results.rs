@@ -16,6 +16,10 @@ pub struct ResultsPanel {
     pub near_field: Option<NearFieldMap>,
     /// Far-field radiation pattern (computed at peak extinction wavelength).
     pub far_field: Option<FarFieldMap>,
+    /// SHG spectrum: `(fundamental_nm, shg_intensity)` pairs. `None` if SHG was not computed.
+    pub shg_spectra: Option<Vec<(f64, f64)>>,
+    /// THG spectrum: `(fundamental_nm, thg_intensity)` pairs. `None` if THG was not computed.
+    pub thg_spectra: Option<Vec<(f64, f64)>>,
     /// Whether to show the data table beneath the spectra plot.
     pub show_table: bool,
 }
@@ -26,6 +30,8 @@ pub enum ResultView {
     Spectra,
     NearField,
     FarField,
+    ShgSpectra,
+    ThgSpectra,
 }
 
 impl ResultsPanel {
@@ -42,6 +48,12 @@ impl ResultsPanel {
             ui.selectable_value(&mut self.active_view, ResultView::Spectra, "Spectra");
             ui.selectable_value(&mut self.active_view, ResultView::NearField, "Near-field");
             ui.selectable_value(&mut self.active_view, ResultView::FarField, "Far-field");
+            if self.shg_spectra.is_some() {
+                ui.selectable_value(&mut self.active_view, ResultView::ShgSpectra, "SHG");
+            }
+            if self.thg_spectra.is_some() {
+                ui.selectable_value(&mut self.active_view, ResultView::ThgSpectra, "THG");
+            }
         });
 
         ui.add_space(8.0);
@@ -50,6 +62,8 @@ impl ResultsPanel {
             ResultView::Spectra => self.spectra_view(ui),
             ResultView::NearField => self.near_field_view(ui),
             ResultView::FarField => self.far_field_view(ui),
+            ResultView::ShgSpectra => self.shg_spectra_view(ui),
+            ResultView::ThgSpectra => self.thg_spectra_view(ui),
         }
     }
 
@@ -324,6 +338,158 @@ impl ResultsPanel {
                     ui.label("Far-field pattern not computed. Run a simulation first.");
                 });
             });
+        }
+    }
+
+    fn shg_spectra_view(&mut self, ui: &mut Ui) {
+        if let Some(shg) = &self.shg_spectra {
+            if let Some(peak) = shg
+                .iter()
+                .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
+            {
+                ui.label(format!(
+                    "Peak SHG intensity: {:.2e} nm\u{2076} at \u{03bb}={:.1} nm ({} points)",
+                    peak.1, peak.0, shg.len()
+                ));
+            }
+
+            ui.add_space(4.0);
+
+            let points: egui_plot::PlotPoints =
+                shg.iter().map(|&(wl, i)| [wl, i]).collect();
+
+            let line = egui_plot::Line::new(points)
+                .name("I\u{209b}\u{2095}\u{1d33}(\u{03c9})")
+                .color(egui::Color32::from_rgb(200, 80, 220))
+                .width(2.0);
+
+            egui_plot::Plot::new("shg_plot")
+                .height(300.0)
+                .x_axis_label("Fundamental wavelength (nm)")
+                .y_axis_label("SHG intensity (nm\u{2076}, arb. units)")
+                .legend(egui_plot::Legend::default())
+                .show(ui, |plot_ui| {
+                    plot_ui.line(line);
+                });
+
+            ui.add_space(8.0);
+            if ui.button("Export SHG CSV\u{2026}").clicked() {
+                export_shg_csv_dialog(shg);
+            }
+        } else {
+            ui.group(|ui| {
+                ui.set_min_size(egui::vec2(500.0, 350.0));
+                ui.centered_and_justified(|ui| {
+                    ui.label(
+                        "SHG spectrum not computed. \
+                         Enable SHG in the Simulation panel and re-run.",
+                    );
+                });
+            });
+        }
+    }
+
+    fn thg_spectra_view(&mut self, ui: &mut Ui) {
+        if let Some(thg) = &self.thg_spectra {
+            if let Some(peak) = thg
+                .iter()
+                .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
+            {
+                ui.label(format!(
+                    "Peak THG intensity: {:.2e} nm\u{2079} at \u{03bb}={:.1} nm ({} points)",
+                    peak.1, peak.0, thg.len()
+                ));
+            }
+
+            ui.add_space(4.0);
+
+            let points: egui_plot::PlotPoints =
+                thg.iter().map(|&(wl, i)| [wl, i]).collect();
+
+            let line = egui_plot::Line::new(points)
+                .name("I\u{209c}\u{2095}\u{1d33}(\u{03c9})")
+                .color(egui::Color32::from_rgb(80, 200, 180))
+                .width(2.0);
+
+            egui_plot::Plot::new("thg_plot")
+                .height(300.0)
+                .x_axis_label("Fundamental wavelength (nm)")
+                .y_axis_label("THG intensity (nm\u{2079}, arb. units)")
+                .legend(egui_plot::Legend::default())
+                .show(ui, |plot_ui| {
+                    plot_ui.line(line);
+                });
+
+            ui.add_space(8.0);
+            if ui.button("Export THG CSV\u{2026}").clicked() {
+                export_thg_csv_dialog(thg);
+            }
+        } else {
+            ui.group(|ui| {
+                ui.set_min_size(egui::vec2(500.0, 350.0));
+                ui.centered_and_justified(|ui| {
+                    ui.label(
+                        "THG spectrum not computed. \
+                         Enable THG in the Simulation panel and re-run.",
+                    );
+                });
+            });
+        }
+    }
+}
+
+/// Open a save-file dialog and write SHG spectrum to CSV.
+fn export_shg_csv_dialog(shg: &[(f64, f64)]) {
+    use std::io::Write;
+
+    let path = rfd::FileDialog::new()
+        .set_title("Export SHG spectrum as CSV")
+        .set_file_name("shg_spectrum.csv")
+        .add_filter("CSV", &["csv"])
+        .save_file();
+
+    if let Some(path) = path {
+        let result = (|| -> std::io::Result<()> {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            let mut file = std::fs::File::create(&path)?;
+            writeln!(file, "fundamental_nm,shg_intensity_nm6")?;
+            for &(wl, i) in shg {
+                writeln!(file, "{:.2},{:.6e}", wl, i)?;
+            }
+            Ok(())
+        })();
+        if let Err(e) = result {
+            log::error!("Failed to export SHG CSV: {}", e);
+        }
+    }
+}
+
+/// Open a save-file dialog and write THG spectrum to CSV.
+fn export_thg_csv_dialog(thg: &[(f64, f64)]) {
+    use std::io::Write;
+
+    let path = rfd::FileDialog::new()
+        .set_title("Export THG spectrum as CSV")
+        .set_file_name("thg_spectrum.csv")
+        .add_filter("CSV", &["csv"])
+        .save_file();
+
+    if let Some(path) = path {
+        let result = (|| -> std::io::Result<()> {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            let mut file = std::fs::File::create(&path)?;
+            writeln!(file, "fundamental_nm,thg_intensity_nm9")?;
+            for &(wl, i) in thg {
+                writeln!(file, "{:.2},{:.6e}", wl, i)?;
+            }
+            Ok(())
+        })();
+        if let Err(e) = result {
+            log::error!("Failed to export THG CSV: {}", e);
         }
     }
 }
