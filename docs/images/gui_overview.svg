@@ -1,135 +1,308 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600">
-  <!-- Background -->
-  <rect width="1000" height="600" fill="#f5f5f5"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 720">
+  <defs>
+    <linearGradient id="headerGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#3d5a80;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#2c3e50;stop-opacity:1"/>
+    </linearGradient>
+    <linearGradient id="plotGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a2a3a;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#0d1b2a;stop-opacity:1"/>
+    </linearGradient>
+  </defs>
 
-  <!-- Main window -->
-  <rect x="10" y="10" width="980" height="580" fill="#ffffff" stroke="#333" stroke-width="2" rx="8"/>
+  <!-- App background -->
+  <rect width="1200" height="720" fill="#1e1e2e"/>
 
   <!-- Title bar -->
-  <rect x="10" y="10" width="980" height="40" fill="#2c3e50" rx="8 8 0 0"/>
-  <text x="30" y="37" font-family="Arial, sans-serif" font-size="18" font-weight="bold" fill="#ecf0f1">
-    Lumina — Coupled Dipole Approximation
+  <rect x="0" y="0" width="1200" height="38" fill="url(#headerGrad)"/>
+  <text x="16" y="24" font-family="'Segoe UI', Arial, sans-serif" font-size="15" font-weight="bold" fill="#e0e8ff">
+    Lumina — Coupled Dipole Approximation  v0.4.0
+  </text>
+  <text x="1140" y="24" font-family="Arial, sans-serif" font-size="15" fill="#aab8cc" text-anchor="middle">✕</text>
+
+  <!-- ─── LEFT PANEL: Scene ─────────────────────────────────────────────────── -->
+  <rect x="0" y="38" width="270" height="682" fill="#252535"/>
+  <rect x="0" y="38" width="270" height="1" fill="#3a3a5a"/>
+
+  <!-- Scene header -->
+  <rect x="0" y="38" width="270" height="36" fill="#2d2d45"/>
+  <text x="14" y="62" font-family="'Segoe UI', Arial, sans-serif" font-size="13" font-weight="bold" fill="#c8d0e8">Scene</text>
+  <rect x="228" y="47" width="32" height="18" fill="#5e81f4" rx="3"/>
+  <text x="244" y="60" font-family="Arial, sans-serif" font-size="12" font-weight="bold" text-anchor="middle" fill="#ffffff">+</text>
+
+  <!-- Object list -->
+  <rect x="6" y="82" width="258" height="36" fill="#3a3a58" rx="4"/>
+  <rect x="6" y="82" width="4" height="36" fill="#5e81f4" rx="2 0 0 2"/>
+  <text x="18" y="97" font-family="'Segoe UI', Arial, sans-serif" font-size="11" font-weight="bold" fill="#e0e8ff">Au_sphere</text>
+  <text x="18" y="111" font-family="'Segoe UI', Arial, sans-serif" font-size="10" fill="#8892aa">Sphere · r=20nm · Au_JC · 2nm</text>
+
+  <rect x="6" y="124" width="258" height="36" fill="#2a2a40" rx="4"/>
+  <rect x="6" y="124" width="4" height="36" fill="#88c0d0" rx="2 0 0 2"/>
+  <text x="18" y="139" font-family="'Segoe UI', Arial, sans-serif" font-size="11" fill="#c8d0e8">SiO2_shell</text>
+  <text x="18" y="153" font-family="'Segoe UI', Arial, sans-serif" font-size="10" fill="#8892aa">CoreShell · Au/SiO₂ · 2nm</text>
+
+  <!-- Dipole preview label -->
+  <text x="14" y="182" font-family="'Segoe UI', Arial, sans-serif" font-size="11" font-weight="bold" fill="#8892aa">Dipole Preview (XY)</text>
+
+  <!-- Preview box -->
+  <rect x="6" y="188" width="258" height="220" fill="url(#plotGrad)" rx="4" stroke="#3a3a5a" stroke-width="1"/>
+
+  <!-- Dipole scatter (sphere) -->
+  <g fill="#5e81f4" opacity="0.75">
+    <circle cx="135" cy="298" r="2.5"/>
+    <circle cx="115" cy="278" r="2.5"/> <circle cx="155" cy="278" r="2.5"/>
+    <circle cx="95"  cy="298" r="2.5"/> <circle cx="175" cy="298" r="2.5"/>
+    <circle cx="115" cy="318" r="2.5"/> <circle cx="155" cy="318" r="2.5"/>
+    <circle cx="135" cy="338" r="2.5"/> <circle cx="135" cy="258" r="2.5"/>
+    <circle cx="75"  cy="278" r="2.5"/> <circle cx="195" cy="278" r="2.5"/>
+    <circle cx="75"  cy="318" r="2.5"/> <circle cx="195" cy="318" r="2.5"/>
+    <circle cx="105" cy="268" r="2.5"/> <circle cx="165" cy="268" r="2.5"/>
+    <circle cx="105" cy="328" r="2.5"/> <circle cx="165" cy="328" r="2.5"/>
+    <circle cx="85"  cy="288" r="2.5"/> <circle cx="185" cy="288" r="2.5"/>
+    <circle cx="85"  cy="308" r="2.5"/> <circle cx="185" cy="308" r="2.5"/>
+    <circle cx="125" cy="268" r="2.5"/> <circle cx="145" cy="268" r="2.5"/>
+    <circle cx="125" cy="328" r="2.5"/> <circle cx="145" cy="328" r="2.5"/>
+    <circle cx="100" cy="298" r="2"/> <circle cx="170" cy="298" r="2"/>
+    <circle cx="120" cy="255" r="2"/> <circle cx="150" cy="255" r="2"/>
+    <circle cx="120" cy="341" r="2"/> <circle cx="150" cy="341" r="2"/>
+    <circle cx="60"  cy="298" r="2"/> <circle cx="210" cy="298" r="2"/>
+    <circle cx="68"  cy="270" r="2"/> <circle cx="202" cy="270" r="2"/>
+    <circle cx="68"  cy="326" r="2"/> <circle cx="202" cy="326" r="2"/>
+  </g>
+  <!-- Outer circle guide -->
+  <circle cx="135" cy="298" r="76" fill="none" stroke="#5e81f4" stroke-width="0.5" opacity="0.3"/>
+
+  <!-- Axes -->
+  <line x1="20" y1="398" x2="250" y2="398" stroke="#4a4a6a" stroke-width="1"/>
+  <line x1="20" y1="198" x2="20"  y2="398" stroke="#4a4a6a" stroke-width="1"/>
+  <text x="135" y="412" font-family="Arial, sans-serif" font-size="10" text-anchor="middle" fill="#6a7a8a">x (nm)</text>
+  <text x="12" y="298" font-family="Arial, sans-serif" font-size="10" text-anchor="middle" fill="#6a7a8a" transform="rotate(-90 12 298)">y (nm)</text>
+
+  <!-- Dipole count -->
+  <rect x="6" y="416" width="258" height="26" fill="#1e2a38" rx="3"/>
+  <text x="135" y="433" font-family="'Segoe UI', Arial, sans-serif" font-size="11" text-anchor="middle" fill="#88c0d0">
+    2 objects · 3 414 dipoles · FCD enabled
   </text>
 
-  <!-- Sidebar -->
-  <rect x="10" y="50" width="160" height="540" fill="#34495e"/>
-
-  <!-- Sidebar items -->
-  <g font-family="Arial, sans-serif" font-size="14">
-    <rect x="20" y="70" width="140" height="35" fill="#3498db" rx="4"/>
-    <text x="90" y="93" text-anchor="middle" fill="#ffffff" font-weight="bold">Geometry</text>
-
-    <rect x="20" y="115" width="140" height="35" fill="#2c3e50" rx="4"/>
-    <text x="90" y="138" text-anchor="middle" fill="#ecf0f1">Materials</text>
-
-    <rect x="20" y="160" width="140" height="35" fill="#2c3e50" rx="4"/>
-    <text x="90" y="183" text-anchor="middle" fill="#ecf0f1">Simulation</text>
-
-    <rect x="20" y="205" width="140" height="35" fill="#2c3e50" rx="4"/>
-    <text x="90" y="228" text-anchor="middle" fill="#ecf0f1">Results</text>
-  </g>
-
-  <!-- Main content area -->
-  <rect x="170" y="50" width="820" height="540" fill="#ecf0f1"/>
-
-  <!-- Content header -->
-  <text x="190" y="80" font-family="Arial, sans-serif" font-size="20" font-weight="bold" fill="#2c3e50">
-    Geometry
+  <!-- Run button -->
+  <rect x="14" y="454" width="242" height="38" fill="#5e81f4" rx="6"/>
+  <text x="135" y="478" font-family="'Segoe UI', Arial, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#ffffff">
+    ▶  Run Simulation
   </text>
-  <line x1="190" y1="90" x2="970" y2="90" stroke="#bdc3c7" stroke-width="2"/>
 
-  <!-- Shape selector -->
-  <g transform="translate(190, 110)">
-    <text x="0" y="0" font-family="Arial, sans-serif" font-size="14" fill="#2c3e50">Shape:</text>
+  <!-- ─── CENTRE PANEL: Simulation ─────────────────────────────────────────── -->
+  <rect x="270" y="38" width="290" height="682" fill="#242434"/>
+  <rect x="270" y="38" width="1" height="682" fill="#3a3a5a"/>
 
-    <rect x="60" y="-15" width="80" height="25" fill="#3498db" stroke="#2980b9" stroke-width="1" rx="4"/>
-    <text x="100" y="3" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" fill="#ffffff">Sphere</text>
+  <!-- Simulation header -->
+  <rect x="270" y="38" width="290" height="36" fill="#2d2d45"/>
+  <text x="284" y="62" font-family="'Segoe UI', Arial, sans-serif" font-size="13" font-weight="bold" fill="#c8d0e8">Simulation</text>
 
-    <rect x="150" y="-15" width="80" height="25" fill="#ecf0f1" stroke="#bdc3c7" stroke-width="1" rx="4"/>
-    <text x="190" y="3" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" fill="#7f8c8d">Cylinder</text>
+  <!-- Wavelength section -->
+  <text x="284" y="92" font-family="'Segoe UI', Arial, sans-serif" font-size="11" font-weight="bold" fill="#8892aa">WAVELENGTH</text>
+  <rect x="284" y="100" width="262" height="26" fill="#1e1e2e" rx="3" stroke="#3a3a5a" stroke-width="1"/>
+  <text x="296" y="117" font-family="'Segoe UI', Arial, sans-serif" font-size="11" fill="#c8d0e8">400 – 900 nm · 100 pts</text>
 
-    <rect x="240" y="-15" width="80" height="25" fill="#ecf0f1" stroke="#bdc3c7" stroke-width="1" rx="4"/>
-    <text x="280" y="3" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" fill="#7f8c8d">Cuboid</text>
+  <text x="284" y="144" font-family="'Segoe UI', Arial, sans-serif" font-size="11" font-weight="bold" fill="#8892aa">ENVIRONMENT</text>
+  <rect x="284" y="152" width="124" height="26" fill="#1e1e2e" rx="3" stroke="#3a3a5a" stroke-width="1"/>
+  <text x="296" y="169" font-family="'Segoe UI', Arial, sans-serif" font-size="11" fill="#c8d0e8">n = 1.33  (water)</text>
+
+  <!-- Substrate toggle -->
+  <text x="284" y="200" font-family="'Segoe UI', Arial, sans-serif" font-size="11" font-weight="bold" fill="#8892aa">SUBSTRATE</text>
+  <rect x="284" y="208" width="262" height="26" fill="#1e2a38" rx="3" stroke="#3a5a88" stroke-width="1"/>
+  <rect x="290" y="212" width="16" height="16" fill="#5e81f4" rx="2"/>
+  <text x="302" y="220" font-family="Arial, sans-serif" font-size="9" fill="#fff" text-anchor="middle">✓</text>
+  <text x="316" y="225" font-family="'Segoe UI', Arial, sans-serif" font-size="11" fill="#88c0d0">SiO2_Palik · z = −25 nm · retarded</text>
+
+  <!-- GPU toggle -->
+  <text x="284" y="252" font-family="'Segoe UI', Arial, sans-serif" font-size="11" font-weight="bold" fill="#8892aa">COMPUTE</text>
+  <rect x="284" y="260" width="262" height="26" fill="#1a2a1e" rx="3" stroke="#3a5a3a" stroke-width="1"/>
+  <rect x="290" y="264" width="16" height="16" fill="#a3be8c" rx="2"/>
+  <text x="298" y="272" font-family="Arial, sans-serif" font-size="9" fill="#1a2a1e" text-anchor="middle">✓</text>
+  <text x="316" y="277" font-family="'Segoe UI', Arial, sans-serif" font-size="11" fill="#a3be8c">GPU (wgpu) · auto fallback · tol 1e-6</text>
+
+  <!-- Divider -->
+  <line x1="284" y1="300" x2="546" y2="300" stroke="#3a3a5a" stroke-width="1"/>
+
+  <!-- Nonlinear section header -->
+  <text x="284" y="322" font-family="'Segoe UI', Arial, sans-serif" font-size="11" font-weight="bold" fill="#8892aa">NONLINEAR OPTICS</text>
+
+  <!-- SHG box -->
+  <rect x="284" y="330" width="262" height="80" fill="#1e1a2e" rx="4" stroke="#5e41a0" stroke-width="1"/>
+  <rect x="290" y="336" width="16" height="16" fill="#b48ead" rx="2"/>
+  <text x="298" y="344" font-family="Arial, sans-serif" font-size="9" fill="#1e1a2e" text-anchor="middle">✓</text>
+  <text x="316" y="350" font-family="'Segoe UI', Arial, sans-serif" font-size="12" font-weight="bold" fill="#b48ead">SHG  (χ⁽²⁾)</text>
+  <text x="480" y="350" font-family="'Segoe UI', Arial, sans-serif" font-size="10" fill="#7a6a8a">isotropic_surface</text>
+  <text x="296" y="370" font-family="'Segoe UI', Arial, sans-serif" font-size="10" fill="#8892aa">χ_zzz</text>
+  <rect x="320" y="360" width="70" height="18" fill="#1e1e2e" rx="2" stroke="#3a3a5a" stroke-width="1"/>
+  <text x="328" y="373" font-family="'Segoe UI', Arial, sans-serif" font-size="10" fill="#c8d0e8">1.0 + 0i  nm³</text>
+  <text x="296" y="395" font-family="'Segoe UI', Arial, sans-serif" font-size="10" fill="#8892aa">χ_zxx</text>
+  <rect x="320" y="385" width="70" height="18" fill="#1e1e2e" rx="2" stroke="#3a3a5a" stroke-width="1"/>
+  <text x="328" y="398" font-family="'Segoe UI', Arial, sans-serif" font-size="10" fill="#c8d0e8">0.3 + 0i  nm³</text>
+
+  <!-- THG box -->
+  <rect x="284" y="418" width="262" height="80" fill="#1a1e1e" rx="4" stroke="#41a08a" stroke-width="1"/>
+  <rect x="290" y="424" width="16" height="16" fill="#8fbcbb" rx="2"/>
+  <text x="298" y="432" font-family="Arial, sans-serif" font-size="9" fill="#1a1e1e" text-anchor="middle">✓</text>
+  <text x="316" y="438" font-family="'Segoe UI', Arial, sans-serif" font-size="12" font-weight="bold" fill="#8fbcbb">THG  (χ⁽³⁾)</text>
+  <text x="480" y="438" font-family="'Segoe UI', Arial, sans-serif" font-size="10" fill="#6a8a7a">isotropic_bulk</text>
+  <text x="296" y="458" font-family="'Segoe UI', Arial, sans-serif" font-size="10" fill="#8892aa">χ_xxxx</text>
+  <rect x="324" y="448" width="70" height="18" fill="#1e1e2e" rx="2" stroke="#3a3a5a" stroke-width="1"/>
+  <text x="332" y="461" font-family="'Segoe UI', Arial, sans-serif" font-size="10" fill="#c8d0e8">0.5 + 0i  nm⁶</text>
+  <text x="296" y="483" font-family="'Segoe UI', Arial, sans-serif" font-size="10" fill="#8892aa">χ_xxyy</text>
+  <rect x="324" y="473" width="70" height="18" fill="#1e1e2e" rx="2" stroke="#3a3a5a" stroke-width="1"/>
+  <text x="332" y="486" font-family="'Segoe UI', Arial, sans-serif" font-size="10" fill="#c8d0e8">0.1 + 0i  nm⁶</text>
+
+  <!-- Polarisation -->
+  <text x="284" y="522" font-family="'Segoe UI', Arial, sans-serif" font-size="11" font-weight="bold" fill="#8892aa">POLARISATION</text>
+  <rect x="284" y="530" width="80" height="24" fill="#5e81f4" rx="3"/>
+  <text x="324" y="546" font-family="'Segoe UI', Arial, sans-serif" font-size="11" text-anchor="middle" fill="#fff">x-pol</text>
+  <rect x="370" y="530" width="80" height="24" fill="#2d2d45" rx="3" stroke="#3a3a5a" stroke-width="1"/>
+  <text x="410" y="546" font-family="'Segoe UI', Arial, sans-serif" font-size="11" text-anchor="middle" fill="#8892aa">y-pol</text>
+  <rect x="456" y="530" width="80" height="24" fill="#2d2d45" rx="3" stroke="#3a3a5a" stroke-width="1"/>
+  <text x="496" y="546" font-family="'Segoe UI', Arial, sans-serif" font-size="11" text-anchor="middle" fill="#8892aa">circular</text>
+
+  <!-- ─── RIGHT PANEL: Results ──────────────────────────────────────────────── -->
+  <rect x="560" y="38" width="640" height="682" fill="#1e1e2e"/>
+  <rect x="560" y="38" width="1" height="682" fill="#3a3a5a"/>
+
+  <!-- Results tabs -->
+  <rect x="560" y="38" width="640" height="38" fill="#2d2d45"/>
+  <rect x="560" y="38" width="640" height="1" fill="#3a3a5a"/>
+
+  <!-- Tab: Spectra (active) -->
+  <rect x="564" y="42" width="82" height="30" fill="#1e1e2e" rx="4 4 0 0"/>
+  <text x="605" y="62" font-family="'Segoe UI', Arial, sans-serif" font-size="12" text-anchor="middle" fill="#e0e8ff">Spectra</text>
+  <!-- Tab: Near-field -->
+  <rect x="650" y="46" width="80" height="26" fill="#2d2d45" rx="4 4 0 0"/>
+  <text x="690" y="64" font-family="'Segoe UI', Arial, sans-serif" font-size="11" text-anchor="middle" fill="#8892aa">Near-field</text>
+  <!-- Tab: Far-field -->
+  <rect x="734" y="46" width="76" height="26" fill="#2d2d45" rx="4 4 0 0"/>
+  <text x="772" y="64" font-family="'Segoe UI', Arial, sans-serif" font-size="11" text-anchor="middle" fill="#8892aa">Far-field</text>
+  <!-- Tab: SHG (highlighted) -->
+  <rect x="814" y="46" width="56" height="26" fill="#1e1a2e" rx="4 4 0 0" stroke="#5e41a0" stroke-width="1"/>
+  <text x="842" y="64" font-family="'Segoe UI', Arial, sans-serif" font-size="11" text-anchor="middle" fill="#b48ead">SHG</text>
+  <!-- Tab: THG (highlighted) -->
+  <rect x="874" y="46" width="56" height="26" fill="#1a1e1e" rx="4 4 0 0" stroke="#41a08a" stroke-width="1"/>
+  <text x="902" y="64" font-family="'Segoe UI', Arial, sans-serif" font-size="11" text-anchor="middle" fill="#8fbcbb">THG</text>
+
+  <!-- Plot area -->
+  <rect x="570" y="86" width="620" height="380" fill="#141424" rx="4" stroke="#2a2a3a" stroke-width="1"/>
+
+  <!-- Grid lines -->
+  <g stroke="#1e2a3a" stroke-width="0.8">
+    <line x1="620" y1="86"  x2="620" y2="466"/>
+    <line x1="702" y1="86"  x2="702" y2="466"/>
+    <line x1="784" y1="86"  x2="784" y2="466"/>
+    <line x1="866" y1="86"  x2="866" y2="466"/>
+    <line x1="948" y1="86"  x2="948" y2="466"/>
+    <line x1="1030" y1="86" x2="1030" y2="466"/>
+    <line x1="1112" y1="86" x2="1112" y2="466"/>
+
+    <line x1="570" y1="148" x2="1190" y2="148"/>
+    <line x1="570" y1="210" x2="1190" y2="210"/>
+    <line x1="570" y1="272" x2="1190" y2="272"/>
+    <line x1="570" y1="334" x2="1190" y2="334"/>
+    <line x1="570" y1="396" x2="1190" y2="396"/>
   </g>
 
-  <!-- Parameters -->
-  <g transform="translate(190, 160)" font-family="Arial, sans-serif" font-size="13" fill="#2c3e50">
-    <text x="0" y="0">Radius: 10.0 nm</text>
-    <rect x="0" y="10" width="300" height="6" fill="#bdc3c7" rx="3"/>
-    <rect x="0" y="10" width="180" height="6" fill="#3498db" rx="3"/>
+  <!-- Y-axis labels -->
+  <text x="608" y="92"  font-family="Arial, sans-serif" font-size="10" text-anchor="end" fill="#5a6a7a">500</text>
+  <text x="608" y="152" font-family="Arial, sans-serif" font-size="10" text-anchor="end" fill="#5a6a7a">400</text>
+  <text x="608" y="214" font-family="Arial, sans-serif" font-size="10" text-anchor="end" fill="#5a6a7a">300</text>
+  <text x="608" y="276" font-family="Arial, sans-serif" font-size="10" text-anchor="end" fill="#5a6a7a">200</text>
+  <text x="608" y="338" font-family="Arial, sans-serif" font-size="10" text-anchor="end" fill="#5a6a7a">100</text>
+  <text x="608" y="469" font-family="Arial, sans-serif" font-size="10" text-anchor="end" fill="#5a6a7a">0</text>
 
-    <text x="0" y="45">Dipole spacing: 2.0 nm</text>
-    <rect x="0" y="55" width="300" height="6" fill="#bdc3c7" rx="3"/>
-    <rect x="0" y="55" width="120" height="6" fill="#3498db" rx="3"/>
+  <!-- X-axis labels -->
+  <text x="620"  y="480" font-family="Arial, sans-serif" font-size="10" text-anchor="middle" fill="#5a6a7a">400</text>
+  <text x="702"  y="480" font-family="Arial, sans-serif" font-size="10" text-anchor="middle" fill="#5a6a7a">475</text>
+  <text x="784"  y="480" font-family="Arial, sans-serif" font-size="10" text-anchor="middle" fill="#5a6a7a">550</text>
+  <text x="866"  y="480" font-family="Arial, sans-serif" font-size="10" text-anchor="middle" fill="#5a6a7a">625</text>
+  <text x="948"  y="480" font-family="Arial, sans-serif" font-size="10" text-anchor="middle" fill="#5a6a7a">700</text>
+  <text x="1030" y="480" font-family="Arial, sans-serif" font-size="10" text-anchor="middle" fill="#5a6a7a">775</text>
+  <text x="1112" y="480" font-family="Arial, sans-serif" font-size="10" text-anchor="middle" fill="#5a6a7a">850</text>
 
-    <text x="0" y="90" font-weight="bold">Estimated dipoles: 515</text>
-  </g>
+  <!-- Axis titles -->
+  <text x="880" y="498" font-family="'Segoe UI', Arial, sans-serif" font-size="12" text-anchor="middle" fill="#6a7a8a">Wavelength (nm)</text>
+  <text x="578" y="276" font-family="'Segoe UI', Arial, sans-serif" font-size="12" text-anchor="middle" fill="#6a7a8a" transform="rotate(-90 578 276)">Cross-Section (nm²)</text>
 
-  <!-- Dipole scatter preview -->
-  <g transform="translate(550, 110)">
-    <text x="0" y="0" font-family="Arial, sans-serif" font-size="14" fill="#2c3e50">Dipole Lattice Preview (XY)</text>
+  <!-- C_ext curve (blue) — SPR peak ~520nm -->
+  <path d="M620,420 C640,410 660,390 680,350 C695,318 710,265 730,210 C745,168 760,148 775,152 C790,156 805,175 820,205 C840,242 860,290 880,330 C900,365 930,395 960,415 C990,430 1040,444 1112,450"
+        fill="none" stroke="#5e81f4" stroke-width="2.5"/>
 
-    <rect x="0" y="10" width="400" height="300" fill="#ffffff" stroke="#bdc3c7" stroke-width="1"/>
+  <!-- C_abs curve (red) -->
+  <path d="M620,432 C640,422 660,400 680,362 C695,330 710,278 730,224 C745,184 760,165 775,168 C790,172 805,190 820,218 C840,252 860,298 880,336 C900,370 930,398 960,418 C990,433 1040,446 1112,454"
+        fill="none" stroke="#bf616a" stroke-width="2"/>
 
-    <!-- Scatter points (sphere outline) -->
-    <g fill="#3498db" opacity="0.6">
-      <!-- Center region (denser) -->
-      <circle cx="200" cy="160" r="80" fill="none" stroke="#3498db" stroke-width="0.5"/>
-      <!-- Scattered dipole points -->
-      <circle cx="200" cy="160" r="2"/>
-      <circle cx="180" cy="140" r="2"/>
-      <circle cx="220" cy="140" r="2"/>
-      <circle cx="160" cy="160" r="2"/>
-      <circle cx="240" cy="160" r="2"/>
-      <circle cx="180" cy="180" r="2"/>
-      <circle cx="220" cy="180" r="2"/>
-      <circle cx="200" cy="200" r="2"/>
-      <circle cx="200" cy="120" r="2"/>
-      <circle cx="140" cy="140" r="2"/>
-      <circle cx="260" cy="140" r="2"/>
-      <circle cx="140" cy="180" r="2"/>
-      <circle cx="260" cy="180" r="2"/>
-      <circle cx="170" cy="160" r="2"/>
-      <circle cx="230" cy="160" r="2"/>
-      <circle cx="190" cy="150" r="2"/>
-      <circle cx="210" cy="150" r="2"/>
-      <circle cx="190" cy="170" r="2"/>
-      <circle cx="210" cy="170" r="2"/>
-      <circle cx="150" cy="150" r="2"/>
-      <circle cx="250" cy="150" r="2"/>
-      <circle cx="150" cy="170" r="2"/>
-      <circle cx="250" cy="170" r="2"/>
-      <!-- More scattered points for effect -->
-      <circle cx="175" cy="135" r="2"/>
-      <circle cx="225" cy="135" r="2"/>
-      <circle cx="175" cy="185" r="2"/>
-      <circle cx="225" cy="185" r="2"/>
-      <circle cx="165" cy="145" r="2"/>
-      <circle cx="235" cy="145" r="2"/>
-      <circle cx="165" cy="175" r="2"/>
-      <circle cx="235" cy="175" r="2"/>
-    </g>
+  <!-- C_sca curve (green, smaller) -->
+  <path d="M620,458 C650,455 680,450 710,443 C730,437 750,425 775,420 C800,415 830,422 860,432 C890,440 930,450 980,455 C1040,460 1080,460 1112,461"
+        fill="none" stroke="#a3be8c" stroke-width="2"/>
 
-    <!-- Axes -->
-    <line x1="20" y1="290" x2="380" y2="290" stroke="#7f8c8d" stroke-width="1"/>
-    <line x1="20" y1="30" x2="20" y2="290" stroke="#7f8c8d" stroke-width="1"/>
+  <!-- CD curve (faint purple) -->
+  <path d="M620,465 C660,462 700,456 730,450 C760,444 790,438 820,440 C850,442 880,448 920,452 C960,456 1040,460 1112,462"
+        fill="none" stroke="#b48ead" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.7"/>
 
-    <text x="200" y="308" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#7f8c8d">x (nm)</text>
-    <text x="8" y="160" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#7f8c8d"
-          transform="rotate(-90 8 160)">y (nm)</text>
-  </g>
+  <!-- Legend -->
+  <rect x="920" y="100" width="130" height="84" fill="#1e2a3e" rx="4" stroke="#2a3a4e" stroke-width="1"/>
+  <line x1="930" y1="118" x2="955" y2="118" stroke="#5e81f4" stroke-width="2.5"/>
+  <text x="962" y="122" font-family="'Segoe UI', Arial, sans-serif" font-size="11" fill="#c8d0e8">C_ext</text>
+  <line x1="930" y1="136" x2="955" y2="136" stroke="#bf616a" stroke-width="2"/>
+  <text x="962" y="140" font-family="'Segoe UI', Arial, sans-serif" font-size="11" fill="#c8d0e8">C_abs</text>
+  <line x1="930" y1="154" x2="955" y2="154" stroke="#a3be8c" stroke-width="2"/>
+  <text x="962" y="158" font-family="'Segoe UI', Arial, sans-serif" font-size="11" fill="#c8d0e8">C_sca</text>
+  <line x1="930" y1="172" x2="955" y2="172" stroke="#b48ead" stroke-width="1.5" stroke-dasharray="4,3"/>
+  <text x="962" y="176" font-family="'Segoe UI', Arial, sans-serif" font-size="11" fill="#c8d0e8">ΔC_CD</text>
 
-  <!-- Action buttons -->
-  <g transform="translate(190, 450)">
-    <rect x="0" y="0" width="120" height="40" fill="#27ae60" stroke="#229954" stroke-width="2" rx="6"/>
-    <text x="60" y="26" font-family="Arial, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#ffffff">
-      Run Simulation
-    </text>
-  </g>
+  <!-- SPR annotation -->
+  <line x1="776" y1="152" x2="776" y2="100" stroke="#5e81f4" stroke-width="0.8" stroke-dasharray="3,3" opacity="0.5"/>
+  <text x="776" y="96" font-family="Arial, sans-serif" font-size="10" text-anchor="middle" fill="#5e81f4">SPR ~520 nm</text>
+
+  <!-- Export buttons -->
+  <rect x="572" y="482" width="70" height="24" fill="#2d3748" rx="3" stroke="#3a4a5a" stroke-width="1"/>
+  <text x="607" y="498" font-family="'Segoe UI', Arial, sans-serif" font-size="11" text-anchor="middle" fill="#88c0d0">CSV</text>
+  <rect x="648" y="482" width="70" height="24" fill="#2d3748" rx="3" stroke="#3a4a5a" stroke-width="1"/>
+  <text x="683" y="498" font-family="'Segoe UI', Arial, sans-serif" font-size="11" text-anchor="middle" fill="#88c0d0">JSON</text>
+
+  <!-- Near-field heatmap preview (bottom right) -->
+  <rect x="840" y="490" width="360" height="190" fill="#141424" rx="4" stroke="#2a2a3a" stroke-width="1"/>
+  <text x="1020" y="508" font-family="'Segoe UI', Arial, sans-serif" font-size="11" text-anchor="middle" fill="#8892aa">Near-field |E|²  @  519 nm</text>
+
+  <!-- Heatmap grid (simplified colour squares) -->
+  <defs>
+    <radialGradient id="heatGrad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%"   style="stop-color:#ffdd00;stop-opacity:1"/>
+      <stop offset="25%"  style="stop-color:#ff6600;stop-opacity:1"/>
+      <stop offset="55%"  style="stop-color:#cc0033;stop-opacity:1"/>
+      <stop offset="80%"  style="stop-color:#440077;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#0a0a1a;stop-opacity:1"/>
+    </radialGradient>
+  </defs>
+  <ellipse cx="1020" cy="635" rx="100" ry="80" fill="url(#heatGrad)" opacity="0.92"/>
+  <!-- Hotspot glow -->
+  <ellipse cx="1060" cy="620" rx="22" ry="18" fill="#ffff88" opacity="0.5"/>
+  <ellipse cx="980"  cy="650" rx="22" ry="18" fill="#ffff88" opacity="0.5"/>
+
+  <!-- Colourbar -->
+  <defs>
+    <linearGradient id="colourBar" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%"   style="stop-color:#ffff88;stop-opacity:1"/>
+      <stop offset="25%"  style="stop-color:#ffdd00;stop-opacity:1"/>
+      <stop offset="50%"  style="stop-color:#ff6600;stop-opacity:1"/>
+      <stop offset="75%"  style="stop-color:#cc0033;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#0a0a1a;stop-opacity:1"/>
+    </linearGradient>
+  </defs>
+  <rect x="1170" y="516" width="16" height="140" fill="url(#colourBar)" rx="2"/>
+  <text x="1168" y="520" font-family="Arial, sans-serif" font-size="9" text-anchor="end" fill="#8892aa">max</text>
+  <text x="1168" y="660" font-family="Arial, sans-serif" font-size="9" text-anchor="end" fill="#8892aa">0</text>
 
   <!-- Status bar -->
-  <rect x="10" y="550" width="980" height="40" fill="#2c3e50" rx="0 0 8 8"/>
-  <text x="30" y="575" font-family="Arial, sans-serif" font-size="12" fill="#ecf0f1">
-    Ready • v0.1.2 • 515 dipoles • FCD enabled
-  </text>
+  <rect x="0" y="698" width="1200" height="22" fill="#0d0d1a"/>
+  <text x="16" y="713" font-family="'Segoe UI', Arial, sans-serif" font-size="10" fill="#5a7a5a">● Done</text>
+  <text x="80" y="713" font-family="'Segoe UI', Arial, sans-serif" font-size="10" fill="#6a7a8a">v0.4.0</text>
+  <text x="140" y="713" font-family="'Segoe UI', Arial, sans-serif" font-size="10" fill="#6a7a8a">3 414 dipoles</text>
+  <text x="260" y="713" font-family="'Segoe UI', Arial, sans-serif" font-size="10" fill="#6a7a8a">100 wavelengths · 4.2 s</text>
+  <text x="440" y="713" font-family="'Segoe UI', Arial, sans-serif" font-size="10" fill="#6a7a8a">GPU (wgpu/f32) · FCD · Ewald</text>
+  <text x="660" y="713" font-family="'Segoe UI', Arial, sans-serif" font-size="10" fill="#8892aa">SHG ✓  THG ✓  substrate ✓</text>
 </svg>

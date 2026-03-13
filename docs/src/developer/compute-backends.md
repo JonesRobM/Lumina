@@ -31,19 +31,76 @@ cargo build --release --features gpu
 **Architecture:**
 
 1. The interaction matrix is assembled on the CPU (Rayon-parallel).
-2. The matrix is uploaded to the GPU once and cached in VRAM.
+2. The matrix is uploaded to the GPU once per wavelength and cached in VRAM.
 3. Each GMRES iteration dispatches a WGSL compute shader for the complex matvec.
 4. The Arnoldi orthogonalisation and Givens rotations remain on the CPU in f64.
 
 **Key design decisions:**
 
 - **f32 precision on GPU:** wgpu/WGSL does not support f64. The matrix and vectors are converted to `Complex<f32>` (stored as `vec2<f32>`) for the GPU matvec. The conversion overhead is O(N), negligible compared to the O(N\\(^2\\)) matvec.
-- **Matrix caching:** The `GpuBackend` caches the uploaded matrix buffer. For a typical GMRES solve (~30–300 iterations), the matrix is uploaded once and reused for every iteration.
+- **Matrix caching:** The `GpuSession` holds 5 pre-allocated WGSL buffers (matrix, input, output, staging, params) and a pre-built bind group. The matrix is uploaded once; each GMRES iteration reuses all buffers (0 per-iteration allocations).
 - **Automatic fallback:** If GPU initialisation fails (no compatible GPU, missing drivers), the solver falls back to `CpuBackend` with a log warning.
+- **Memory budget gate (v0.4.1):** The GPU path is only entered if the matrix fits within `matrix_memory_budget` (default 2 GiB). For large N where the matrix would exceed this limit, the solver goes directly to the CPU on-the-fly path — preventing a silent O(N²) CPU allocation before a GPU upload attempt.
 
 **Precision implications:**
 
 The f32 matvec limits the achievable GMRES residual to approximately \\(10^{-7}\\). For most CDA applications this is more than adequate — the discretisation error (typically 5–25%) dominates. The solver tolerance should be set to \\(\geq 10^{-6}\\) when using GPU acceleration.
+
+## Memory-Aware Solver Dispatch
+
+For large systems the interaction matrix dominates memory. `CdaSolver::solve_dipoles` selects its sub-strategy based on the matrix size `(3N)² × 16 bytes` versus a configurable `matrix_memory_budget` (default 2 GiB):
+
+![Solver path selection flowchart](../../images/solver_dispatch.svg)
+
+| Condition | Path | Peak memory | Speed |
+|-----------|------|-------------|-------|
+| N ≤ 1 000 | Direct LU (faer) | O(N²) | Fastest |
+| matrix_bytes ≤ budget AND GPU | GPU GMRES | O(N²) CPU + VRAM | Fast at N > 5 000 |
+| matrix_bytes ≤ budget, no GPU | CPU cached GMRES | O(N²) | Good |
+| matrix_bytes > budget | **On-the-fly GMRES** | **O(N)** | Slower per iter |
+
+### On-the-fly Matvec
+
+When the matrix exceeds the budget, `assembly::matvec_on_the_fly` is used instead:
+
+```rust
+// No matrix is ever assembled. For each GMRES iteration:
+// result[3i..3i+3] = α_i⁻¹ · x[3i..3i+3]  (diagonal)
+//                  + Σⱼ₌ᵢ -G(rᵢ, rⱼ) · x[3j..3j+3]  (off-diagonal)
+// Rows are computed in parallel (Rayon par_iter over i).
+```
+
+Peak memory is proportional to the Krylov subspace only:
+\\[
+M_\text{on-the-fly} \approx (m+1) \times 3N \times 16 \text{ bytes}
+\\]
+where \\(m = 30\\) is the GMRES restart parameter.
+
+### Memory Scaling
+
+![Peak memory vs N for cached vs on-the-fly](../../images/memory_scaling.svg)
+
+The crossover from "fits in budget" to "on-the-fly" occurs at:
+\\[
+N_\text{cross} = \frac{1}{3} \sqrt{\frac{M_\text{budget}}{16}} \approx 3\,860 \text{ at the 2 GiB default}
+\\]
+
+At N = 10 000:
+- **Cached matrix**: 14.4 GB — requires a workstation with ample RAM
+- **On-the-fly**: ~47 MB — runs on any laptop
+
+### Configuring the Budget
+
+In the TOML configuration:
+
+```toml
+[simulation]
+# Increase to cache larger matrices (faster, but needs more RAM)
+matrix_memory_gib = 8.0
+
+# Set to 0 to always use on-the-fly (lowest memory, slower)
+matrix_memory_gib = 0.0
+```
 
 **WGSL shader:**
 

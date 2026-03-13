@@ -110,23 +110,48 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
     let copper = JohnsonChristyMaterial::copper();
     let tio2   = PalikMaterial::tio2();
     let sio2   = PalikMaterial::sio2();
+    let al2o3  = PalikMaterial::al2o3();
+    let si     = PalikMaterial::silicon();
+    let gaas   = PalikMaterial::gaas();
 
     // Select compute backend based on config.
     let backend: Arc<dyn ComputeBackend> = create_backend(&job.simulation.backend);
+
+    let matrix_memory_budget = (job.simulation.matrix_memory_gib * 1024.0 * 1024.0 * 1024.0) as u64;
 
     // Run simulation across wavelengths — parallel via Rayon.
     let solver = CdaSolver {
         backend,
         substrate: job.simulation.substrate.clone(),
+        matrix_memory_budget,
         ..Default::default()
     };
 
     let n_wl = wavelengths.len();
     let progress = AtomicUsize::new(0);
 
-    println!("Solving {} wavelengths in parallel (rayon)...", n_wl);
+    // Cap the number of concurrent wavelength threads to avoid OOM.
+    // On the CPU GMRES path, the matrix is never assembled (on-the-fly matvec),
+    // so each thread uses only O(N) memory.  On the GPU path the matrix IS
+    // assembled per thread (3N×3N×16 bytes), so we limit parallelism to keep
+    // peak allocation within an 8 GiB budget.
+    let matrix_bytes = (3u64 * total_dipoles as u64).pow(2) * 16;
+    const MEMORY_BUDGET: u64 = 8 * 1024 * 1024 * 1024; // 8 GiB
+    let max_par = ((MEMORY_BUDGET / matrix_bytes.max(1)) as usize)
+        .max(1)
+        .min(rayon::current_num_threads());
 
-    let all_spectra: Vec<CrossSections> = wavelengths
+    println!(
+        "Solving {} wavelengths in parallel (up to {} threads)...",
+        n_wl, max_par
+    );
+
+    let wl_pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(max_par)
+        .build()
+        .map_err(|e| anyhow::anyhow!("Failed to build wavelength thread pool: {}", e))?;
+
+    let all_spectra: Vec<CrossSections> = wl_pool.install(|| wavelengths
         .par_iter()
         .map(|&wl| {
             let k = 2.0 * std::f64::consts::PI * params.environment_n / wl;
@@ -136,7 +161,7 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
             let mut params_wl = params.clone();
             if let Some(sub) = &job.simulation.substrate {
                 let eps_sub = resolve_material_epsilon(
-                    &sub.material, wl, &gold, &silver, &copper, &tio2, &sio2,
+                    &sub.material, wl, &gold, &silver, &copper, &tio2, &sio2, &al2o3, &si, &gaas,
                 ).map_err(|e| anyhow::anyhow!("{}", e))?;
                 params_wl.substrate_delta_eps = Some(substrate_reflection_factor(eps_sub, epsilon_m, sub.use_retarded));
             }
@@ -144,7 +169,7 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
             let mut dipoles = Vec::with_capacity(total_dipoles);
             for i in 0..total_dipoles {
                 let epsilon = resolve_material_epsilon(
-                    &geom.materials[i], wl, &gold, &silver, &copper, &tio2, &sio2,
+                    &geom.materials[i], wl, &gold, &silver, &copper, &tio2, &sio2, &al2o3, &si, &gaas,
                 )
                 .map_err(|e| anyhow::anyhow!("{}", e))?;
                 let volume = geom.spacings[i].powi(3);
@@ -193,7 +218,8 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
 
             Ok(cs)
         })
-        .collect::<Result<Vec<_>>>()?;
+        .collect::<Result<Vec<_>>>()
+    )?;
 
     // Report convergence failures
     let n_failed = all_spectra.iter().filter(|cs| cs.extinction.is_nan()).count();
@@ -224,14 +250,14 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
         let mut peak_params = params.clone();
         if let Some(sub) = &job.simulation.substrate {
             let eps_sub = resolve_material_epsilon(
-                &sub.material, peak_wl, &gold, &silver, &copper, &tio2, &sio2,
+                &sub.material, peak_wl, &gold, &silver, &copper, &tio2, &sio2, &al2o3, &si, &gaas,
             )?;
             peak_params.substrate_delta_eps = Some(substrate_reflection_factor(eps_sub, epsilon_m, sub.use_retarded));
         }
         let mut peak_dipoles = Vec::with_capacity(total_dipoles);
         for i in 0..total_dipoles {
             let epsilon = resolve_material_epsilon(
-                &geom.materials[i], peak_wl, &gold, &silver, &copper, &tio2, &sio2,
+                &geom.materials[i], peak_wl, &gold, &silver, &copper, &tio2, &sio2, &al2o3, &si, &gaas,
             )?;
             let volume = geom.spacings[i].powi(3);
             let dipole = if let Some(hint) = &geom.hints[i] {
@@ -295,6 +321,9 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
                 &copper,
                 &tio2,
                 &sio2,
+                &al2o3,
+                &si,
+                &gaas,
             )
         } else {
             Vec::new()
@@ -317,6 +346,9 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
                 &copper,
                 &tio2,
                 &sio2,
+                &al2o3,
+                &si,
+                &gaas,
             )
         } else {
             Vec::new()
@@ -349,6 +381,9 @@ fn run_shg_sweep(
     copper: &lumina_materials::johnson_christy::JohnsonChristyMaterial,
     tio2: &lumina_materials::palik::PalikMaterial,
     sio2: &lumina_materials::palik::PalikMaterial,
+    al2o3: &lumina_materials::palik::PalikMaterial,
+    si: &lumina_materials::palik::PalikMaterial,
+    gaas: &lumina_materials::palik::PalikMaterial,
 ) -> Vec<ShgPoint> {
     let chi2 = build_chi2_tensor(nl);
     let total_dipoles = geom.positions.len();
@@ -371,7 +406,7 @@ fn run_shg_sweep(
             let mut params_2omega = params.clone();
             if let Some(sub) = &solver.substrate {
                 if let Ok(eps_sub) =
-                    resolve_material_epsilon(&sub.material, wl, gold, silver, copper, tio2, sio2)
+                    resolve_material_epsilon(&sub.material, wl, gold, silver, copper, tio2, sio2, al2o3, si, gaas)
                 {
                     params_omega.substrate_delta_eps =
                         Some(substrate_reflection_factor(eps_sub, epsilon_m, sub.use_retarded));
@@ -384,6 +419,9 @@ fn run_shg_sweep(
                     copper,
                     tio2,
                     sio2,
+                    al2o3,
+                    si,
+                    gaas,
                 ) {
                     params_2omega.substrate_delta_eps =
                         Some(substrate_reflection_factor(eps_sub, epsilon_m, sub.use_retarded));
@@ -401,6 +439,9 @@ fn run_shg_sweep(
                     copper,
                     tio2,
                     sio2,
+                    al2o3,
+                    si,
+                    gaas,
                 ) {
                     Ok(e) => e,
                     Err(_) => return None,
@@ -437,6 +478,9 @@ fn run_shg_sweep(
                     copper,
                     tio2,
                     sio2,
+                    al2o3,
+                    si,
+                    gaas,
                 ) {
                     Ok(e) => e,
                     Err(_) => return None, // 2ω out of material range — skip
@@ -580,6 +624,9 @@ fn run_thg_sweep(
     copper: &lumina_materials::johnson_christy::JohnsonChristyMaterial,
     tio2: &lumina_materials::palik::PalikMaterial,
     sio2: &lumina_materials::palik::PalikMaterial,
+    al2o3: &lumina_materials::palik::PalikMaterial,
+    si: &lumina_materials::palik::PalikMaterial,
+    gaas: &lumina_materials::palik::PalikMaterial,
 ) -> Vec<ThgPoint> {
     let chi3 = build_chi3_tensor(nl);
     let total_dipoles = geom.positions.len();
@@ -602,7 +649,7 @@ fn run_thg_sweep(
             let mut params_3omega = params.clone();
             if let Some(sub) = &solver.substrate {
                 if let Ok(eps_sub) =
-                    resolve_material_epsilon(&sub.material, wl, gold, silver, copper, tio2, sio2)
+                    resolve_material_epsilon(&sub.material, wl, gold, silver, copper, tio2, sio2, al2o3, si, gaas)
                 {
                     params_omega.substrate_delta_eps =
                         Some(lumina_core::solver::substrate::substrate_reflection_factor(
@@ -617,6 +664,9 @@ fn run_thg_sweep(
                     copper,
                     tio2,
                     sio2,
+                    al2o3,
+                    si,
+                    gaas,
                 ) {
                     params_3omega.substrate_delta_eps =
                         Some(lumina_core::solver::substrate::substrate_reflection_factor(
@@ -636,6 +686,9 @@ fn run_thg_sweep(
                     copper,
                     tio2,
                     sio2,
+                    al2o3,
+                    si,
+                    gaas,
                 ) {
                     Ok(e) => e,
                     Err(_) => return None,
@@ -672,6 +725,9 @@ fn run_thg_sweep(
                     copper,
                     tio2,
                     sio2,
+                    al2o3,
+                    si,
+                    gaas,
                 ) {
                     Ok(e) => e,
                     Err(_) => return None, // 3ω out of material range — skip
@@ -796,6 +852,7 @@ pub fn write_thg_csv(thg: &[ThgPoint], path: &Path, job: &JobConfig) -> Result<(
 }
 
 /// Resolve the dielectric function for a material identifier at a given wavelength.
+#[allow(clippy::too_many_arguments)]
 fn resolve_material_epsilon(
     material_id: &str,
     wavelength_nm: f64,
@@ -804,15 +861,22 @@ fn resolve_material_epsilon(
     copper: &JohnsonChristyMaterial,
     tio2: &PalikMaterial,
     sio2: &PalikMaterial,
+    al2o3: &PalikMaterial,
+    si: &PalikMaterial,
+    gaas: &PalikMaterial,
 ) -> Result<Complex64> {
     let provider: &dyn MaterialProvider = match material_id {
-        "Au_JC"       => gold,
-        "Ag_JC"       => silver,
-        "Cu_JC"       => copper,
-        "TiO2_Palik"  => tio2,
-        "SiO2_Palik"  => sio2,
+        "Au_JC"        => gold,
+        "Ag_JC"        => silver,
+        "Cu_JC"        => copper,
+        "TiO2_Palik"   => tio2,
+        "SiO2_Palik"   => sio2,
+        "Al2O3_Palik"  => al2o3,
+        "Si_Palik"     => si,
+        "GaAs_Palik"   => gaas,
         _ => anyhow::bail!(
-            "Unknown material '{}'. Valid identifiers: Au_JC, Ag_JC, Cu_JC, TiO2_Palik, SiO2_Palik",
+            "Unknown material '{}'. Valid: Au_JC, Ag_JC, Cu_JC, \
+             TiO2_Palik, SiO2_Palik, Al2O3_Palik, Si_Palik, GaAs_Palik",
             material_id
         ),
     };

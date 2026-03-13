@@ -36,6 +36,14 @@ pub struct SimulationConfig {
     /// `material = "SiO2_Palik"`.
     #[serde(default)]
     pub substrate: Option<SubstrateSpec>,
+    /// Memory budget for caching the interaction matrix (GiB). Default: 2.0.
+    ///
+    /// The CPU GMRES solver assembles and caches the 3N×3N matrix when it
+    /// fits within this budget (fast BLAS matvec).  If the matrix exceeds the
+    /// budget, an on-the-fly approach is used instead (O(N) memory, same
+    /// arithmetic cost per iteration).  Increase this on nodes with ample RAM.
+    #[serde(default = "default_matrix_memory_gib")]
+    pub matrix_memory_gib: f64,
 }
 
 fn default_backend() -> String {
@@ -50,6 +58,9 @@ fn default_solver_tolerance() -> f64 {
 }
 fn default_max_iterations() -> usize {
     1000
+}
+fn default_matrix_memory_gib() -> f64 {
+    2.0
 }
 
 /// Wavelength specification: either a range or explicit list.

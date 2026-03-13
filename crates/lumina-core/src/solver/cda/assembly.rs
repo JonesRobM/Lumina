@@ -189,6 +189,122 @@ pub fn build_incident_field_vector(
     rhs
 }
 
+/// Compute the matrix-vector product **A · x** without explicitly assembling
+/// the $3N \times 3N$ interaction matrix.
+///
+/// Functionally identical to `assemble_interaction_matrix(…).dot(x)` but
+/// requires only $O(N)$ working memory instead of $O(N^2)$, making it safe
+/// for large systems (N > 3 000) where the full matrix would exhaust RAM.
+///
+/// Each output row-block $i$ is independent, so the outer loop is
+/// parallelised with Rayon. The cost per call is $O(N^2)$ — the same as one
+/// explicit matrix–vector product.
+///
+/// # Arguments
+/// Same as [`assemble_interaction_matrix`], plus `x` (the input vector, length $3N$).
+pub fn matvec_on_the_fly(
+    dipoles: &[Dipole],
+    x: &Array1<Complex64>,
+    k: f64,
+    use_fcd: bool,
+    cell_size: f64,
+    lattice: Option<&LatticeSpec>,
+    k_bloch: [f64; 3],
+    substrate: Option<(f64, Complex64)>,
+) -> Array1<Complex64> {
+    let n = dipoles.len();
+    let ewald: Option<std::sync::Arc<EwaldGreens>> = lattice
+        .map(|lat| std::sync::Arc::new(EwaldGreens::new(lat.clone())));
+
+    // Compute each row-block i independently in parallel.
+    let rows: Vec<[Complex64; 3]> = (0..n)
+        .into_par_iter()
+        .map(|i| {
+            let ewald_ref = ewald.as_ref().map(std::sync::Arc::as_ref);
+            let mut yi = [Complex64::from(0.0); 3];
+
+            // Diagonal block: α_i^{-1} · x[3i..3i+2]
+            let inv_alpha = invert_3x3(&dipoles[i].polarisability);
+            for a in 0..3 {
+                for b in 0..3 {
+                    yi[a] += inv_alpha[3 * a + b] * x[3 * i + b];
+                }
+            }
+
+            for j in 0..n {
+                // ── Direct Green's function contribution ────────────────────
+                // For free-space (no Ewald) the i==j self-block is skipped;
+                // the α⁻¹ diagonal is already handled above.
+                let skip_direct = i == j && ewald_ref.is_none();
+                if !skip_direct {
+                    let g = if let Some(eg) = ewald_ref {
+                        let r = [
+                            dipoles[i].position[0] - dipoles[j].position[0],
+                            dipoles[i].position[1] - dipoles[j].position[1],
+                            dipoles[i].position[2] - dipoles[j].position[2],
+                        ];
+                        eg.evaluate(r, k_bloch, k)
+                    } else if use_fcd {
+                        super::greens::dyadic_greens_tensor_filtered(
+                            &dipoles[i].position,
+                            &dipoles[j].position,
+                            k,
+                            cell_size,
+                        )
+                    } else {
+                        super::greens::dyadic_greens_tensor(
+                            &dipoles[i].position,
+                            &dipoles[j].position,
+                            k,
+                        )
+                    };
+                    for a in 0..3 {
+                        for b in 0..3 {
+                            yi[a] -= g[a][b] * x[3 * j + b];
+                        }
+                    }
+                }
+
+                // ── Substrate image-dipole contribution ─────────────────────
+                // Runs for ALL j (including i == j self-image).
+                if let Some((z_interface, delta_eps)) = substrate {
+                    let rj = dipoles[j].position;
+                    let rj_img = [rj[0], rj[1], 2.0 * z_interface - rj[2]];
+                    let ri = dipoles[i].position;
+                    let diff = [
+                        ri[0] - rj_img[0],
+                        ri[1] - rj_img[1],
+                        ri[2] - rj_img[2],
+                    ];
+                    let dist_sq = diff[0] * diff[0] + diff[1] * diff[1] + diff[2] * diff[2];
+                    if dist_sq >= 1e-20 {
+                        let g_img = if let Some(eg) = ewald_ref {
+                            eg.evaluate(diff, k_bloch, k)
+                        } else {
+                            super::greens::dyadic_greens_tensor(&ri, &rj_img, k)
+                        };
+                        let m = [-delta_eps, -delta_eps, delta_eps];
+                        for a in 0..3 {
+                            for b in 0..3 {
+                                yi[a] -= m[b] * g_img[a][b] * x[3 * j + b];
+                            }
+                        }
+                    }
+                }
+            }
+            yi
+        })
+        .collect();
+
+    let mut y = Array1::<Complex64>::zeros(3 * n);
+    for (i, yi) in rows.iter().enumerate() {
+        for c in 0..3 {
+            y[3 * i + c] = yi[c];
+        }
+    }
+    y
+}
+
 /// Public wrapper for 3x3 inversion, used by cross-section computation.
 pub fn invert_3x3_pub(m: &[Complex64; 9]) -> [Complex64; 9] {
     invert_3x3(m)

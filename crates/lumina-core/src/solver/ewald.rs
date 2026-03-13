@@ -40,8 +40,10 @@
 //! $$M_{ab} = k^2\delta_{ab} - \tilde{k}_a\tilde{k}_b,\quad
 //!   \tilde{\mathbf{k}} = (Q_x,\,Q_y,\,i\,q\,\operatorname{sgn}(z))$$
 //!
-//! For 1D chains the reciprocal sum returns zero (direct sum converges
-//! adequately; full 1D spectral sum is deferred).
+//! For 1D chains the reciprocal sum returns zero. The real-space sum uses
+//! no erfc damping (direct lattice sum) with a higher default shell count
+//! (≥ 20) to achieve ~2 % convergence at optical wavelengths. A proper 1D
+//! spectral sum (requiring modified Bessel functions K₀/K₁) is deferred.
 //!
 //! # Convergence note
 //!
@@ -94,12 +96,17 @@ impl EwaldGreens {
         out
     }
 
-    /// Real-space lattice sum with erfc damping.
+    /// Real-space lattice sum.
     ///
-    /// Sums `erfc(η·|s|) · G_free(s) · exp(i k∥ · R)` over all **R** ∈ Λ
-    /// within `truncation_real` shells, where **s** = **r** − **R** and
-    /// η = `self.lattice.eta()`.  The **R** = 0 term is excluded when
-    /// `|r| < 1e-12` nm.
+    /// **2D lattices**: sums `erfc(η·|s|) · G_free(s) · exp(i k∥ · R)` over
+    /// all **R** ∈ Λ within `truncation_real` shells (η = `self.lattice.eta()`).
+    /// The erfc factor provides exponential convergence.
+    ///
+    /// **1D chains**: no erfc damping — uses a direct lattice sum over at least
+    /// 20 shells.  This gives ~2 % convergence at typical optical wavelengths.
+    /// The full 1D Ewald (Bessel spectral sum) is deferred to a future version.
+    ///
+    /// The **R** = 0 term is excluded when `|r| < 1e-12` nm.
     pub fn real_space(
         &self,
         r: [f64; 3],
@@ -109,8 +116,18 @@ impl EwaldGreens {
         let r_norm_sq = r[0]*r[0] + r[1]*r[1] + r[2]*r[2];
         let r_is_zero = r_norm_sq < 1e-24;
 
+        let is_2d = self.lattice.is_2d();
         let eta = self.lattice.eta();
-        let lattice_points = self.lattice.real_lattice_points(self.lattice.truncation_real);
+
+        // 1D chains: use a direct lattice sum (no erfc) with at least 20 shells
+        // for ~2 % convergence at optical wavelengths.  The Bessel-function-based
+        // 1D spectral correction is not yet implemented.
+        let n_shells = if is_2d {
+            self.lattice.truncation_real
+        } else {
+            self.lattice.truncation_real.max(20)
+        };
+        let lattice_points = self.lattice.real_lattice_points(n_shells);
         let zero = Complex64::from(0.0);
         let mut g = [[zero; 3]; 3];
 
@@ -132,8 +149,8 @@ impl EwaldGreens {
             let bloch_arg = k_bloch[0]*lp[0] + k_bloch[1]*lp[1] + k_bloch[2]*lp[2];
             let bloch_phase = Complex64::new(bloch_arg.cos(), bloch_arg.sin());
 
-            // erfc damping factor
-            let damp = erfc_real(eta * s_norm);
+            // erfc damping factor (2D only — 1D uses direct sum without damping)
+            let damp = if is_2d { erfc_real(eta * s_norm) } else { 1.0 };
 
             let g_s = dyadic_greens_tensor_at(&s, k);
 
@@ -424,7 +441,10 @@ mod tests {
         );
     }
 
-    /// 1D chain: real-space sum should be finite and reciprocal.
+    /// 1D chain: real-space sum should be finite, non-zero, and reciprocal.
+    ///
+    /// Prior to the direct-sum fix (v0.4.1) the erfc η was so large that every
+    /// term was zeroed → evaluate() returned ≈ 0 silently.
     #[test]
     fn test_1d_chain_finite() {
         let lat = LatticeSpec::chain([80.0, 0.0, 0.0]);
@@ -432,10 +452,40 @@ mod tests {
         let k = 2.0 * std::f64::consts::PI / 500.0;
         let r = [10.0, 5.0, 0.0];
         let g = eg.evaluate(r, [0.0; 3], k);
+        let mut max_mag = 0.0_f64;
         for i in 0..3 {
             for j in 0..3 {
                 assert!(g[i][j].re.is_finite());
                 assert!(g[i][j].im.is_finite());
+                max_mag = max_mag.max(g[i][j].norm());
+            }
+        }
+        // The result must be genuinely non-zero (dominant element ≫ 0).
+        assert!(
+            max_mag > 1e-12,
+            "1D chain G ≈ 0 — erfc η bug: max_mag = {:.2e}",
+            max_mag
+        );
+    }
+
+    /// 1D chain: evaluate() at Γ point satisfies G(r)[i,j] == G(-r)[j,i] (reciprocity).
+    #[test]
+    fn test_1d_chain_reciprocity() {
+        let lat = LatticeSpec::chain([80.0, 0.0, 0.0]);
+        let eg = EwaldGreens::new(lat);
+        let k = 2.0 * std::f64::consts::PI / 600.0;
+        let r = [10.0, 5.0, 0.0];
+        let neg_r = [-r[0], -r[1], -r[2]];
+        let kb = [0.0; 3];
+        let g_r = eg.evaluate(r, kb, k);
+        let g_neg = eg.evaluate(neg_r, kb, k);
+        for i in 0..3 {
+            for j in 0..3 {
+                assert!(
+                    near_c(g_r[i][j], g_neg[j][i], 1e-6),
+                    "1D reciprocity G[{i}][{j}] = {:?}, G[-r][{j}][{i}] = {:?}",
+                    g_r[i][j], g_neg[j][i]
+                );
             }
         }
     }

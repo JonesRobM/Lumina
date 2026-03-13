@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 520" width="560" height="520"
+     font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="12">
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#555"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="560" height="520" fill="#fafafa" rx="8"/>
+
+  <!-- Title -->
+  <text x="280" y="26" text-anchor="middle" font-size="13" font-weight="700" fill="#1a1a2e">solve_dipoles() — Solver Path Selection</text>
+
+  <!-- ── Start ── -->
+  <ellipse cx="280" cy="58" rx="100" ry="20" fill="#e8eaf6" stroke="#5c6bc0" stroke-width="1.5"/>
+  <text x="280" y="62" text-anchor="middle" font-size="11" fill="#1a1a2e">N dipoles received</text>
+
+  <!-- arrow → diamond 1 -->
+  <line x1="280" y1="78" x2="280" y2="100" stroke="#555" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- ── Diamond 1: N ≤ threshold? ── -->
+  <polygon points="280,102 372,140 280,178 188,140" fill="#fff9c4" stroke="#f9a825" stroke-width="1.5"/>
+  <text x="280" y="135" text-anchor="middle" font-size="11" fill="#333">N ≤ iterative_threshold</text>
+  <text x="280" y="150" text-anchor="middle" font-size="10" fill="#666">(default: 1 000)</text>
+
+  <!-- Yes → left (Direct LU) -->
+  <line x1="188" y1="140" x2="105" y2="140" stroke="#555" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="147" y="133" text-anchor="middle" font-size="10" font-weight="600" fill="#2e7d32">Yes</text>
+
+  <rect x="15" y="116" width="90" height="48" rx="6" fill="#e8f5e9" stroke="#43a047" stroke-width="1.5"/>
+  <text x="60" y="135" text-anchor="middle" font-size="11" font-weight="600" fill="#1a1a2e">Direct LU</text>
+  <text x="60" y="149" text-anchor="middle" font-size="9" fill="#555">faer — exact</text>
+  <text x="60" y="161" text-anchor="middle" font-size="9" fill="#555">O(N³) time</text>
+
+  <!-- No → down -->
+  <line x1="280" y1="178" x2="280" y2="202" stroke="#555" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="295" y="193" font-size="10" font-weight="600" fill="#c62828">No</text>
+
+  <!-- ── Diamond 2: matrix_bytes ≤ budget? ── -->
+  <polygon points="280,204 395,250 280,296 165,250" fill="#fff9c4" stroke="#f9a825" stroke-width="1.5"/>
+  <text x="280" y="243" text-anchor="middle" font-size="11" fill="#333">(3N)² × 16 bytes ≤ budget?</text>
+  <text x="280" y="259" text-anchor="middle" font-size="10" fill="#666">matrix_memory_budget (default 2 GiB)</text>
+
+  <!-- No → right (on-the-fly) -->
+  <line x1="395" y1="250" x2="462" y2="250" stroke="#555" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="429" y="243" text-anchor="middle" font-size="10" font-weight="600" fill="#c62828">No</text>
+
+  <rect x="462" y="222" width="85" height="56" rx="6" fill="#fce4ec" stroke="#e91e63" stroke-width="1.5"/>
+  <text x="504" y="240" text-anchor="middle" font-size="11" font-weight="600" fill="#1a1a2e">On-the-fly</text>
+  <text x="504" y="254" text-anchor="middle" font-size="9" fill="#555">CPU GMRES</text>
+  <text x="504" y="266" text-anchor="middle" font-size="9" fill="#555">O(N) memory</text>
+  <text x="504" y="278" text-anchor="middle" font-size="9" fill="#555">no assembly</text>
+
+  <!-- Yes → down; label + "assemble matrix" note -->
+  <line x1="280" y1="296" x2="280" y2="322" stroke="#555" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="295" y="313" font-size="10" font-weight="600" fill="#2e7d32">Yes</text>
+
+  <!-- "assemble matrix once" note -->
+  <rect x="140" y="300" width="130" height="18" rx="3" fill="#f5f5f5" stroke="#bbb" stroke-width="0.8" stroke-dasharray="3,2"/>
+  <text x="205" y="313" text-anchor="middle" font-size="9" fill="#777" font-style="italic">assemble matrix once (CPU)</text>
+
+  <!-- ── Diamond 3: GPU available? ── -->
+  <polygon points="280,324 375,363 280,402 185,363" fill="#fff9c4" stroke="#f9a825" stroke-width="1.5"/>
+  <text x="280" y="357" text-anchor="middle" font-size="11" fill="#333">GPU session available?</text>
+  <text x="280" y="371" text-anchor="middle" font-size="10" fill="#666">(wgpu, VRAM check)</text>
+
+  <!-- Yes → left (GPU GMRES) -->
+  <line x1="185" y1="363" x2="105" y2="363" stroke="#555" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="145" y="356" text-anchor="middle" font-size="10" font-weight="600" fill="#2e7d32">Yes</text>
+
+  <rect x="15" y="338" width="90" height="50" rx="6" fill="#e3f2fd" stroke="#1e88e5" stroke-width="1.5"/>
+  <text x="60" y="357" text-anchor="middle" font-size="11" font-weight="600" fill="#1a1a2e">GPU GMRES</text>
+  <text x="60" y="370" text-anchor="middle" font-size="9" fill="#555">upload once</text>
+  <text x="60" y="382" text-anchor="middle" font-size="9" fill="#555">f32 WGSL shader</text>
+
+  <!-- No → right (CPU cached) -->
+  <line x1="375" y1="363" x2="447" y2="363" stroke="#555" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="411" y="356" text-anchor="middle" font-size="10" font-weight="600" fill="#c62828">No</text>
+
+  <rect x="447" y="338" width="98" height="50" rx="6" fill="#f3e5f5" stroke="#8e24aa" stroke-width="1.5"/>
+  <text x="496" y="357" text-anchor="middle" font-size="11" font-weight="600" fill="#1a1a2e">CPU cached</text>
+  <text x="496" y="370" text-anchor="middle" font-size="9" fill="#555">BLAS matvec</text>
+  <text x="496" y="382" text-anchor="middle" font-size="9" fill="#555">O(N²) memory</text>
+
+  <!-- ── Legend ── -->
+  <rect x="15" y="412" width="530" height="92" rx="6" fill="#f0f4ff" stroke="#c5cae9" stroke-width="1"/>
+  <text x="270" y="430" text-anchor="middle" font-size="11" font-weight="700" fill="#1a1a2e">Key design choices</text>
+  <text x="25" y="447" font-size="10" fill="#333">• Budget gate fires <tspan font-style="italic">before</tspan> GPU assembly — large-N systems go directly to on-the-fly (no O(N²) alloc).</text>
+  <text x="25" y="462" font-size="10" fill="#333">• On-the-fly: peak memory ≈ 32 × 3N × 16 bytes (Krylov vectors only); same O(N²) work per GMRES iteration.</text>
+  <text x="25" y="477" font-size="10" fill="#333">• GPU path: f32 matvec (≤1e-7 residual floor), upload once per wavelength; Arnoldi/Givens remain f64 on CPU.</text>
+  <text x="25" y="492" font-size="10" fill="#333">• Direct LU threshold: N ≤ 1 000 (≤ 144 MB matrix, exact solve in milliseconds).</text>
+</svg>

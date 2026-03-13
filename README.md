@@ -7,7 +7,7 @@
 
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-90%20passing-brightgreen.svg)](https://github.com/jonesrobm/lumina)
+[![Tests](https://img.shields.io/badge/tests-136%20passing-brightgreen.svg)](https://github.com/jonesrobm/lumina)
 [![Documentation](https://img.shields.io/badge/docs-mdBook-blue.svg)](docs/)
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20Development-ff5e5b?logo=ko-fi&logoColor=white)](https://ko-fi.com/jonesrobm)
 
@@ -25,12 +25,21 @@ Lumina is a Rust framework for computing the linear and nonlinear optical respon
 
 ---
 
-## What's New in v0.4.0
+## What's New in v0.4.1
 
-- **SHG & THG** — self-consistent second- and third-harmonic generation via χ^(2) and χ^(3) tensors; available in both CLI (`[nonlinear]` TOML section) and GUI (dedicated panel + spectra tab)
-- **Full Ewald acceleration** — erfc-damped real-space sum + 2D spectral reciprocal-space sum for periodic arrays; convergence in ≤ 5 shells regardless of unit cell size
-- **Retarded substrate** — retarded normal-incidence Fresnel amplitude r = (n_sub − n_env)/(n_sub + n_env) replaces the quasi-static Δε; more accurate at optical frequencies (default, backward-compatible)
-- **90 tests passing** — 5 new THG tests, 5 new Ewald/substrate tests
+- **O(N) memory GMRES** — on-the-fly matvec evaluates G(rᵢ,rⱼ)·xⱼ per iteration without ever assembling the 3N×3N matrix; peak memory drops from ~1.3 GB to ~4 MB at N = 3 000
+- **GPU budget gate** — the `matrix_memory_budget` check now fires *before* GPU assembly, so large-N systems go directly to on-the-fly rather than silently doing an O(N²) CPU allocation
+- **1D chain Ewald fix** — the previous implementation zeroed all inter-cell interactions (erfc ≈ 10⁻¹⁰⁹ at the nearest image); 1D chains now use a correct direct lattice sum with ≥ 20 shells
+- **Extended Palik library** — Al₂O₃ (sapphire), Si (crystalline, 400–1100 nm), GaAs (300–1000 nm) added alongside TiO₂ and SiO₂
+- **136 tests passing**
+
+<details>
+<summary>v0.4.0 highlights</summary>
+
+- **SHG & THG** — self-consistent second- and third-harmonic generation via χ^(2) and χ^(3) tensors
+- **Full Ewald acceleration** — erfc-damped real-space sum + 2D spectral reciprocal-space sum for periodic arrays
+- **Retarded substrate** — retarded normal-incidence Fresnel amplitude replaces the quasi-static Δε
+</details>
 
 ---
 
@@ -55,6 +64,8 @@ Lumina is a Rust framework for computing the linear and nonlinear optical respon
 
 - Direct LU decomposition (`faer`) for N ≤ 1000 dipoles
 - GMRES(m=30) iterative solver for N > 1000 (agrees with direct to 10⁻¹³ relative error)
+- **On-the-fly matvec** — computes G(rᵢ,rⱼ)·xⱼ per iteration with no matrix assembly; O(N) peak memory, runs on any laptop at N = 10 000
+- Configurable `matrix_memory_budget` (default 2 GiB) — automatically selects cached or on-the-fly path based on matrix size
 - GPU-accelerated GMRES matvec via wgpu compute shaders (optional, `--features gpu`)
 - Persistent GPU session buffers — matrix uploaded once per wavelength solve
 - Rayon-parallel wavelength sweep across all CPU cores (GUI and CLI)
@@ -62,7 +73,7 @@ Lumina is a Rust framework for computing the linear and nonlinear optical respon
 ### Materials
 
 - Johnson & Christy (1972): Au, Ag, Cu — 43 data points, 188–892 nm
-- Palik handbook: TiO₂, SiO₂ — 300–1000 nm
+- Palik handbook: TiO₂, SiO₂, Al₂O₃, Si (400–1100 nm), GaAs (300–1000 nm)
 - Cubic spline interpolation for smooth ε(λ)
 
 ### Geometry
@@ -166,7 +177,7 @@ cargo run --release -p lumina-cli -- run gold_sphere.toml
 Output in `./output/spectra.csv`:
 
 ```
-# Lumina v0.4.0 | object: Au_sphere | material: Au_JC | spacing: 2.0 nm
+# Lumina v0.4.1 | object: Au_sphere | material: Au_JC | spacing: 2.0 nm
 wavelength_nm,extinction_nm2,absorption_nm2,scattering_nm2
 400.0,3.21e2,2.87e2,3.40e1
 ...
@@ -373,6 +384,36 @@ backend = "gpu"    # "auto" (default) | "cpu" | "gpu"
 - GMRES residual floor on GPU: ~1e-7 (use `solver_tolerance = 1e-6`)
 - At N ≤ 3000, GPU is slower than CPU due to transfer overhead; speedup expected at N > 5000
 
+### How the solver picks its path
+
+The solver automatically selects the lowest-memory strategy that fits the configured budget:
+
+<p align="center">
+  <img src="docs/images/solver_dispatch.svg" alt="Solver path selection flowchart" width="560"/>
+</p>
+
+For large N, the interaction matrix grows as (3N)² × 16 bytes — 14.4 GB at N = 10 000. The `matrix_memory_budget` (default 2 GiB) gates both the GPU and CPU-cached paths, so large problems automatically fall through to the on-the-fly path without ever allocating the matrix.
+
+### Memory scaling
+
+<p align="center">
+  <img src="docs/images/memory_scaling.svg" alt="Peak memory vs N — cached matrix vs on-the-fly" width="560"/>
+</p>
+
+| N | Cached matrix | On-the-fly |
+|---|---------------|-----------|
+| 1 000 | 144 MB | ~1.5 MB |
+| 3 000 | 1.3 GB | ~4.6 MB |
+| 10 000 | 14.4 GB | ~15 MB |
+
+The crossover from cached to on-the-fly occurs at N ≈ 3 860 (2 GiB default budget). Override in TOML:
+
+```toml
+[simulation]
+matrix_memory_gib = 8.0   # increase to cache larger matrices
+matrix_memory_gib = 0.0   # always use on-the-fly (lowest memory)
+```
+
 ---
 
 ## Validation
@@ -414,7 +455,8 @@ cargo test --workspace
 | v0.2.1 | Parallel wavelength sweep, stack-allocated Green's tensors, XYZ workflow, debug output |
 | v0.2.2 | Persistent GPU session buffers, SceneSpec multi-object assembly |
 | v0.3.0 | CoreShell geometry, anisotropic ellipsoid dipoles, substrate image-dipole, periodic lattice sums |
-| **v0.4.0** | **Full Ewald acceleration, retarded substrate, SHG (χ^(2)), THG (χ^(3))** |
+| v0.4.0 | Full Ewald acceleration, retarded substrate, SHG (χ^(2)), THG (χ^(3)) |
+| **v0.4.1** | **O(N) on-the-fly matvec, GPU budget gate, 1D chain Ewald fix, extended Palik (Al₂O₃/Si/GaAs)** |
 
 ### Planned
 
@@ -471,10 +513,10 @@ Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines
 
 Priority areas:
 - Surface-averaging methods for improved metallic convergence
-- Extended Palik library (Al₂O₃, Si, GaAs)
 - DFT polarisability import (VASP WAVEDER, Gaussian)
 - Full Sommerfeld substrate (k∥-dependent Fresnel coefficients)
 - GPU matrix assembly shader (currently CPU only)
+- 1D Bessel spectral sum (K₀/K₁) for < 1% on-axis chain accuracy
 
 ---
 
@@ -488,7 +530,7 @@ If you use Lumina in your research, please cite:
   title   = {Lumina: Coupled Dipole Approximation for Nanophotonics},
   year    = {2026},
   url     = {https://github.com/jonesrobm/lumina},
-  version = {0.4.0}
+  version = {0.4.1}
 }
 ```
 

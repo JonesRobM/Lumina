@@ -205,9 +205,56 @@
 ### Deferred to v0.5
 
 - [ ] Full Sommerfeld integral substrate (k∥-dependent Fresnel coefficients)
-- [ ] 1D reciprocal Ewald sum
+- [x] 1D Ewald direct sum fix (v0.4.1) — Bessel spectral correction still deferred
 - [ ] DFT polarisability import (VASP WAVEDER, Gaussian)
 - [ ] MPI distributed wavelength sweep
+
+## v0.4.1 — Memory & Periodic Fixes
+
+### On-the-fly Matvec (CPU GMRES path)
+
+- [x] `assembly::matvec_on_the_fly` — computes A·x by evaluating G(rᵢ,rⱼ) on-the-fly per GMRES iteration; no matrix assembled
+- [x] Peak memory drops from O(N²) to O(N) (Krylov vectors only, ≈ 4 MB for N = 3 000)
+- [x] `CdaSolver.matrix_memory_budget: u64` (default 2 GiB) — adaptive strategy: cached matrix if it fits, on-the-fly otherwise
+- [x] `matrix_memory_gib` exposed in CLI TOML `[simulation]`
+
+### GPU Memory Budget Integration
+
+- [x] Budget gate applied **before** GPU path — large systems skip GPU assembly entirely (previously: silent O(N²) CPU alloc before GPU attempt)
+- [x] Restructured `solve_dipoles` branch: direct LU → (matrix fits budget? → GPU or CPU cached) → on-the-fly
+- [x] Memory-aware wavelength thread pool cap: `min(cpus, 8 GiB / matrix_bytes)` — prevents OOM on parallel wavelength sweeps
+- [x] Applied in GUI (`app.rs`) and CLI (`runner.rs`) including SHG and THG sweeps
+
+### 1D Ewald Direct Sum Fix
+
+- [x] **Bug fixed**: η = √(π/|**a**₁|) zeroed all real-space terms (erfc ≈ 10⁻¹⁰⁹ at nearest image) — 1D periodic G was silently ≈ 0
+- [x] 1D chains now use a direct lattice sum (no erfc damping) with ≥ 20 shells (~2 % accuracy at optical wavelengths)
+- [x] 2D lattices unaffected — erfc Ewald still used for 2D
+- [x] New tests: `test_1d_chain_finite` strengthened (asserts max_mag > 1e-12), `test_1d_chain_reciprocity` added
+- [x] 1D Bessel spectral sum (K₀/K₁ for complex argument) documented as deferred
+
+### Extended Palik Materials
+
+- [x] `PalikMaterial::al2o3()` — sapphire (Al₂O₃) ordinary ray, 300–1000 nm, n ≈ 1.76–1.81
+- [x] `PalikMaterial::silicon()` — crystalline Si at 300 K, 400–1100 nm (starts at 400 nm to avoid UV gap structure)
+- [x] `PalikMaterial::gaas()` — GaAs at 300 K, 300–1000 nm, band edge ~870 nm
+- [x] Identifiers: `Al2O3_Palik`, `Si_Palik`, `GaAs_Palik` in GUI and CLI
+
+### Documentation
+
+- [x] `docs/src/theory/periodic.md` — 1D convergence table, Bessel deferral note, updated status/limitations table
+- [x] `docs/src/developer/compute-backends.md` — memory-aware dispatch section, solver path flowchart, memory scaling diagram
+- [x] `docs/images/solver_dispatch.svg` — flowchart of `solve_dipoles` path selection
+- [x] `docs/images/memory_scaling.svg` — log-log memory vs N for cached vs on-the-fly
+
+### Memory Scaling After v0.4.1
+
+| N dipoles | Matrix size | CPU on-the-fly peak | GPU budget cap (8 GiB pool) |
+|-----------|------------|---------------------|------------------------------|
+| 1 000 | 144 MB | — (direct LU) | — (direct LU) |
+| 3 000 | 1.3 GB | **~4 MB** | 6 parallel wavelength threads |
+| 5 000 | 3.6 GB | **~11 MB** | 2 parallel wavelength threads |
+| 10 000 | 14.4 GB | **~43 MB** | 1 thread at a time |
 
 ## v1.0 — Multi-Method & Cross-Platform
 

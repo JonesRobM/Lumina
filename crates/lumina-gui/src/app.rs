@@ -183,16 +183,23 @@ impl LuminaApp {
             let copper = JohnsonChristyMaterial::copper();
             let tio2   = PalikMaterial::tio2();
             let sio2   = PalikMaterial::sio2();
+            let al2o3  = PalikMaterial::al2o3();
+            let si     = PalikMaterial::silicon();
+            let gaas   = PalikMaterial::gaas();
 
             let resolve_eps = |mat: &str, wl: f64| -> Result<Complex64, String> {
                 let provider: &dyn MaterialProvider = match mat {
-                    "Au_JC"       => &gold,
-                    "Ag_JC"       => &silver,
-                    "Cu_JC"       => &copper,
-                    "TiO2_Palik"  => &tio2,
-                    "SiO2_Palik"  => &sio2,
+                    "Au_JC"        => &gold,
+                    "Ag_JC"        => &silver,
+                    "Cu_JC"        => &copper,
+                    "TiO2_Palik"   => &tio2,
+                    "SiO2_Palik"   => &sio2,
+                    "Al2O3_Palik"  => &al2o3,
+                    "Si_Palik"     => &si,
+                    "GaAs_Palik"   => &gaas,
                     other => return Err(format!(
-                        "Unknown material '{other}'. Valid: Au_JC, Ag_JC, Cu_JC, TiO2_Palik, SiO2_Palik"
+                        "Unknown material '{other}'. Valid: Au_JC, Ag_JC, Cu_JC, \
+                         TiO2_Palik, SiO2_Palik, Al2O3_Palik, Si_Palik, GaAs_Palik"
                     )),
                 };
                 provider.dielectric_function(wl).map_err(|e| format!("{e}"))
@@ -260,9 +267,30 @@ impl LuminaApp {
             let passes = if compute_cd { 2 } else { 1 };
             let sim_start = std::time::Instant::now();
 
-            dbg("Solving wavelengths in parallel (rayon)…".to_string());
+            // Cap concurrent wavelength threads to avoid OOM.
+            // On the CPU GMRES path the matrix is never assembled (on-the-fly
+            // matvec), so memory per thread is O(N).  On the GPU path the
+            // matrix is assembled per thread (3N×3N×16 bytes); cap threads to
+            // keep that within an 8 GiB budget.
+            let matrix_bytes = (3u64 * n as u64).pow(2) * 16;
+            const MEMORY_BUDGET: u64 = 8 * 1024 * 1024 * 1024; // 8 GiB
+            let max_par = ((MEMORY_BUDGET / matrix_bytes.max(1)) as usize)
+                .max(1)
+                .min(rayon::current_num_threads());
+            let wl_pool = match rayon::ThreadPoolBuilder::new()
+                .num_threads(max_par)
+                .build()
+            {
+                Ok(p) => p,
+                Err(e) => {
+                    let _ = tx.send(SimulationMessage::Error(format!("Thread pool error: {e}")));
+                    return;
+                }
+            };
 
-            let results: Result<Vec<(CrossSections, Vec<Dipole>)>, String> = wavelengths
+            dbg(format!("Solving wavelengths in parallel ({max_par} threads)…"));
+
+            let results: Result<Vec<(CrossSections, Vec<Dipole>)>, String> = wl_pool.install(|| wavelengths
                 .par_iter()
                 .map(|&wl| {
                     let t0 = std::time::Instant::now();
@@ -354,7 +382,8 @@ impl LuminaApp {
 
                     Ok((cs, dipoles))
                 })
-                .collect();
+                .collect()
+            );
 
             // ── Collect results ──────────────────────────────────────────────
             let (spectra, peak_dipoles, peak_wl) = match results {
@@ -435,7 +464,7 @@ impl LuminaApp {
 
                 dbg("SHG sweep…".to_string());
 
-                let shg_results: Vec<Option<(f64, f64)>> = wavelengths
+                let shg_results: Vec<Option<(f64, f64)>> = wl_pool.install(|| wavelengths
                     .par_iter()
                     .map(|&wl| {
                         let wl_2omega = wl / 2.0;
@@ -501,7 +530,8 @@ impl LuminaApp {
 
                         Some((wl, shg.shg_intensity))
                     })
-                    .collect();
+                    .collect()
+                );
 
                 shg_results.into_iter().flatten().collect()
             } else {
@@ -524,7 +554,7 @@ impl LuminaApp {
 
                 dbg("THG sweep…".to_string());
 
-                let thg_results: Vec<Option<(f64, f64)>> = wavelengths
+                let thg_results: Vec<Option<(f64, f64)>> = wl_pool.install(|| wavelengths
                     .par_iter()
                     .map(|&wl| {
                         let wl_3omega = wl / 3.0;
@@ -590,7 +620,8 @@ impl LuminaApp {
 
                         Some((wl, thg.thg_intensity))
                     })
-                    .collect();
+                    .collect()
+                );
 
                 thg_results.into_iter().flatten().collect()
             } else {

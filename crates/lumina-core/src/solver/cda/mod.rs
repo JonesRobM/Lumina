@@ -9,8 +9,18 @@
 //!
 //! - **Direct solve** (LU decomposition via `faer`): Used when $N \leq 1000$.
 //!   Exact but $O(N^3)$ in time and $O(N^2)$ in memory.
-//! - **Iterative solve** (GMRES): Used when $N > 1000$. Requires only
-//!   matrix-vector products, reducing memory to $O(N)$ per iteration.
+//! - **Iterative solve** (GMRES): Used when $N > 1000$. The sub-strategy is
+//!   chosen by comparing the matrix size $(3N)^2 \times 16$ bytes against
+//!   `matrix_memory_budget` (default 2 GiB):
+//!   - **Within budget + GPU**: assemble once on CPU, upload to GPU, GMRES
+//!     matvec on GPU (fast).
+//!   - **Within budget, CPU only**: assemble once, BLAS matvec reused across
+//!     all GMRES iterations.
+//!   - **Exceeds budget**: on-the-fly matvec — $O(N)$ peak memory, no
+//!     assembly.  Krylov vectors only (≈ 90 × 3N complex doubles).
+//!
+//!   The budget gate is checked *before* attempting GPU assembly, so large
+//!   systems always take the on-the-fly path regardless of GPU availability.
 
 pub mod assembly;
 pub mod direct;
@@ -50,7 +60,23 @@ pub struct CdaSolver {
     /// are added to the interaction matrix at each wavelength using the
     /// pre-computed Fresnel factor from `SimulationParams::substrate_delta_eps`.
     pub substrate: Option<SubstrateSpec>,
+    /// Memory budget for the interaction matrix (bytes).
+    ///
+    /// For large systems on the CPU GMRES path, the solver compares the matrix
+    /// size `(3N)² × 16` against this budget:
+    ///
+    /// - **Within budget**: assemble the full matrix once and use BLAS for
+    ///   each matvec (fast — memory is O(N²), but reused across iterations).
+    /// - **Exceeds budget**: compute A·x on-the-fly per GMRES iteration
+    ///   (O(N) memory, same O(N²) work per call).
+    ///
+    /// Default: 2 GiB (fits matrices up to N ≈ 3 860).
+    /// Set to `0` to always use on-the-fly.
+    pub matrix_memory_budget: u64,
 }
+
+/// Default matrix memory budget: 2 GiB.
+const DEFAULT_MATRIX_MEMORY_BUDGET: u64 = 2 * 1024 * 1024 * 1024;
 
 impl Default for CdaSolver {
     fn default() -> Self {
@@ -62,60 +88,29 @@ impl Default for CdaSolver {
             backend: Arc::new(CpuBackend::new()),
             lattice: None,
             substrate: None,
+            matrix_memory_budget: DEFAULT_MATRIX_MEMORY_BUDGET,
         }
     }
 }
 
 impl CdaSolver {
     pub fn new(iterative_threshold: usize) -> Self {
-        Self {
-            iterative_threshold,
-            incident_field: IncidentField::default(),
-            use_fcd: true,
-            cell_size: 3.0,
-            backend: Arc::new(CpuBackend::new()),
-            lattice: None,
-            substrate: None,
-        }
+        Self { iterative_threshold, ..Default::default() }
     }
 
     /// Create a CDA solver with explicit FCD configuration.
     pub fn with_fcd(iterative_threshold: usize, use_fcd: bool, cell_size: f64) -> Self {
-        Self {
-            iterative_threshold,
-            incident_field: IncidentField::default(),
-            use_fcd,
-            cell_size,
-            backend: Arc::new(CpuBackend::new()),
-            lattice: None,
-            substrate: None,
-        }
+        Self { iterative_threshold, use_fcd, cell_size, ..Default::default() }
     }
 
     /// Create a CDA solver with a custom incident field (polarisation/direction).
     pub fn with_incident(iterative_threshold: usize, use_fcd: bool, cell_size: f64, incident_field: IncidentField) -> Self {
-        Self {
-            iterative_threshold,
-            incident_field,
-            use_fcd,
-            cell_size,
-            backend: Arc::new(CpuBackend::new()),
-            lattice: None,
-            substrate: None,
-        }
+        Self { iterative_threshold, use_fcd, cell_size, incident_field, ..Default::default() }
     }
 
     /// Create a CDA solver with a specific compute backend.
     pub fn with_backend(iterative_threshold: usize, use_fcd: bool, cell_size: f64, backend: Arc<dyn ComputeBackend>) -> Self {
-        Self {
-            iterative_threshold,
-            incident_field: IncidentField::default(),
-            use_fcd,
-            cell_size,
-            backend,
-            lattice: None,
-            substrate: None,
-        }
+        Self { iterative_threshold, use_fcd, cell_size, backend, ..Default::default() }
     }
 
     /// Compute cross-sections from a pre-solved [`DipoleResponse`].
@@ -257,38 +252,80 @@ impl OpticalSolver for CdaSolver {
             params.substrate_delta_eps.map(|de| (sub.z_interface, de))
         });
 
-        // Assemble the interaction matrix
-        let matrix = assembly::assemble_interaction_matrix(
-            dipoles,
-            k,
-            self.use_fcd,
-            self.cell_size,
-            self.lattice.as_ref(),
-            params.k_bloch,
-            substrate,
-        );
-
         // Build the RHS (incident field at each dipole)
         let rhs = assembly::build_incident_field_vector(dipoles, &self.incident_field, k);
 
-        // Solve: use direct for small systems, GMRES for large
+        // Solve: use direct for small systems, GMRES for large.
+        //
+        // The iterative path has three sub-strategies, chosen by comparing the
+        // matrix size (3N)²·16 bytes against `matrix_memory_budget`:
+        //
+        // - **Within budget, GPU available**: assemble once on CPU, upload to
+        //   GPU, GMRES matvec on GPU (fast).
+        // - **Within budget, CPU only**: assemble once on CPU, BLAS matvec
+        //   (fast — reuses matrix across all GMRES iterations).
+        // - **Exceeds budget**: on-the-fly matvec — evaluates G(rᵢ,rⱼ)·xⱼ
+        //   per GMRES iteration without storing the matrix; O(N) peak memory.
+        //
+        // The budget gate is applied *before* attempting GPU to avoid a silent
+        // O(N²) CPU allocation on the assembly path for large systems.
+        let matrix_bytes = (3 * n as u64).pow(2) * 16;
+
         let solution = if n <= self.iterative_threshold {
+            // Small system: assemble matrix and solve directly (LU).
+            let matrix = assembly::assemble_interaction_matrix(
+                dipoles,
+                k,
+                self.use_fcd,
+                self.cell_size,
+                self.lattice.as_ref(),
+                params.k_bloch,
+                substrate,
+            );
             direct::solve_direct(&matrix, &rhs)
                 .map_err(|e| SolverError::LinAlgError(e.to_string()))?
-        } else if let Some(session) = self.backend.create_session(3 * n) {
-            // GPU path: upload matrix once, reuse buffers for all GMRES iterations.
-            session
-                .upload_matrix(&matrix)
-                .map_err(|e| SolverError::LinAlgError(e.to_string()))?;
-            let matvec_fn = move |x: &ndarray::Array1<Complex64>| -> Result<ndarray::Array1<Complex64>, SolverError> {
-                session.matvec(x.view()).map_err(|e| SolverError::LinAlgError(e.to_string()))
-            };
-            iterative::solve_gmres(&matvec_fn, &rhs, params.solver_tolerance, params.max_iterations)?
+        } else if matrix_bytes <= self.matrix_memory_budget {
+            // Matrix fits in budget: assemble once and choose GPU or CPU matvec.
+            let matrix = assembly::assemble_interaction_matrix(
+                dipoles,
+                k,
+                self.use_fcd,
+                self.cell_size,
+                self.lattice.as_ref(),
+                params.k_bloch,
+                substrate,
+            );
+            if let Some(session) = self.backend.create_session(3 * n) {
+                // GPU path: upload assembled matrix, GMRES matvec on GPU.
+                session
+                    .upload_matrix(&matrix)
+                    .map_err(|e| SolverError::LinAlgError(e.to_string()))?;
+                let matvec_fn = move |x: &ndarray::Array1<Complex64>| -> Result<ndarray::Array1<Complex64>, SolverError> {
+                    session.matvec(x.view()).map_err(|e| SolverError::LinAlgError(e.to_string()))
+                };
+                iterative::solve_gmres(&matvec_fn, &rhs, params.solver_tolerance, params.max_iterations)?
+            } else {
+                // CPU cached path: BLAS matvec reuses matrix across iterations.
+                let backend = Arc::clone(&self.backend);
+                let matvec_fn = move |x: &ndarray::Array1<Complex64>| -> Result<ndarray::Array1<Complex64>, SolverError> {
+                    backend.matvec(&matrix, x).map_err(|e| SolverError::LinAlgError(e.to_string()))
+                };
+                iterative::solve_gmres(&matvec_fn, &rhs, params.solver_tolerance, params.max_iterations)?
+            }
         } else {
-            // CPU path: pass matrix by reference through the backend matvec.
-            let backend = Arc::clone(&self.backend);
-            let matvec_fn = move |x: &ndarray::Array1<Complex64>| -> Result<ndarray::Array1<Complex64>, SolverError> {
-                backend.matvec(&matrix, x).map_err(|e| SolverError::LinAlgError(e.to_string()))
+            // Matrix exceeds budget: on-the-fly matvec — O(N) memory, no assembly.
+            let lattice_ref = self.lattice.as_ref();
+            let matvec_fn = |x: &ndarray::Array1<Complex64>| -> Result<ndarray::Array1<Complex64>, SolverError> {
+                Ok(assembly::matvec_on_the_fly(
+                    dipoles,
+                    x,
+                    k,
+                    self.use_fcd,
+                    self.cell_size,
+                    lattice_ref,
+                    params.k_bloch,
+                    substrate,
+                ))
             };
             iterative::solve_gmres(&matvec_fn, &rhs, params.solver_tolerance, params.max_iterations)?
         };

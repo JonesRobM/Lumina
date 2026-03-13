@@ -1,6 +1,6 @@
 # Periodic Structures & Ewald Summation
 
-> **Status (v0.4.0):** Full Ewald acceleration implemented — erfc-damped real-space sum + 2D spectral reciprocal-space sum.
+> **Status (v0.4.1):** 2D lattices — full Ewald acceleration (erfc real-space + spectral reciprocal sum). 1D chains — direct lattice sum with ≥ 20 shells (no erfc, ~2 % convergence at optical wavelengths). Bessel-function 1D spectral sum deferred.
 
 ## Motivation
 
@@ -68,9 +68,19 @@ a2 = [0.0, 50.0, 0.0]
 \mathbf{G}_{\text{per}} = \mathbf{G}_{\text{real}} + \mathbf{G}_{\text{recip}}
 \\]
 
-**Real-space part**: Each free-space Green's tensor term is multiplied by `erfc(η·|r−R|)`, which exponentially damps distant images. With the auto-selected η = √(π/A), 5 shells are sufficient for < 0.01 % error.
+**Real-space part (2D)**: Each free-space Green's tensor term is multiplied by `erfc(η·|r−R|)`, which exponentially damps distant images. With η = √(π/A), 5 shells give < 0.01 % error.
 
-**Reciprocal-space part** (2D lattices): Evaluates the spectral sum
+**Real-space part (1D chains)**: No erfc damping is applied. A direct lattice sum over at least 20 shells is used instead:
+
+\\[
+\mathbf{G}_{\text{real}}^{1D}(\mathbf{r}, k_\parallel) = \sum_{n = -N_\text{shells}}^{N_\text{shells}} \mathbf{G}_\text{free}(\mathbf{r} - n\mathbf{a}_1)\, e^{i n k_\parallel a_1}
+\\]
+
+With 20 shells this gives ~2 % accuracy at visible wavelengths for chains with period ≥ 50 nm. Use `truncation_real = 50` in the TOML for < 0.5 % error at the cost of more computation.
+
+> **Why no erfc for 1D?** The optimal Ewald splitting parameter η = √(π/|**a**₁|) was derived for 2D. Applied to 1D chains it gives η·|**a**₁| ≈ 1.77, making `erfc(η·|**a**₁|) ≈ 0.004` — 99.6 % of the nearest-image interaction would be pushed into the reciprocal sum. The 1D reciprocal sum requires modified Bessel functions K₀/K₁ with complex arguments and is deferred to a future release. The direct sum is a correct, if slower-converging, alternative.
+
+**Reciprocal-space part (2D lattices)**: Evaluates the spectral sum
 
 \\[
 \mathbf{G}^{\text{spec}}_{ab} = \frac{i}{2A} \sum_{\mathbf{G}}
@@ -80,7 +90,17 @@ a2 = [0.0, 50.0, 0.0]
 
 where **Q** = **k**∥ + **G**, \\(q = \sqrt{Q^2 - k^2}\\) with Im(q) ≥ 0, and \\(M_{ab} = k^2\delta_{ab} - \tilde{k}_a\tilde{k}_b\\).
 
-For 1D chains the reciprocal sum returns zero (the erfc-damped direct sum converges adequately).
+**Reciprocal-space part (1D chains)**: Returns zero. The direct real-space sum carries the full interaction.
+
+### Convergence for 1D chains
+
+With the default `truncation_real = 5` (auto-clamped to 20 for 1D), the direct sum error is dominated by the truncated tail. For a chain with period 80 nm at λ = 500 nm:
+
+| `truncation_real` | Approx. error | Wall time (relative) |
+|-------------------|---------------|----------------------|
+| 20 | ~2 % | 1× |
+| 50 | ~0.5 % | 2.5× |
+| 100 | ~0.2 % | 5× |
 
 ### Bloch Boundary Conditions
 
@@ -103,12 +123,12 @@ When sweeping over multiple \\(\mathbf{k}_\parallel\\) values, the output type i
 | `k_points` | \\(k_\parallel\\) grid (nm⁻¹) |
 | `extinction` | C\_ext(λ, k) matrix |
 
-## Known Limitations (v0.4.0)
+## Known Limitations (v0.4.1)
 
 | Scenario | Status |
 |----------|--------|
-| 2D periodic array, any unit cell size | ✓ Full Ewald (v0.4) |
-| 1D chain | ✓ erfc-damped real-space sum; reciprocal sum not needed |
-| Oblique incidence (arbitrary \\(\mathbf{k}_\parallel\\)) | ✓ Correct with Bloch phases |
+| 2D periodic array, any unit cell size | ✓ Full Ewald (erfc real-space + spectral recip) |
+| 1D chain | ✓ Direct lattice sum, ≥ 20 shells, ~2 % accuracy |
+| Oblique incidence (arbitrary \\(\mathbf{k}_\parallel\\)) | ✓ Bloch phases on all sums |
 | 3D periodicity | Not supported |
-| Reciprocal sum for 1D chain | Deferred (direct sum adequate) |
+| 1D Bessel spectral sum (K₀/K₁) | Deferred — needed for < 1 % on-axis chains |

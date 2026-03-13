@@ -1,0 +1,140 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 380" width="560" height="380"
+     font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="12">
+
+  <!-- Background -->
+  <rect width="560" height="380" fill="#fafafa" rx="8"/>
+
+  <!-- Title -->
+  <text x="280" y="24" text-anchor="middle" font-size="13" font-weight="700" fill="#1a1a2e">Peak Memory vs System Size</text>
+  <text x="280" y="40" text-anchor="middle" font-size="10" fill="#666">CPU GMRES path — cached matrix vs on-the-fly matvec</text>
+
+  <!-- Plot area: x 70–490, y 60–300 -->
+  <!-- Grid lines (Y) -->
+  <g stroke="#e0e0e0" stroke-width="0.8" stroke-dasharray="4,3">
+    <!-- 1 MB: y=263 -->   <line x1="70" y1="263" x2="490" y2="263"/>
+    <!-- 10 MB: y=209 -->  <line x1="70" y1="209" x2="490" y2="209"/>
+    <!-- 100 MB: y=155 --> <line x1="70" y1="155" x2="490" y2="155"/>
+    <!-- 1 GB: y=101 -->   <line x1="70" y1="101" x2="490" y2="101"/>
+    <!-- 10 GB: y=47 -->   <line x1="70" y1="47"  x2="490" y2="47"/>
+  </g>
+  <!-- Grid lines (X) -->
+  <g stroke="#e0e0e0" stroke-width="0.8" stroke-dasharray="4,3">
+    <!-- N=500: x=70 -->   <line x1="70"  y1="60" x2="70"  y2="300"/>
+    <!-- N=1000: x=155 --> <line x1="155" y1="60" x2="155" y2="300"/>
+    <!-- N=2000: x=250 --> <line x1="250" y1="60" x2="250" y2="300"/>
+    <!-- N=5000: x=375 --> <line x1="375" y1="60" x2="375" y2="300"/>
+    <!-- N=10000: x=490 --><line x1="490" y1="60" x2="490" y2="300"/>
+  </g>
+
+  <!-- Axes -->
+  <line x1="70" y1="300" x2="490" y2="300" stroke="#444" stroke-width="1.5"/>
+  <line x1="70" y1="60"  x2="70"  y2="300" stroke="#444" stroke-width="1.5"/>
+
+  <!-- ── 2 GiB budget line ── -->
+  <!-- 2048 MB: y = 280 - (log10(2048)+0.301)/4.602*240 = 280 - (3.311+0.301)/4.602*240 = 280 - 188.3 = 91.7 ≈ 84
+       Using plot area y: 300 - (3.311+0.301)/4.602*240 = 300 - 188.3 = 111.7 ≈ 84
+       Let me recalculate with y from 300 (bottom) to 60 (top), height = 240 px:
+       y_px = 300 - (log10(mem_MB) - log10(0.5)) / (log10(20000) - log10(0.5)) * 240
+       log10(0.5) = -0.301, log10(20000) = 4.301, range = 4.602
+       2048 MB: y = 300 - (3.311+0.301)/4.602 * 240 = 300 - 3.612/4.602*240 = 300 - 188.4 = 111.6
+  -->
+  <line x1="70" y1="112" x2="490" y2="112" stroke="#f44336" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="494" y="116" font-size="9" fill="#f44336" font-weight="600">2 GiB</text>
+  <text x="494" y="127" font-size="9" fill="#f44336">budget</text>
+
+  <!-- Crossover marker at N≈3860, 2048 MB → x=340, y=112 -->
+  <circle cx="340" cy="112" r="5" fill="none" stroke="#f44336" stroke-width="1.5"/>
+  <line x1="340" y1="112" x2="340" y2="300" stroke="#f44336" stroke-width="1" stroke-dasharray="3,3"/>
+  <text x="343" y="295" font-size="8" fill="#f44336">N≈3 860</text>
+
+  <!-- ── Cached matrix line (blue) ── -->
+  <!--
+    N=500:   (3*500)^2*16 bytes = 36 MB    → x=70,  y = 300 - (1.556+0.301)/4.602*240 = 300 - 96.8 = 203
+    N=1000:  144 MB                         → x=155, y = 300 - (2.158+0.301)/4.602*240 = 300 - 128.2 = 172
+    N=2000:  576 MB                         → x=250, y = 300 - (2.760+0.301)/4.602*240 = 300 - 159.6 = 140
+    N=3000:  1296 MB                        → x=305, y = 300 - (3.113+0.301)/4.602*240 = 300 - 177.8 = 122
+    N=5000:  3600 MB                        → x=375, y = 300 - (3.556+0.301)/4.602*240 = 300 - 200.9 = 99
+    N=10000: 14400 MB                       → x=490, y = 300 - (4.158+0.301)/4.602*240 = 300 - 232.3 = 68
+  -->
+  <polyline
+    points="70,203 155,172 250,140 305,122 375,99 490,68"
+    fill="none" stroke="#1e88e5" stroke-width="2.5" stroke-linejoin="round"/>
+  <!-- dots -->
+  <circle cx="70"  cy="203" r="3.5" fill="#1e88e5"/>
+  <circle cx="155" cy="172" r="3.5" fill="#1e88e5"/>
+  <circle cx="250" cy="140" r="3.5" fill="#1e88e5"/>
+  <circle cx="305" cy="122" r="3.5" fill="#1e88e5"/>
+  <circle cx="375" cy="99"  r="3.5" fill="#1e88e5"/>
+  <circle cx="490" cy="68"  r="3.5" fill="#1e88e5"/>
+  <!-- label -->
+  <text x="400" y="76" font-size="10" fill="#1e88e5" font-weight="600">Cached matrix</text>
+  <text x="400" y="88" font-size="9"  fill="#1e88e5">O(N²) — (3N)²×16 B</text>
+
+  <!-- ── On-the-fly line (green) ── -->
+  <!--
+    mem = 32 × 3N × 16 bytes = 1536N bytes = 1.536N / 1e6 MB
+    N=500:   0.768 MB  → x=70,  y = 300 - (-0.115+0.301)/4.602*240 = 300 - 9.7 = 290
+    N=1000:  1.536 MB  → x=155, y = 300 - (0.186+0.301)/4.602*240 = 300 - 25.4 = 275
+    N=2000:  3.072 MB  → x=250, y = 300 - (0.487+0.301)/4.602*240 = 300 - 41.1 = 259
+    N=3000:  4.608 MB  → x=305, y = 300 - (0.664+0.301)/4.602*240 = 300 - 50.3 = 250
+    N=5000:  7.680 MB  → x=375, y = 300 - (0.885+0.301)/4.602*240 = 300 - 61.8 = 238
+    N=10000: 15.36 MB  → x=490, y = 300 - (1.186+0.301)/4.602*240 = 300 - 77.5 = 222
+  -->
+  <polyline
+    points="70,290 155,275 250,259 305,250 375,238 490,222"
+    fill="none" stroke="#43a047" stroke-width="2.5" stroke-linejoin="round"/>
+  <circle cx="70"  cy="290" r="3.5" fill="#43a047"/>
+  <circle cx="155" cy="275" r="3.5" fill="#43a047"/>
+  <circle cx="250" cy="259" r="3.5" fill="#43a047"/>
+  <circle cx="305" cy="250" r="3.5" fill="#43a047"/>
+  <circle cx="375" cy="238" r="3.5" fill="#43a047"/>
+  <circle cx="490" cy="222" r="3.5" fill="#43a047"/>
+  <!-- label -->
+  <text x="400" y="228" font-size="10" fill="#43a047" font-weight="600">On-the-fly matvec</text>
+  <text x="400" y="240" font-size="9"  fill="#43a047">O(N) — Krylov vectors</text>
+
+  <!-- ── Y-axis labels ── -->
+  <g text-anchor="end" fill="#555" font-size="9">
+    <text x="65" y="267">1 MB</text>
+    <text x="65" y="213">10 MB</text>
+    <text x="65" y="159">100 MB</text>
+    <text x="65" y="105">1 GB</text>
+    <text x="65" y="51">10 GB</text>
+  </g>
+  <!-- Y tick marks -->
+  <g stroke="#aaa" stroke-width="1">
+    <line x1="66" y1="263" x2="70" y2="263"/>
+    <line x1="66" y1="209" x2="70" y2="209"/>
+    <line x1="66" y1="155" x2="70" y2="155"/>
+    <line x1="66" y1="101" x2="70" y2="101"/>
+    <line x1="66" y1="47"  x2="70" y2="47"/>
+  </g>
+  <!-- Y axis label -->
+  <text transform="rotate(-90,16,180)" x="16" y="180" text-anchor="middle" font-size="11" fill="#333" font-weight="600">Peak memory</text>
+
+  <!-- ── X-axis labels ── -->
+  <g text-anchor="middle" fill="#555" font-size="9">
+    <text x="70"  y="315">500</text>
+    <text x="155" y="315">1 000</text>
+    <text x="250" y="315">2 000</text>
+    <text x="375" y="315">5 000</text>
+    <text x="490" y="315">10 000</text>
+  </g>
+  <!-- X tick marks -->
+  <g stroke="#aaa" stroke-width="1">
+    <line x1="70"  y1="300" x2="70"  y2="304"/>
+    <line x1="155" y1="300" x2="155" y2="304"/>
+    <line x1="250" y1="300" x2="250" y2="304"/>
+    <line x1="375" y1="300" x2="375" y2="304"/>
+    <line x1="490" y1="300" x2="490" y2="304"/>
+  </g>
+  <!-- X axis label -->
+  <text x="280" y="332" text-anchor="middle" font-size="11" fill="#333" font-weight="600">N (dipoles)</text>
+  <text x="280" y="346" text-anchor="middle" font-size="9" fill="#666">log-log scale · both axes</text>
+
+  <!-- ── Note box ── -->
+  <rect x="70" y="354" width="420" height="20" rx="4" fill="#fff3e0" stroke="#ffb74d" stroke-width="1"/>
+  <text x="280" y="368" text-anchor="middle" font-size="9" fill="#555">
+    At N ≈ 3 860, the 2 GiB budget is crossed — on-the-fly path saves &gt;500× memory vs cached matrix.
+  </text>
+</svg>
