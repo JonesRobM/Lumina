@@ -130,10 +130,8 @@ pub fn compute_shg_response(
     // Step 1: Nonlinear source moments p_NL from local fields at ω.
     let source_moments = compute_shg_sources(&omega_response.local_fields, chi2_tensors);
 
-    // Substrate runtime params for the 2ω solve.
-    let substrate = solver.substrate.as_ref().and_then(|sub| {
-        params_2omega.substrate_delta_eps.map(|de| (sub.z_interface, de))
-    });
+    // Substrate runtime for the 2ω solve.
+    let substrate = params_2omega.substrate_runtime.as_ref();
 
     // Step 2: Interaction matrix at 2ω.
     let matrix = assembly::assemble_interaction_matrix(
@@ -317,10 +315,8 @@ pub fn compute_thg_response(
     // Step 1: Nonlinear source moments p_NL from local fields at ω.
     let source_moments = compute_thg_sources(&omega_response.local_fields, chi3_tensors);
 
-    // Substrate runtime params for the 3ω solve.
-    let substrate = solver.substrate.as_ref().and_then(|sub| {
-        params_3omega.substrate_delta_eps.map(|de| (sub.z_interface, de))
-    });
+    // Substrate runtime for the 3ω solve.
+    let substrate = params_3omega.substrate_runtime.as_ref();
 
     // Step 2: Interaction matrix at 3ω.
     let matrix = assembly::assemble_interaction_matrix(

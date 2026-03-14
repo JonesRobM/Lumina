@@ -15,6 +15,7 @@ use rayon::prelude::*;
 
 use crate::types::{Dipole, IncidentField};
 use crate::solver::ewald::EwaldGreens;
+use crate::solver::substrate::SubstrateRuntime;
 use lumina_geometry::lattice::LatticeSpec;
 
 /// Assemble the full $3N \times 3N$ interaction matrix.
@@ -34,10 +35,10 @@ use lumina_geometry::lattice::LatticeSpec;
 ///   of the free-space Green's function.
 /// * `k_bloch`   - In-plane Bloch wavevector **k**∥ (nm⁻¹). Used only when
 ///   `lattice` is `Some`. Pass `[0;3]` for the Γ point.
-/// * `substrate` - If `Some((z_interface, Δε))`, adds image-dipole corrections
-///   from a planar substrate at z = z_interface with reflection factor Δε.
-///   When both `lattice` and `substrate` are present, the image-dipole sum is
-///   also Ewald-accelerated (periodic forest on substrate).
+/// * `substrate` - If `Some`, adds the substrate correction (image-dipole or
+///   Sommerfeld integral) for each dipole pair. When both `lattice` and
+///   `substrate` are present, the Fresnel image-dipole sum is also
+///   Ewald-accelerated; the Sommerfeld path always uses free-space G.
 ///
 /// # Returns
 /// The interaction matrix $\mathbf{A}$ such that $\mathbf{A}\mathbf{p} = \mathbf{E}_{\text{inc}}$.
@@ -48,7 +49,7 @@ pub fn assemble_interaction_matrix(
     cell_size: f64,
     lattice: Option<&LatticeSpec>,
     k_bloch: [f64; 3],
-    substrate: Option<(f64, Complex64)>,
+    substrate: Option<&SubstrateRuntime>,
 ) -> Array2<Complex64> {
     let n = dipoles.len();
     let dim = 3 * n;
@@ -125,40 +126,43 @@ pub fn assemble_interaction_matrix(
                 }
             }
 
-            // ── Substrate image-dipole contribution ────────────────────────
-            // For each pair (i, j) — including self-image i == j — add the
-            // contribution of the image dipole at r_j′ = (x_j, y_j, 2z₀ − z_j):
-            //
-            //   A_ij += −Δε · T · G(r_i, r_j′),  T = diag(−1, −1, +1)
-            //
-            // i.e. A_ij[row,col] -= m[col] * G[row,col](r_i, r_j′)
-            //      where m = [−Δε, −Δε, +Δε].
-            if let Some((z_interface, delta_eps)) = substrate {
+            // ── Substrate contribution ──────────────────────────────────────
+            // Runs for ALL (i, j) pairs, including the self-image i == j.
+            if let Some(sub_rt) = substrate {
                 let rj = dipoles[j].position;
-                let rj_img = [rj[0], rj[1], 2.0 * z_interface - rj[2]];
                 let ri = dipoles[i].position;
-
-                // Guard against near-degenerate image positions (physically
-                // unusual — requires z_i + z_j = 2·z_interface with all
-                // dipoles strictly above the substrate).
-                let diff = [ri[0] - rj_img[0], ri[1] - rj_img[1], ri[2] - rj_img[2]];
-                let dist_sq = diff[0] * diff[0] + diff[1] * diff[1] + diff[2] * diff[2];
-                if dist_sq >= 1e-20 {
-                    let g_img = if let Some(eg) = ewald_ref {
-                        // Periodic: Ewald sum of image-dipole contributions.
-                        eg.evaluate(diff, k_bloch, k)
-                    } else {
-                        // Isolated: free-space G at image position.
-                        super::greens::dyadic_greens_tensor(&ri, &rj_img, k)
-                    };
-
-                    // Image tensor diagonal: m = [−Δε, −Δε, +Δε]
-                    let m = [-delta_eps, -delta_eps, delta_eps];
-                    for (row, g_row) in g_img.iter().enumerate() {
-                        for (col, &g_val) in g_row.iter().enumerate() {
-                            unsafe {
-                                let offset = (3 * i + row) * stride + (3 * j + col);
-                                *(matrix_ptr as *mut Complex64).add(offset) -= m[col] * g_val;
+                match sub_rt {
+                    SubstrateRuntime::Fresnel { z_interface, delta_eps } => {
+                        // Image position: mirror of r_j through the interface.
+                        let rj_img = [rj[0], rj[1], 2.0 * z_interface - rj[2]];
+                        let diff = [ri[0] - rj_img[0], ri[1] - rj_img[1], ri[2] - rj_img[2]];
+                        let dist_sq = diff[0]*diff[0] + diff[1]*diff[1] + diff[2]*diff[2];
+                        if dist_sq >= 1e-20 {
+                            let g_img = if let Some(eg) = ewald_ref {
+                                eg.evaluate(diff, k_bloch, k)
+                            } else {
+                                super::greens::dyadic_greens_tensor(&ri, &rj_img, k)
+                            };
+                            let m = [-delta_eps, -delta_eps, *delta_eps];
+                            for (row, g_row) in g_img.iter().enumerate() {
+                                for (col, &g_val) in g_row.iter().enumerate() {
+                                    unsafe {
+                                        let offset = (3 * i + row) * stride + (3 * j + col);
+                                        *(matrix_ptr as *mut Complex64).add(offset) -= m[col] * g_val;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    SubstrateRuntime::Sommerfeld { z_interface, greens } => {
+                        // Full Sommerfeld reflected Green's tensor — no image position needed.
+                        let g_refl = greens.evaluate(ri, rj, *z_interface);
+                        for (row, g_row) in g_refl.iter().enumerate() {
+                            for (col, &g_val) in g_row.iter().enumerate() {
+                                unsafe {
+                                    let offset = (3 * i + row) * stride + (3 * j + col);
+                                    *(matrix_ptr as *mut Complex64).add(offset) -= g_val;
+                                }
                             }
                         }
                     }
@@ -210,7 +214,7 @@ pub fn matvec_on_the_fly(
     cell_size: f64,
     lattice: Option<&LatticeSpec>,
     k_bloch: [f64; 3],
-    substrate: Option<(f64, Complex64)>,
+    substrate: Option<&SubstrateRuntime>,
 ) -> Array1<Complex64> {
     let n = dipoles.len();
     let ewald: Option<std::sync::Arc<EwaldGreens>> = lattice
@@ -265,28 +269,36 @@ pub fn matvec_on_the_fly(
                     }
                 }
 
-                // ── Substrate image-dipole contribution ─────────────────────
+                // ── Substrate contribution ───────────────────────────────────
                 // Runs for ALL j (including i == j self-image).
-                if let Some((z_interface, delta_eps)) = substrate {
+                if let Some(sub_rt) = substrate {
                     let rj = dipoles[j].position;
-                    let rj_img = [rj[0], rj[1], 2.0 * z_interface - rj[2]];
                     let ri = dipoles[i].position;
-                    let diff = [
-                        ri[0] - rj_img[0],
-                        ri[1] - rj_img[1],
-                        ri[2] - rj_img[2],
-                    ];
-                    let dist_sq = diff[0] * diff[0] + diff[1] * diff[1] + diff[2] * diff[2];
-                    if dist_sq >= 1e-20 {
-                        let g_img = if let Some(eg) = ewald_ref {
-                            eg.evaluate(diff, k_bloch, k)
-                        } else {
-                            super::greens::dyadic_greens_tensor(&ri, &rj_img, k)
-                        };
-                        let m = [-delta_eps, -delta_eps, delta_eps];
-                        for a in 0..3 {
-                            for b in 0..3 {
-                                yi[a] -= m[b] * g_img[a][b] * x[3 * j + b];
+                    match sub_rt {
+                        SubstrateRuntime::Fresnel { z_interface, delta_eps } => {
+                            let rj_img = [rj[0], rj[1], 2.0 * z_interface - rj[2]];
+                            let diff = [ri[0]-rj_img[0], ri[1]-rj_img[1], ri[2]-rj_img[2]];
+                            let dist_sq = diff[0]*diff[0]+diff[1]*diff[1]+diff[2]*diff[2];
+                            if dist_sq >= 1e-20 {
+                                let g_img = if let Some(eg) = ewald_ref {
+                                    eg.evaluate(diff, k_bloch, k)
+                                } else {
+                                    super::greens::dyadic_greens_tensor(&ri, &rj_img, k)
+                                };
+                                let m = [-delta_eps, -delta_eps, *delta_eps];
+                                for a in 0..3 {
+                                    for b in 0..3 {
+                                        yi[a] -= m[b] * g_img[a][b] * x[3 * j + b];
+                                    }
+                                }
+                            }
+                        }
+                        SubstrateRuntime::Sommerfeld { z_interface, greens } => {
+                            let g_refl = greens.evaluate(ri, rj, *z_interface);
+                            for a in 0..3 {
+                                for b in 0..3 {
+                                    yi[a] -= g_refl[a][b] * x[3 * j + b];
+                                }
                             }
                         }
                     }

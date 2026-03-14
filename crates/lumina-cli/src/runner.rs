@@ -11,7 +11,7 @@ use rayon::prelude::*;
 use lumina_compute::ComputeBackend;
 use lumina_core::nonlinear::{compute_shg_response, compute_thg_response};
 use lumina_core::solver::cda::CdaSolver;
-use lumina_core::solver::substrate::substrate_reflection_factor;
+use lumina_core::solver::substrate::SubstrateRuntime;
 use lumina_core::solver::{NearFieldPlane, OpticalSolver, SolverError};
 use lumina_core::types::{
     clausius_mossotti, ellipsoid_polarisability_tensor, radiative_correction, Chi2Tensor,
@@ -81,11 +81,7 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
         solver_tolerance: job.simulation.solver_tolerance,
         max_iterations: job.simulation.max_iterations,
         k_bloch: [0.0, 0.0, 0.0],
-        substrate_z_interface: job.simulation.substrate
-            .as_ref()
-            .map(|s| s.z_interface)
-            .unwrap_or(0.0),
-        substrate_delta_eps: None, // resolved per-wavelength below
+        substrate_runtime: None, // resolved per-wavelength below
     };
 
     // Build dipoles from the scene specification.
@@ -163,7 +159,7 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
                 let eps_sub = resolve_material_epsilon(
                     &sub.material, wl, &gold, &silver, &copper, &tio2, &sio2, &al2o3, &si, &gaas,
                 ).map_err(|e| anyhow::anyhow!("{}", e))?;
-                params_wl.substrate_delta_eps = Some(substrate_reflection_factor(eps_sub, epsilon_m, sub.use_retarded));
+                params_wl.substrate_runtime = Some(SubstrateRuntime::from_spec(sub, eps_sub, epsilon_m, wl));
             }
 
             let mut dipoles = Vec::with_capacity(total_dipoles);
@@ -252,7 +248,7 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
             let eps_sub = resolve_material_epsilon(
                 &sub.material, peak_wl, &gold, &silver, &copper, &tio2, &sio2, &al2o3, &si, &gaas,
             )?;
-            peak_params.substrate_delta_eps = Some(substrate_reflection_factor(eps_sub, epsilon_m, sub.use_retarded));
+            peak_params.substrate_runtime = Some(SubstrateRuntime::from_spec(sub, eps_sub, epsilon_m, peak_wl));
         }
         let mut peak_dipoles = Vec::with_capacity(total_dipoles);
         for i in 0..total_dipoles {
@@ -401,15 +397,15 @@ fn run_shg_sweep(
             let k_2omega = 2.0 * std::f64::consts::PI * params.environment_n / wl_2omega;
             let epsilon_m = params.environment_n * params.environment_n;
 
-            // Resolve substrate Fresnel factor at ω and 2ω.
+            // Resolve substrate runtime at ω and 2ω.
             let mut params_omega = params.clone();
             let mut params_2omega = params.clone();
             if let Some(sub) = &solver.substrate {
                 if let Ok(eps_sub) =
                     resolve_material_epsilon(&sub.material, wl, gold, silver, copper, tio2, sio2, al2o3, si, gaas)
                 {
-                    params_omega.substrate_delta_eps =
-                        Some(substrate_reflection_factor(eps_sub, epsilon_m, sub.use_retarded));
+                    params_omega.substrate_runtime =
+                        Some(SubstrateRuntime::from_spec(sub, eps_sub, epsilon_m, wl));
                 }
                 if let Ok(eps_sub) = resolve_material_epsilon(
                     &sub.material,
@@ -423,8 +419,8 @@ fn run_shg_sweep(
                     si,
                     gaas,
                 ) {
-                    params_2omega.substrate_delta_eps =
-                        Some(substrate_reflection_factor(eps_sub, epsilon_m, sub.use_retarded));
+                    params_2omega.substrate_runtime =
+                        Some(SubstrateRuntime::from_spec(sub, eps_sub, epsilon_m, wl_2omega));
                 }
             }
 
@@ -644,17 +640,15 @@ fn run_thg_sweep(
             let k_3omega = 2.0 * std::f64::consts::PI * params.environment_n / wl_3omega;
             let epsilon_m = params.environment_n * params.environment_n;
 
-            // Resolve substrate Fresnel factor at ω and 3ω.
+            // Resolve substrate runtime at ω and 3ω.
             let mut params_omega = params.clone();
             let mut params_3omega = params.clone();
             if let Some(sub) = &solver.substrate {
                 if let Ok(eps_sub) =
                     resolve_material_epsilon(&sub.material, wl, gold, silver, copper, tio2, sio2, al2o3, si, gaas)
                 {
-                    params_omega.substrate_delta_eps =
-                        Some(lumina_core::solver::substrate::substrate_reflection_factor(
-                            eps_sub, epsilon_m, sub.use_retarded,
-                        ));
+                    params_omega.substrate_runtime =
+                        Some(SubstrateRuntime::from_spec(sub, eps_sub, epsilon_m, wl));
                 }
                 if let Ok(eps_sub) = resolve_material_epsilon(
                     &sub.material,
@@ -668,10 +662,8 @@ fn run_thg_sweep(
                     si,
                     gaas,
                 ) {
-                    params_3omega.substrate_delta_eps =
-                        Some(lumina_core::solver::substrate::substrate_reflection_factor(
-                            eps_sub, epsilon_m, sub.use_retarded,
-                        ));
+                    params_3omega.substrate_runtime =
+                        Some(SubstrateRuntime::from_spec(sub, eps_sub, epsilon_m, wl_3omega));
                 }
             }
 

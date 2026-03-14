@@ -37,8 +37,11 @@
 //! integral treatment with k∥-dependent Fresnel coefficients is deferred
 //! to v0.5.
 
+use std::sync::Arc;
 use num_complex::Complex64;
 use serde::{Deserialize, Serialize};
+
+use super::sommerfeld::SommerfeldGreens;
 
 fn default_use_retarded() -> bool { true }
 
@@ -52,7 +55,8 @@ fn default_use_retarded() -> bool { true }
 /// [simulation.substrate]
 /// z_interface = 0.0
 /// material    = "SiO2_Palik"
-/// use_retarded = true      # optional, default true
+/// use_retarded  = true    # optional, default true
+/// use_sommerfeld = false  # optional, default false; overrides use_retarded
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubstrateSpec {
@@ -65,8 +69,80 @@ pub struct SubstrateSpec {
     pub material: String,
     /// Use the retarded (refractive-index based) Fresnel amplitude coefficient
     /// instead of the quasi-static Δε.  Defaults to `true`.
+    ///
+    /// Ignored when `use_sommerfeld = true`.
     #[serde(default = "default_use_retarded")]
     pub use_retarded: bool,
+    /// Use the full Sommerfeld integral treatment (k∥-dependent Fresnel
+    /// coefficients). More accurate than the scalar image-dipole approximation,
+    /// especially for particles close to the substrate (z < λ/4).
+    ///
+    /// Defaults to `false`. When `true`, overrides `use_retarded`.
+    #[serde(default)]
+    pub use_sommerfeld: bool,
+}
+
+/// Runtime substrate correction, constructed once per wavelength.
+///
+/// Implements `Debug` manually because `SommerfeldGreens` only derives `Debug`
+/// and `Arc<SommerfeldGreens>` does too, so the derive would work — but we keep
+/// the manual impl explicit for clarity.
+///
+/// `SubstrateRuntime` is what the solver receives — it holds the
+/// wavelength-resolved reflection information rather than material names.
+///
+/// # Construction
+///
+/// Call [`SubstrateRuntime::from_spec`] in the runner / GUI per-wavelength loop.
+#[derive(Clone, Debug)]
+pub enum SubstrateRuntime {
+    /// Scalar image-dipole: r · T · G(r_i, r_j′).
+    ///
+    /// Corresponds to `use_retarded = false` (quasi-static Δε) or
+    /// `use_retarded = true` (retarded Fresnel amplitude).
+    Fresnel {
+        z_interface: f64,
+        /// Scalar reflection factor (quasi-static Δε or retarded r_amp).
+        delta_eps: Complex64,
+    },
+    /// Full Sommerfeld integral: **G**_refl(**r**_i, **r**_j) from k∥ integration.
+    Sommerfeld {
+        z_interface: f64,
+        /// Pre-initialised integrator (cheap to clone — contains only a few f64/Complex64 fields).
+        greens: Arc<SommerfeldGreens>,
+    },
+}
+
+impl SubstrateRuntime {
+    /// Build the runtime substrate from a spec and the wavelength-resolved
+    /// substrate dielectric function.
+    ///
+    /// # Arguments
+    /// * `spec`      — The substrate configuration.
+    /// * `eps_sub`   — Substrate ε at the current wavelength.
+    /// * `eps_env`   — Environment ε = n_env² at the current wavelength.
+    /// * `wavelength_nm` — Current wavelength in nm (needed for Sommerfeld).
+    pub fn from_spec(spec: &SubstrateSpec, eps_sub: Complex64, eps_env: f64, wavelength_nm: f64) -> Self {
+        if spec.use_sommerfeld {
+            SubstrateRuntime::Sommerfeld {
+                z_interface: spec.z_interface,
+                greens: Arc::new(SommerfeldGreens::new(wavelength_nm, eps_sub, eps_env)),
+            }
+        } else {
+            SubstrateRuntime::Fresnel {
+                z_interface: spec.z_interface,
+                delta_eps: substrate_reflection_factor(eps_sub, eps_env, spec.use_retarded),
+            }
+        }
+    }
+
+    /// The z-coordinate of the interface, regardless of variant.
+    pub fn z_interface(&self) -> f64 {
+        match self {
+            SubstrateRuntime::Fresnel { z_interface, .. } => *z_interface,
+            SubstrateRuntime::Sommerfeld { z_interface, .. } => *z_interface,
+        }
+    }
 }
 
 /// Compute the quasi-static Fresnel reflection factor.
@@ -210,11 +286,50 @@ mod tests {
     }
 
     #[test]
-    fn test_substrate_spec_default_use_retarded() {
-        // Check that the serde default is true
+    fn test_substrate_spec_defaults() {
+        // Check that the serde defaults are correct
         let spec: SubstrateSpec = serde_json::from_str(
             r#"{"z_interface": 0.0, "material": "SiO2_Palik"}"#
         ).unwrap();
         assert!(spec.use_retarded, "use_retarded should default to true");
+        assert!(!spec.use_sommerfeld, "use_sommerfeld should default to false");
+    }
+
+    #[test]
+    fn test_substrate_runtime_fresnel() {
+        let spec = SubstrateSpec {
+            z_interface: 0.0,
+            material: "SiO2_Palik".into(),
+            use_retarded: true,
+            use_sommerfeld: false,
+        };
+        let eps_sub = Complex64::new(2.25, 0.0);
+        let rt = SubstrateRuntime::from_spec(&spec, eps_sub, 1.0, 600.0);
+        match rt {
+            SubstrateRuntime::Fresnel { delta_eps, .. } => {
+                // n_sub = 1.5, n_env = 1.0 → r = 0.5/2.5 = 0.2
+                assert!((delta_eps.re - 0.2).abs() < 1e-10,
+                    "Fresnel runtime delta_eps.re = {:.6}", delta_eps.re);
+            }
+            SubstrateRuntime::Sommerfeld { .. } => panic!("Expected Fresnel variant"),
+        }
+    }
+
+    #[test]
+    fn test_substrate_runtime_sommerfeld() {
+        let spec = SubstrateSpec {
+            z_interface: 5.0,
+            material: "SiO2_Palik".into(),
+            use_retarded: true,
+            use_sommerfeld: true,
+        };
+        let eps_sub = Complex64::new(2.25, 0.0);
+        let rt = SubstrateRuntime::from_spec(&spec, eps_sub, 1.0, 600.0);
+        match rt {
+            SubstrateRuntime::Sommerfeld { z_interface, .. } => {
+                assert_eq!(z_interface, 5.0);
+            }
+            SubstrateRuntime::Fresnel { .. } => panic!("Expected Sommerfeld variant"),
+        }
     }
 }

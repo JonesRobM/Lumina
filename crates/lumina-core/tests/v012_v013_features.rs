@@ -40,8 +40,7 @@ fn default_params() -> SimulationParams {
         solver_tolerance: 1e-8,
         max_iterations: 500,
         k_bloch: [0.0, 0.0, 0.0],
-        substrate_z_interface: 0.0,
-        substrate_delta_eps: None,
+        substrate_runtime: None,
     }
 }
 

@@ -104,7 +104,7 @@ impl LuminaApp {
             use lumina_compute::ComputeBackend;
             use lumina_core::fields::compute_circular_dichroism;
             use lumina_core::solver::cda::CdaSolver;
-            use lumina_core::solver::substrate::{substrate_reflection_factor, SubstrateSpec};
+            use lumina_core::solver::substrate::{SubstrateRuntime, SubstrateSpec};
             use lumina_core::solver::{NearFieldPlane, OpticalSolver, SolverError};
             use lumina_core::types::{
                 clausius_mossotti, ellipsoid_polarisability_tensor, radiative_correction,
@@ -210,7 +210,6 @@ impl LuminaApp {
                 wavelength_range: [wl_start, wl_end],
                 num_wavelengths: num_wl,
                 environment_n: env_n,
-                substrate_z_interface: substrate_z,
                 ..Default::default()
             };
 
@@ -240,7 +239,7 @@ impl LuminaApp {
 
             // Each solver carries its own Arc<backend>.
             let substrate_spec = if enable_substrate {
-                Some(SubstrateSpec { z_interface: substrate_z, material: substrate_mat.clone(), use_retarded: true })
+                Some(SubstrateSpec { z_interface: substrate_z, material: substrate_mat.clone(), use_retarded: true, use_sommerfeld: false })
             } else {
                 None
             };
@@ -255,7 +254,7 @@ impl LuminaApp {
                 1000, true, geom.spacings[0], incident_y.clone(),
             );
             solver_y.backend = Arc::clone(&backend);
-            solver_y.substrate = substrate_spec;
+            solver_y.substrate = substrate_spec.clone();
 
             // ── Wavelength sweep ─────────────────────────────────────────────
             let wavelengths: Vec<f64> = (0..num_wl)
@@ -296,13 +295,15 @@ impl LuminaApp {
                     let t0 = std::time::Instant::now();
                     let k = k_of(wl);
 
-                    // Resolve substrate Fresnel factor for this wavelength.
+                    // Resolve substrate runtime for this wavelength.
                     let mut params_wl = params.clone();
                     if enable_substrate {
                         match resolve_eps(&substrate_mat, wl) {
                             Ok(eps_sub) => {
-                                params_wl.substrate_delta_eps =
-                                    Some(substrate_reflection_factor(eps_sub, epsilon_m, true));
+                                if let Some(sub) = &substrate_spec {
+                                    params_wl.substrate_runtime =
+                                        Some(SubstrateRuntime::from_spec(sub, eps_sub, epsilon_m, wl));
+                                }
                             }
                             Err(e) => {
                                 if let Ok(lock) = tx_par.lock() {
@@ -427,8 +428,10 @@ impl LuminaApp {
                 let mut peak_params = params.clone();
                 if enable_substrate {
                     if let Ok(eps_sub) = resolve_eps(&substrate_mat, peak_wl) {
-                        peak_params.substrate_delta_eps =
-                            Some(substrate_reflection_factor(eps_sub, epsilon_m, true));
+                        if let Some(sub) = &substrate_spec {
+                            peak_params.substrate_runtime =
+                                Some(SubstrateRuntime::from_spec(sub, eps_sub, epsilon_m, peak_wl));
+                        }
                     }
                 }
                 if let Ok(response) = solver_x.solve_dipoles(&peak_dipoles, peak_wl, &peak_params) {

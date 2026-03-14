@@ -246,11 +246,8 @@ impl OpticalSolver for CdaSolver {
         let k = Self::wavenumber(wavelength_nm, params.environment_n);
         let n = dipoles.len();
 
-        // Build substrate runtime params: combine z_interface from solver config
-        // with the wavelength-resolved delta_eps from SimulationParams.
-        let substrate = self.substrate.as_ref().and_then(|sub| {
-            params.substrate_delta_eps.map(|de| (sub.z_interface, de))
-        });
+        // Substrate runtime — set per-wavelength by runner/GUI in SimulationParams.
+        let substrate = params.substrate_runtime.as_ref();
 
         // Build the RHS (incident field at each dipole)
         let rhs = assembly::build_incident_field_vector(dipoles, &self.incident_field, k);

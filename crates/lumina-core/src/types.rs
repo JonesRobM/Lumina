@@ -90,17 +90,14 @@ pub struct SimulationParams {
     /// Use `[0.0, 0.0, 0.0]` for the Γ point (normal incidence).
     #[serde(default)]
     pub k_bloch: [f64; 3],
-    /// z-coordinate of the substrate interface in nm. Ignored when
-    /// `substrate_delta_eps` is `None`. Defaults to 0.0.
-    #[serde(default)]
-    pub substrate_z_interface: f64,
-    /// Pre-computed Fresnel reflection factor Δε = (ε_sub − ε_env)/(ε_sub + ε_env)
-    /// at the current wavelength. `None` = free-space (no substrate).
+    /// Runtime substrate correction at the current wavelength.
+    /// `None` = free-space (no substrate correction).
     ///
-    /// Not parsed from TOML; set per-wavelength by the runner after resolving
-    /// the substrate material's dielectric function.
+    /// Not parsed from TOML; set per-wavelength by the runner / GUI after
+    /// resolving the substrate material's dielectric function. Contains either
+    /// a scalar Fresnel factor or a full Sommerfeld integrator.
     #[serde(skip, default)]
-    pub substrate_delta_eps: Option<Complex64>,
+    pub substrate_runtime: Option<crate::solver::substrate::SubstrateRuntime>,
 }
 
 impl Default for SimulationParams {
@@ -112,8 +109,7 @@ impl Default for SimulationParams {
             solver_tolerance: 1e-6,
             max_iterations: 1000,
             k_bloch: [0.0, 0.0, 0.0],
-            substrate_z_interface: 0.0,
-            substrate_delta_eps: None,
+            substrate_runtime: None,
         }
     }
 }
