@@ -9,18 +9,19 @@
 //!
 //! - **Direct solve** (LU decomposition via `faer`): Used when $N \leq 1000$.
 //!   Exact but $O(N^3)$ in time and $O(N^2)$ in memory.
-//! - **Iterative solve** (GMRES): Used when $N > 1000$. The sub-strategy is
-//!   chosen by comparing the matrix size $(3N)^2 \times 16$ bytes against
-//!   `matrix_memory_budget` (default 2 GiB):
+//! - **FFT matvec** (block-Toeplitz convolution via `rustfft`): Used when
+//!   $N > 1000$, dipoles are on a regular cubic grid, and no periodic BC,
+//!   substrate, or FCD correction is active. $O(N \log N)$ per matvec.
+//!   Falls back to on-the-fly if the grid is irregular.
+//! - **Iterative solve** (GMRES): Used when $N > 1000$ and FFT path is
+//!   not available. The sub-strategy is chosen by comparing the matrix
+//!   size $(3N)^2 \times 16$ bytes against `matrix_memory_budget` (default 2 GiB):
 //!   - **Within budget + GPU**: assemble once on CPU, upload to GPU, GMRES
 //!     matvec on GPU (fast).
 //!   - **Within budget, CPU only**: assemble once, BLAS matvec reused across
 //!     all GMRES iterations.
 //!   - **Exceeds budget**: on-the-fly matvec — $O(N)$ peak memory, no
 //!     assembly.  Krylov vectors only (≈ 90 × 3N complex doubles).
-//!
-//!   The budget gate is checked *before* attempting GPU assembly, so large
-//!   systems always take the on-the-fly path regardless of GPU availability.
 
 pub mod assembly;
 pub mod direct;

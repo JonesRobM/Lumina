@@ -74,8 +74,14 @@ pub struct FftMatvecPlan {
     grid_index: Vec<usize>,
     /// Precomputed FFT of 9 kernel components G_αβ (α,β ∈ {0,1,2}).
     /// Shape: 9 × fft_len where fft_len = 2Nx · 2Ny · 2Nz.
-    kernel_fft: Vec<Vec<rustfft::num_complex::Complex<f64>>>,
+    kernel_fft: Vec<Vec<Complex64>>,
     fft_len: usize,
+    fft_x: std::sync::Arc<dyn rustfft::Fft<f64>>,
+    fft_y: std::sync::Arc<dyn rustfft::Fft<f64>>,
+    fft_z: std::sync::Arc<dyn rustfft::Fft<f64>>,
+    ifft_x: std::sync::Arc<dyn rustfft::Fft<f64>>,
+    ifft_y: std::sync::Arc<dyn rustfft::Fft<f64>>,
+    ifft_z: std::sync::Arc<dyn rustfft::Fft<f64>>,
 }
 
 impl FftMatvecPlan {
@@ -89,6 +95,14 @@ impl FftMatvecPlan {
         let pad_ny = 2 * ny;
         let pad_nz = 2 * nz;
         let fft_len = pad_nx * pad_ny * pad_nz;
+
+        let mut planner = FftPlanner::<f64>::new();
+        let fft_x = planner.plan_fft_forward(pad_nx);
+        let fft_y = planner.plan_fft_forward(pad_ny);
+        let fft_z = planner.plan_fft_forward(pad_nz);
+        let ifft_x = planner.plan_fft_inverse(pad_nx);
+        let ifft_y = planner.plan_fft_inverse(pad_ny);
+        let ifft_z = planner.plan_fft_inverse(pad_nz);
 
         // Find bounding box origin to map dipole positions to grid indices.
         let x_min = dipoles.iter().map(|d| d.position[0]).fold(f64::INFINITY, f64::min);
@@ -105,15 +119,15 @@ impl FftMatvecPlan {
         }
 
         // Build and FFT the 9 kernel buffers.
-        let mut kernel_fft: Vec<Vec<rustfft::num_complex::Complex<f64>>> =
-            vec![vec![rustfft::num_complex::Complex::new(0.0f64, 0.0f64); fft_len]; 9];
+        let mut kernel_fft: Vec<Vec<Complex64>> =
+            vec![vec![Complex64::new(0.0f64, 0.0f64); fft_len]; 9];
 
         for component_idx in 0..9usize {
             let alpha = component_idx / 3; // output component
             let beta = component_idx % 3;  // input component
 
-            let mut buf: Vec<rustfft::num_complex::Complex<f64>> =
-                vec![rustfft::num_complex::Complex::new(0.0f64, 0.0f64); fft_len];
+            let mut buf: Vec<Complex64> =
+                vec![Complex64::new(0.0f64, 0.0f64); fft_len];
 
             // Fill the kernel buffer using circulant embedding.
             let nx_i = nx as isize;
@@ -139,13 +153,13 @@ impl FftMatvecPlan {
                         let flat = cl * (pad_ny * pad_nz) + cm * pad_nz + cn;
 
                         let g_val = g[alpha][beta];
-                        buf[flat] = rustfft::num_complex::Complex::new(g_val.re, g_val.im);
+                        buf[flat] = Complex64::new(g_val.re, g_val.im);
                     }
                 }
             }
 
             // 3D FFT of kernel buffer.
-            fft3d_forward(&mut buf, pad_nx, pad_ny, pad_nz);
+            fft3d_forward(&mut buf, pad_nx, pad_ny, pad_nz, fft_x.as_ref(), fft_y.as_ref(), fft_z.as_ref());
 
             kernel_fft[component_idx] = buf;
         }
@@ -157,6 +171,12 @@ impl FftMatvecPlan {
             grid_index,
             kernel_fft,
             fft_len,
+            fft_x,
+            fft_y,
+            fft_z,
+            ifft_x,
+            ifft_y,
+            ifft_z,
         })
     }
 
@@ -187,22 +207,22 @@ impl FftMatvecPlan {
 
         // Accumulators for each output component α (in frequency domain).
         // We accumulate pointwise multiplications before doing inverse FFT.
-        let mut acc: Vec<Vec<rustfft::num_complex::Complex<f64>>> = vec![
-            vec![rustfft::num_complex::Complex::new(0.0f64, 0.0f64); self.fft_len]; 3
+        let mut acc: Vec<Vec<Complex64>> = vec![
+            vec![Complex64::new(0.0f64, 0.0f64); self.fft_len]; 3
         ];
 
         for beta in 0..3usize {
             // Scatter: place x[3j+β] at grid position of dipole j.
-            let mut buf: Vec<rustfft::num_complex::Complex<f64>> =
-                vec![rustfft::num_complex::Complex::new(0.0f64, 0.0f64); self.fft_len];
+            let mut buf: Vec<Complex64> =
+                vec![Complex64::new(0.0f64, 0.0f64); self.fft_len];
 
             for j in 0..n {
                 let xj = x[3 * j + beta];
-                buf[self.grid_index[j]] = rustfft::num_complex::Complex::new(xj.re, xj.im);
+                buf[self.grid_index[j]] = Complex64::new(xj.re, xj.im);
             }
 
             // Forward FFT of the scattered input.
-            fft3d_forward(&mut buf, 2 * self.nx, pad_ny, pad_nz);
+            fft3d_forward(&mut buf, 2 * self.nx, pad_ny, pad_nz, self.fft_x.as_ref(), self.fft_y.as_ref(), self.fft_z.as_ref());
 
             // Accumulate into each output component α.
             for alpha in 0..3usize {
@@ -217,7 +237,7 @@ impl FftMatvecPlan {
         let norm = 1.0 / self.fft_len as f64;
 
         for alpha in 0..3usize {
-            fft3d_inverse(&mut acc[alpha], 2 * self.nx, pad_ny, pad_nz);
+            fft3d_inverse(&mut acc[alpha], 2 * self.nx, pad_ny, pad_nz, self.ifft_x.as_ref(), self.ifft_y.as_ref(), self.ifft_z.as_ref());
 
             // Gather: subtract (A = α⁻¹ − G, so off-diagonal part is −G).
             for i in 0..n {
@@ -238,35 +258,34 @@ impl FftMatvecPlan {
 /// - y-pass: nx*nz transforms of length ny
 /// - z-pass: nx*ny transforms of length nz
 fn fft3d_forward(
-    buf: &mut Vec<rustfft::num_complex::Complex<f64>>,
+    buf: &mut [Complex64],
     nx: usize,
     ny: usize,
     nz: usize,
+    fft_x: &dyn rustfft::Fft<f64>,
+    fft_y: &dyn rustfft::Fft<f64>,
+    fft_z: &dyn rustfft::Fft<f64>,
 ) {
-    let mut planner = FftPlanner::<f64>::new();
-
     // z-pass: nx*ny contiguous transforms of length nz.
     {
-        let fft = planner.plan_fft_forward(nz);
         for i in 0..nx {
             for j in 0..ny {
                 let offset = i * ny * nz + j * nz;
-                fft.process(&mut buf[offset..offset + nz]);
+                fft_z.process(&mut buf[offset..offset + nz]);
             }
         }
     }
 
     // y-pass: nx*nz transforms of length ny with stride nz.
     {
-        let fft = planner.plan_fft_forward(ny);
-        let mut tmp = vec![rustfft::num_complex::Complex::new(0.0f64, 0.0f64); ny];
+        let mut tmp = vec![Complex64::new(0.0f64, 0.0f64); ny];
         for i in 0..nx {
             for k in 0..nz {
                 // Gather stride-nz elements.
                 for j in 0..ny {
                     tmp[j] = buf[i * ny * nz + j * nz + k];
                 }
-                fft.process(&mut tmp);
+                fft_y.process(&mut tmp);
                 // Scatter back.
                 for j in 0..ny {
                     buf[i * ny * nz + j * nz + k] = tmp[j];
@@ -277,15 +296,14 @@ fn fft3d_forward(
 
     // x-pass: ny*nz transforms of length nx with stride ny*nz.
     {
-        let fft = planner.plan_fft_forward(nx);
-        let mut tmp = vec![rustfft::num_complex::Complex::new(0.0f64, 0.0f64); nx];
+        let mut tmp = vec![Complex64::new(0.0f64, 0.0f64); nx];
         for j in 0..ny {
             for k in 0..nz {
                 // Gather stride-ny*nz elements.
                 for i in 0..nx {
                     tmp[i] = buf[i * ny * nz + j * nz + k];
                 }
-                fft.process(&mut tmp);
+                fft_x.process(&mut tmp);
                 // Scatter back.
                 for i in 0..nx {
                     buf[i * ny * nz + j * nz + k] = tmp[i];
@@ -300,34 +318,33 @@ fn fft3d_forward(
 /// Uses three passes of 1D inverse FFTs. Note: rustfft does NOT normalise the
 /// inverse FFT; the caller must divide by `nx * ny * nz` after the call.
 fn fft3d_inverse(
-    buf: &mut Vec<rustfft::num_complex::Complex<f64>>,
+    buf: &mut [Complex64],
     nx: usize,
     ny: usize,
     nz: usize,
+    ifft_x: &dyn rustfft::Fft<f64>,
+    ifft_y: &dyn rustfft::Fft<f64>,
+    ifft_z: &dyn rustfft::Fft<f64>,
 ) {
-    let mut planner = FftPlanner::<f64>::new();
-
     // z-pass.
     {
-        let fft = planner.plan_fft_inverse(nz);
         for i in 0..nx {
             for j in 0..ny {
                 let offset = i * ny * nz + j * nz;
-                fft.process(&mut buf[offset..offset + nz]);
+                ifft_z.process(&mut buf[offset..offset + nz]);
             }
         }
     }
 
     // y-pass.
     {
-        let fft = planner.plan_fft_inverse(ny);
-        let mut tmp = vec![rustfft::num_complex::Complex::new(0.0f64, 0.0f64); ny];
+        let mut tmp = vec![Complex64::new(0.0f64, 0.0f64); ny];
         for i in 0..nx {
             for k in 0..nz {
                 for j in 0..ny {
                     tmp[j] = buf[i * ny * nz + j * nz + k];
                 }
-                fft.process(&mut tmp);
+                ifft_y.process(&mut tmp);
                 for j in 0..ny {
                     buf[i * ny * nz + j * nz + k] = tmp[j];
                 }
@@ -337,14 +354,13 @@ fn fft3d_inverse(
 
     // x-pass.
     {
-        let fft = planner.plan_fft_inverse(nx);
-        let mut tmp = vec![rustfft::num_complex::Complex::new(0.0f64, 0.0f64); nx];
+        let mut tmp = vec![Complex64::new(0.0f64, 0.0f64); nx];
         for j in 0..ny {
             for k in 0..nz {
                 for i in 0..nx {
                     tmp[i] = buf[i * ny * nz + j * nz + k];
                 }
-                fft.process(&mut tmp);
+                ifft_x.process(&mut tmp);
                 for i in 0..nx {
                     buf[i * ny * nz + j * nz + k] = tmp[i];
                 }
