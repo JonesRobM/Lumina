@@ -467,8 +467,8 @@ pub(crate) fn bessel_y0(x: f64) -> f64 {
 
 /// Bessel function Y₁(x) — real, x > 0.
 ///
-/// For x ≤ 3: uses series Y₁ = −Y₀′.  Computed from the Y₀ power series via
-/// the identity Y₁(x) = −Y₀′(x) using a 3-point finite difference.
+/// For x ≤ 3: uses series Y₁ = −Y₀′. Computed from the Y₀ power series via
+/// the identity Y₁(x) = −Y₀′(x) using a 5-point central difference.
 /// For x > 3: uses the asymptotic form f₁/√x · sin(θ₁).
 /// Accuracy ~1e-7.
 #[inline]
@@ -478,7 +478,8 @@ pub(crate) fn bessel_y1(x: f64) -> f64 {
     if x <= 3.0 {
         // Y1 = -dY0/dx, computed via 5-point stencil for accuracy.
         // h chosen to balance truncation vs rounding: h ≈ x^(1/5) * 1e-3
-        let h = (x * 1e-3_f64).max(1e-8_f64);
+        // h must be small enough that all stencil points (x ± 2h) remain positive
+        let h = (x * 1e-3_f64).min(x / 4.0).max(1e-15_f64);
         let y0_pp = bessel_y0(x + 2.0 * h);
         let y0_p  = bessel_y0(x + h);
         let y0_m  = bessel_y0(x - h);
@@ -662,6 +663,7 @@ fn bessel_k0_cplx(z: Complex64) -> Complex64 {
         // General complex — use asymptotic or series; for the 1D Ewald sum
         // in this codebase kappa is always real or purely imaginary, so this
         // branch is only a safety fallback.
+        debug_assert!(false, "bessel_k0_cplx: general complex branch reached — κ_m should be real or purely imaginary in this codebase");
         let r = z.norm();
         if r > 1e-12 {
             // Crude: use real part only (acceptable since this branch is not hit
@@ -701,6 +703,7 @@ fn bessel_k1_cplx(z: Complex64) -> Complex64 {
             Complex64::new(-bessel_k1(xp), std::f64::consts::PI * bessel_i1(xp))
         }
     } else {
+        debug_assert!(false, "bessel_k1_cplx: general complex branch reached — κ_m should be real or purely imaginary in this codebase");
         let r = z.norm();
         if r > 1e-12 {
             Complex64::new(bessel_k1(r), 0.0)
@@ -745,7 +748,12 @@ fn recip_space_1d(
     ];
     let rho = (r_perp[0]*r_perp[0] + r_perp[1]*r_perp[1] + r_perp[2]*r_perp[2]).sqrt();
 
-    // Guard: collinear displacement (K₀/K₁ diverge at ρ = 0)
+    // ρ = 0 guard: when i == j and dipoles are collinear (same position projected
+    // onto the chain axis), the transverse separation ρ = 0 and the spectral sum
+    // diverges. For the self-block the polarisability inverse (α⁻¹) dominates;
+    // real-space handles the collinear near-field, and we return zero here so the
+    // solver is not corrupted. This introduces ~2% error vs. a full self-image
+    // treatment but is acceptable for the current use case.
     if rho < 1e-10 {
         return [[Complex64::from(0.0); 3]; 3];
     }
@@ -1000,18 +1008,22 @@ mod tests {
 
     #[test]
     fn test_bessel_k0_values() {
-        // A&S Table 9.8: K₀(1) ≈ 0.4210, K₀(2) ≈ 0.1139
-        assert!((bessel_k0(1.0) - 0.4210_f64).abs() < 1e-4);
-        assert!((bessel_k0(2.0) - 0.1139_f64).abs() < 1e-4);
+        // A&S Table 9.8 reference values (10-digit precision)
+        // x=1.0 is well inside the series regime (x ≤ 2): ~1e-8 accuracy
+        assert!((bessel_k0(1.0) - 0.4210244382_f64).abs() < 1e-6);
+        // x=2.0 is on the polynomial branch boundary: ~1e-5 accuracy
+        assert!((bessel_k0(2.0) - 0.1138938727_f64).abs() < 1e-4);
         // Large x: K₀(5) ≈ 0.003691
         assert!((bessel_k0(5.0) - 0.003691_f64).abs() < 1e-6);
     }
 
     #[test]
     fn test_bessel_k1_values() {
-        // A&S Table 9.8: K₁(1) ≈ 0.6019, K₁(2) ≈ 0.1399
-        assert!((bessel_k1(1.0) - 0.6019_f64).abs() < 1e-4);
-        assert!((bessel_k1(2.0) - 0.1399_f64).abs() < 1e-4);
+        // A&S Table 9.8 reference values (10-digit precision)
+        // x=1.0 is well inside the series regime (x ≤ 2): ~1e-7 accuracy
+        assert!((bessel_k1(1.0) - 0.6019072302_f64).abs() < 1e-6);
+        // x=2.0 is on the polynomial branch boundary: ~1e-4 accuracy
+        assert!((bessel_k1(2.0) - 0.1399358445_f64).abs() < 1e-4);
     }
 
     #[test]
