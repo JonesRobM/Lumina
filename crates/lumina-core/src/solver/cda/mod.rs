@@ -24,6 +24,7 @@
 
 pub mod assembly;
 pub mod direct;
+pub mod fft_matvec;
 pub mod greens;
 pub mod iterative;
 
@@ -281,6 +282,34 @@ impl OpticalSolver for CdaSolver {
             );
             direct::solve_direct(&matrix, &rhs)
                 .map_err(|e| SolverError::LinAlgError(e.to_string()))?
+        } else if self.lattice.is_none()
+            && params.substrate_runtime.is_none()
+            && !self.use_fcd
+        {
+            // FFT path: O(N log N) for regular cubic grids; falls back to on-the-fly
+            // if detect_regular_grid returns None (non-uniform or irregular spacing).
+            if let Some(plan) = fft_matvec::FftMatvecPlan::try_build(dipoles, self.cell_size, k) {
+                let matvec_fn = |x: &ndarray::Array1<Complex64>| -> Result<ndarray::Array1<Complex64>, SolverError> {
+                    Ok(plan.matvec(dipoles, x.view()))
+                };
+                iterative::solve_gmres(&matvec_fn, &rhs, params.solver_tolerance, params.max_iterations)?
+            } else {
+                // Grid not regular — fall through to on-the-fly.
+                let lattice_ref = self.lattice.as_ref();
+                let matvec_fn = |x: &ndarray::Array1<Complex64>| -> Result<ndarray::Array1<Complex64>, SolverError> {
+                    Ok(assembly::matvec_on_the_fly(
+                        dipoles,
+                        x,
+                        k,
+                        self.use_fcd,
+                        self.cell_size,
+                        lattice_ref,
+                        params.k_bloch,
+                        substrate,
+                    ))
+                };
+                iterative::solve_gmres(&matvec_fn, &rhs, params.solver_tolerance, params.max_iterations)?
+            }
         } else if matrix_bytes <= self.matrix_memory_budget {
             // Matrix fits in budget: assemble once and choose GPU or CPU matvec.
             let matrix = assembly::assemble_interaction_matrix(

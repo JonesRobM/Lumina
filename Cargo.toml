@@ -53,6 +53,9 @@ egui = "0.29"
 # Interpolation
 nalgebra = "0.33"
 
+# FFT
+rustfft = "6"
+
 # Testing
 approx = "0.5"
 
