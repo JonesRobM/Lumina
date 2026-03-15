@@ -582,13 +582,12 @@ impl ComputeBackend for GpuBackend {
         state.queue.submit(std::iter::once(encoder.finish()));
         state.device.poll(wgpu::Maintain::Wait);
 
-        drop(state);
-
         // ── Patch diagonal blocks (α⁻¹ per dipole) ────────────────────────────
         // The shader wrote zero to diagonal blocks; patch with α⁻¹ now.
         // Each 3×3 block starts at offset (3i * dim + 3i) * sizeof(vec2<f32>).
+        // The lock is held continuously from the assembly dispatch above so that
+        // no other thread can interleave between the submit/poll and the patch.
         let elem_size = std::mem::size_of::<[f32; 2]>();
-        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         for (i, block) in diagonal_blocks.iter().enumerate() {
             // block is [Complex64; 9] in row-major order
             let patch: Vec<[f32; 2]> = block.iter().map(|c| [c.re as f32, c.im as f32]).collect();

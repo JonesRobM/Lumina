@@ -289,6 +289,8 @@ impl OpticalSolver for CdaSolver {
         {
             // FFT path: O(N log N) for regular cubic grids; falls back to GPU
             // assembly or on-the-fly if the grid is irregular.
+            // Note: the default `CdaSolver` has `use_fcd = true`, so this path
+            // is only active when the solver is constructed with `use_fcd = false`.
             if let Some(plan) = fft_matvec::FftMatvecPlan::try_build(dipoles, self.cell_size, k) {
                 let matvec_fn = |x: &ndarray::Array1<Complex64>| -> Result<ndarray::Array1<Complex64>, SolverError> {
                     Ok(plan.matvec(dipoles, x.view()))

@@ -785,7 +785,7 @@ fn recip_space_1d(
         // Tensor structure coefficients
         let c_delta = prefactor * (Complex64::from(k*k) * k0 - k1_rho);
         let c_ee    = prefactor * (k1_rho - Complex64::from(g_m*g_m) * k0);
-        let c_cross = prefactor * Complex64::new(0.0, -g_m) * kappa * k1;
+        let c_cross = prefactor * Complex64::new(0.0, -g_m) * k1_rho;
         let c_rr    = prefactor * (kappa*kappa * k0 + Complex64::from(2.0)*k1_rho);
 
         // Accumulate into tensor
