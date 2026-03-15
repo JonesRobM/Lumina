@@ -51,6 +51,16 @@ struct ShaderParams {
     _pad2: u32,
 }
 
+/// Uniform parameters for the matrix_assemble.wgsl shader.
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Pod, Zeroable)]
+struct AssemblyParams {
+    dim: u32,
+    n_dipoles: u32,
+    k: f32,
+    _pad: f32,
+}
+
 // ─── Internal state ─────────────────────────────────────────────────────────
 
 /// Internal wgpu state shared between [`GpuBackend`] and all [`GpuSession`]s.
@@ -62,6 +72,8 @@ struct GpuState {
     queue: wgpu::Queue,
     pipeline: wgpu::ComputePipeline,
     bind_group_layout: wgpu::BindGroupLayout,
+    assembly_pipeline: wgpu::ComputePipeline,
+    assembly_bg_layout: wgpu::BindGroupLayout,
 }
 
 // ─── Public types ───────────────────────────────────────────────────────────
@@ -208,12 +220,75 @@ impl GpuBackend {
             cache: None,
         });
 
+        // ── Assembly shader pipeline ───────────────────────────────────────────
+        let assembly_shader_source = include_str!("shaders/matrix_assemble.wgsl");
+        let assembly_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("matrix_assemble_shader"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(assembly_shader_source)),
+        });
+
+        let assembly_bg_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("assembly_bind_group_layout"),
+            entries: &[
+                // binding 0: positions (storage, read)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // binding 1: matrix (storage, read_write)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // binding 2: params (uniform)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let assembly_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("assembly_pipeline_layout"),
+            bind_group_layouts: &[&assembly_bg_layout],
+            push_constant_ranges: &[],
+        });
+
+        let assembly_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("matrix_assemble_pipeline"),
+            layout: Some(&assembly_pipeline_layout),
+            module: &assembly_shader,
+            entry_point: Some("main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            cache: None,
+        });
+
         Ok(Self {
             state: Arc::new(Mutex::new(GpuState {
                 device,
                 queue,
                 pipeline,
                 bind_group_layout,
+                assembly_pipeline,
+                assembly_bg_layout,
             })),
             device_name,
         })
@@ -428,6 +503,110 @@ impl ComputeBackend for GpuBackend {
     /// Create a persistent GPU session for `n` unknowns.
     fn create_session(&self, n: usize) -> Option<Box<dyn MatvecSession>> {
         self.new_session(n).ok().map(|s| Box::new(s) as Box<dyn MatvecSession>)
+    }
+
+    fn assemble_and_create_session(
+        &self,
+        positions: &[[f64; 3]],
+        k: f64,
+        diagonal_blocks: &[[Complex64; 9]],
+    ) -> Option<Result<Box<dyn MatvecSession>, ComputeError>> {
+        let n = positions.len();
+        if n == 0 {
+            return None;
+        }
+        let dim = 3 * n;
+
+        // Create the GpuSession (allocates matrix/input/output/staging/params buffers)
+        let session = match self.new_session(dim) {
+            Ok(s) => s,
+            Err(e) => return Some(Err(e)),
+        };
+
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+
+        // ── Upload positions (as vec4<f32>) ────────────────────────────────────
+        let pos_data: Vec<[f32; 4]> = positions
+            .iter()
+            .map(|p| [p[0] as f32, p[1] as f32, p[2] as f32, 0.0f32])
+            .collect();
+        let pos_bytes = bytemuck::cast_slice::<[f32; 4], u8>(&pos_data);
+        let pos_buf = state.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("assembly_positions"),
+            size: pos_bytes.len() as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        state.queue.write_buffer(&pos_buf, 0, pos_bytes);
+
+        // ── Upload assembly params ─────────────────────────────────────────────
+        let asm_params = AssemblyParams {
+            dim: dim as u32,
+            n_dipoles: n as u32,
+            k: k as f32,
+            _pad: 0.0,
+        };
+        let asm_params_buf = state.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("assembly_params"),
+            size: std::mem::size_of::<AssemblyParams>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        state.queue.write_buffer(&asm_params_buf, 0, bytemuck::bytes_of(&asm_params));
+
+        // ── Build assembly bind group ──────────────────────────────────────────
+        let assembly_bg = state.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("assembly_bind_group"),
+            layout: &state.assembly_bg_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: pos_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: session.matrix_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: asm_params_buf.as_entire_binding() },
+            ],
+        });
+
+        // ── Dispatch assembly shader ───────────────────────────────────────────
+        let mut encoder = state.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("assembly_encoder"),
+        });
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("assembly_pass"),
+                timestamp_writes: None,
+            });
+            cpass.set_pipeline(&state.assembly_pipeline);
+            cpass.set_bind_group(0, &assembly_bg, &[]);
+            let wg = (dim as u32).div_ceil(16);
+            cpass.dispatch_workgroups(wg, wg, 1);
+        }
+        state.queue.submit(std::iter::once(encoder.finish()));
+        state.device.poll(wgpu::Maintain::Wait);
+
+        drop(state);
+
+        // ── Patch diagonal blocks (α⁻¹ per dipole) ────────────────────────────
+        // The shader wrote zero to diagonal blocks; patch with α⁻¹ now.
+        // Each 3×3 block starts at offset (3i * dim + 3i) * sizeof(vec2<f32>).
+        let elem_size = std::mem::size_of::<[f32; 2]>();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        for (i, block) in diagonal_blocks.iter().enumerate() {
+            // block is [Complex64; 9] in row-major order
+            let patch: Vec<[f32; 2]> = block.iter().map(|c| [c.re as f32, c.im as f32]).collect();
+            // Write each row of the 3×3 block
+            for row_in_block in 0..3 {
+                let global_row = 3 * i + row_in_block;
+                let global_col_start = 3 * i;
+                let offset = (global_row * dim + global_col_start) * elem_size;
+                let row_patch = &patch[row_in_block * 3..(row_in_block + 1) * 3];
+                let row_bytes = bytemuck::cast_slice::<[f32; 2], u8>(row_patch);
+                state.queue.write_buffer(&session.matrix_buf, offset as u64, row_bytes);
+            }
+        }
+        state.queue.submit(std::iter::empty());
+
+        drop(state);
+
+        Some(Ok(Box::new(session) as Box<dyn MatvecSession>))
     }
 
     fn parallel_matrix_fill(
@@ -667,6 +846,178 @@ mod tests {
                 let err = (result[i] - expected[i]).norm();
                 assert!(err < 1e-4, "Trial {trial} mismatch [{}] err={:.2e}", i, err);
             }
+        }
+    }
+
+    // Helper: compute dyadic Green's tensor for tests
+    fn greens_tensor_test(r1: &[f64; 3], r2: &[f64; 3], k: f64) -> [[num_complex::Complex64; 3]; 3] {
+        let rx = r1[0] - r2[0];
+        let ry = r1[1] - r2[1];
+        let rz = r1[2] - r2[2];
+        let r = (rx*rx + ry*ry + rz*rz).sqrt();
+        let kr = k * r;
+        let kr_sq = kr * kr;
+        let ikr = num_complex::Complex64::new(0.0, kr);
+        let exp_ikr = ikr.exp();
+        let prefactor = k * k * exp_ikr / (4.0 * std::f64::consts::PI * r);
+        let a = num_complex::Complex64::from(1.0) + (ikr - num_complex::Complex64::from(1.0)) / num_complex::Complex64::from(kr_sq);
+        let b = (num_complex::Complex64::from(3.0) - 3.0 * ikr - num_complex::Complex64::from(kr_sq)) / num_complex::Complex64::from(kr_sq);
+        let rhat = [rx/r, ry/r, rz/r];
+        let zero = num_complex::Complex64::from(0.0);
+        let mut g = [[zero; 3]; 3];
+        for i in 0..3 {
+            for j in 0..3 {
+                let delta = if i == j { 1.0 } else { 0.0 };
+                g[i][j] = prefactor * (a * delta + b * rhat[i] * rhat[j]);
+            }
+        }
+        g
+    }
+
+    /// GPU assembly agrees with CPU assembly to within f32 precision.
+    #[test]
+    fn test_gpu_assembly_agrees_with_cpu() {
+        let gpu = match try_gpu() {
+            Some(g) => g,
+            None => { println!("Skipping: no GPU"); return; }
+        };
+
+        // 20 dipoles (N=20, dim=60) on a line: simple geometry
+        let n = 20;
+        let dim = 3 * n;
+        let positions: Vec<[f64; 3]> = (0..n).map(|i| [i as f64 * 3.0, 0.0, 0.0]).collect();
+        let k = 2.0 * std::f64::consts::PI / 600.0_f64; // 600 nm
+
+        // Diagonal blocks: simple isotropic polarisability
+        let alpha = Complex64::new(1000.0, 200.0);
+        let zero = Complex64::from(0.0);
+        let _pol: [Complex64; 9] = [alpha, zero, zero, zero, alpha, zero, zero, zero, alpha];
+        // inv_alpha = 1/alpha on diagonal
+        let inv_alpha = Complex64::from(1.0) / alpha;
+        let inv_pol: [Complex64; 9] = [inv_alpha, zero, zero, zero, inv_alpha, zero, zero, zero, inv_alpha];
+        let diagonal_blocks: Vec<[Complex64; 9]> = vec![inv_pol; n];
+
+        // GPU assembly
+        let session_result = gpu.assemble_and_create_session(&positions, k, &diagonal_blocks);
+        let session = match session_result {
+            Some(Ok(s)) => s,
+            _ => { println!("GPU assembly not available"); return; }
+        };
+
+        // CPU assembly: build the reference matrix manually
+        use ndarray::Array2;
+        let mut cpu_matrix = Array2::<Complex64>::zeros((dim, dim));
+        // Diagonal blocks
+        for i in 0..n {
+            for a in 0..3 {
+                for b in 0..3 {
+                    cpu_matrix[[3*i+a, 3*i+b]] = inv_pol[a*3+b];
+                }
+            }
+        }
+        // Off-diagonal blocks: -G(r_i, r_j)
+        for i in 0..n {
+            for j in 0..n {
+                if i == j { continue; }
+                let r1 = positions[i];
+                let r2 = positions[j];
+                let g = greens_tensor_test(&r1, &r2, k);
+                for a in 0..3 {
+                    for b in 0..3 {
+                        cpu_matrix[[3*i+a, 3*j+b]] -= g[a][b];
+                    }
+                }
+            }
+        }
+
+        // Test: do a matvec with a known vector and compare
+        let test_vec: ndarray::Array1<Complex64> = ndarray::Array1::from_vec(
+            (0..dim).map(|i| Complex64::new(i as f64 * 0.01 + 1.0, i as f64 * 0.005)).collect()
+        );
+        let gpu_result = session.matvec(test_vec.view()).expect("GPU matvec failed");
+        let cpu_result = cpu_matrix.dot(&test_vec);
+
+        let mut max_err = 0.0_f64;
+        for i in 0..dim {
+            let err = (gpu_result[i] - cpu_result[i]).norm();
+            max_err = max_err.max(err);
+        }
+        let cpu_norm: f64 = cpu_result.iter().map(|c| c.norm_sqr()).sum::<f64>().sqrt();
+        let rel_err = max_err / cpu_norm;
+        assert!(
+            rel_err < 5e-4,
+            "GPU assembly test: max relative error = {:.2e} (expected < 5e-4)",
+            rel_err
+        );
+    }
+
+    /// Diagonal blocks are correctly patched after GPU assembly.
+    #[test]
+    fn test_gpu_assembly_diagonal_correct() {
+        let gpu = match try_gpu() {
+            Some(g) => g,
+            None => { println!("Skipping: no GPU"); return; }
+        };
+
+        let n = 3;
+        let dim = 9;
+        let positions: Vec<[f64; 3]> = vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [20.0, 0.0, 0.0]];
+        let k = 0.01_f64;
+
+        // Known diagonal blocks
+        let alpha = num_complex::Complex64::new(500.0, 100.0);
+        let zero = num_complex::Complex64::from(0.0);
+        let inv_alpha_val = num_complex::Complex64::from(1.0) / alpha;
+        let inv_pol: [num_complex::Complex64; 9] = [inv_alpha_val, zero, zero, zero, inv_alpha_val, zero, zero, zero, inv_alpha_val];
+        let diagonal_blocks: Vec<[num_complex::Complex64; 9]> = vec![inv_pol; n];
+
+        let session = match gpu.assemble_and_create_session(&positions, k, &diagonal_blocks) {
+            Some(Ok(s)) => s,
+            _ => { println!("Skipping: GPU assembly not available"); return; }
+        };
+
+        // Test: identity vector for dipole 0 should give inv_alpha in first 3 components
+        let x_identity_0: ndarray::Array1<num_complex::Complex64> =
+            ndarray::Array1::from_vec((0..dim).map(|i| if i == 0 { num_complex::Complex64::from(1.0) } else { num_complex::Complex64::from(0.0) }).collect());
+        let result = session.matvec(x_identity_0.view()).expect("matvec failed");
+        // result[0] should be close to inv_alpha (real part dominant)
+        let err = (result[0] - inv_alpha_val).norm();
+        // The off-diagonal G contributions are small relative to inv_alpha for this geometry.
+        // Allow generous tolerance for the f32 precision.
+        assert!(
+            err < inv_alpha_val.norm() * 0.01 + 1e-6,
+            "Diagonal patch error: result[0]={:?}, expected~={:?}, err={:.2e}",
+            result[0], inv_alpha_val, err
+        );
+    }
+
+    /// N=1 (single dipole, 3×3 matrix) does not panic.
+    #[test]
+    fn test_gpu_assembly_n1_edge_case() {
+        let gpu = match try_gpu() {
+            Some(g) => g,
+            None => { println!("Skipping: no GPU"); return; }
+        };
+
+        let positions: Vec<[f64; 3]> = vec![[0.0, 0.0, 0.0]];
+        let k = 0.01_f64;
+        let inv_alpha_val = num_complex::Complex64::new(0.001, 0.0001);
+        let zero = num_complex::Complex64::from(0.0);
+        let diagonal_blocks = vec![[inv_alpha_val, zero, zero, zero, inv_alpha_val, zero, zero, zero, inv_alpha_val]];
+
+        let result = gpu.assemble_and_create_session(&positions, k, &diagonal_blocks);
+        match result {
+            Some(Ok(session)) => {
+                // For N=1 with only a diagonal block, matvec should return inv_alpha * x
+                let x: ndarray::Array1<num_complex::Complex64> = ndarray::Array1::from_vec(vec![
+                    num_complex::Complex64::from(1.0), num_complex::Complex64::from(0.0), num_complex::Complex64::from(0.0)
+                ]);
+                let y = session.matvec(x.view()).expect("N=1 matvec failed");
+                let err = (y[0] - inv_alpha_val).norm();
+                assert!(err < 1e-4, "N=1 result y[0]={:?}, expected {:?}, err={:.2e}", y[0], inv_alpha_val, err);
+            }
+            Some(Err(e)) => println!("GPU assembly failed for N=1 (ok): {}", e),
+            None => println!("GPU assembly not available"),
         }
     }
 

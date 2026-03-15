@@ -92,6 +92,30 @@ pub trait ComputeBackend: Send + Sync {
         vector: &ndarray::Array1<Complex64>,
     ) -> Result<ndarray::Array1<Complex64>, ComputeError>;
 
+    /// Assemble the interaction matrix on-device and return a ready session.
+    ///
+    /// GPU backends implement this to eliminate CPU assembly + PCIe upload.
+    /// The default returns `None` (CPU backends do not override this).
+    ///
+    /// Activation guards (enforced by the caller in `cda/mod.rs`):
+    /// - `use_fcd == false`
+    /// - `lattice.is_none()` (no periodic BC)
+    /// - `substrate_runtime.is_none()` (no substrate)
+    ///
+    /// # Arguments
+    /// * `positions`        — Dipole positions in nm, one `[f64; 3]` per dipole.
+    /// * `k`                — Wavenumber in the medium (nm⁻¹, always real).
+    /// * `diagonal_blocks`  — Pre-computed α⁻¹ per dipole (output of `compute_diagonal_blocks`).
+    fn assemble_and_create_session(
+        &self,
+        positions: &[[f64; 3]],
+        k: f64,
+        diagonal_blocks: &[[Complex64; 9]],
+    ) -> Option<Result<Box<dyn MatvecSession>, ComputeError>> {
+        let _ = (positions, k, diagonal_blocks);
+        None
+    }
+
     /// Solve a dense linear system $\mathbf{A}\mathbf{x} = \mathbf{b}$.
     ///
     /// For CPU, delegates to `faer` LU. GPU backends may use cuSOLVER or

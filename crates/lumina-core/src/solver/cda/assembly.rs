@@ -317,6 +317,15 @@ pub fn matvec_on_the_fly(
     y
 }
 
+/// Compute the 3×3 inverse polarisability block for each dipole.
+///
+/// Returns a `Vec` of length N, each a column-major `[Complex64; 9]`.
+/// This is a pure inversion of each dipole's pre-built polarisability tensor;
+/// no k, FCD, or cell_size dependency.
+pub fn compute_diagonal_blocks(dipoles: &[Dipole]) -> Vec<[Complex64; 9]> {
+    dipoles.iter().map(|d| invert_3x3(&d.polarisability)).collect()
+}
+
 /// Public wrapper for 3x3 inversion, used by cross-section computation.
 pub fn invert_3x3_pub(m: &[Complex64; 9]) -> [Complex64; 9] {
     invert_3x3(m)

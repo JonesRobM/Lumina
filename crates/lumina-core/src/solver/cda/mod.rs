@@ -312,32 +312,54 @@ impl OpticalSolver for CdaSolver {
                 iterative::solve_gmres(&matvec_fn, &rhs, params.solver_tolerance, params.max_iterations)?
             }
         } else if matrix_bytes <= self.matrix_memory_budget {
-            // Matrix fits in budget: assemble once and choose GPU or CPU matvec.
-            let matrix = assembly::assemble_interaction_matrix(
-                dipoles,
-                k,
-                self.use_fcd,
-                self.cell_size,
-                self.lattice.as_ref(),
-                params.k_bloch,
-                substrate,
-            );
-            if let Some(session) = self.backend.create_session(3 * n) {
-                // GPU path: upload assembled matrix, GMRES matvec on GPU.
-                session
-                    .upload_matrix(&matrix)
-                    .map_err(|e| SolverError::LinAlgError(e.to_string()))?;
+            // Matrix fits in budget: try GPU assembly first, then CPU assembly.
+            let diagonal_blocks = assembly::compute_diagonal_blocks(dipoles);
+            let positions: Vec<[f64; 3]> = dipoles.iter().map(|d| d.position).collect();
+
+            // GPU assembly: only when no FCD, no substrate, no Ewald periodic BC.
+            let gpu_session = if !self.use_fcd
+                && params.substrate_runtime.is_none()
+                && self.lattice.is_none()
+            {
+                self.backend.assemble_and_create_session(&positions, k, &diagonal_blocks)
+            } else {
+                None
+            };
+
+            if let Some(Ok(session)) = gpu_session {
+                // GPU assembled matrix: GMRES matvec on GPU.
                 let matvec_fn = move |x: &ndarray::Array1<Complex64>| -> Result<ndarray::Array1<Complex64>, SolverError> {
                     session.matvec(x.view()).map_err(|e| SolverError::LinAlgError(e.to_string()))
                 };
                 iterative::solve_gmres(&matvec_fn, &rhs, params.solver_tolerance, params.max_iterations)?
             } else {
-                // CPU cached path: BLAS matvec reuses matrix across iterations.
-                let backend = Arc::clone(&self.backend);
-                let matvec_fn = move |x: &ndarray::Array1<Complex64>| -> Result<ndarray::Array1<Complex64>, SolverError> {
-                    backend.matvec(&matrix, x).map_err(|e| SolverError::LinAlgError(e.to_string()))
-                };
-                iterative::solve_gmres(&matvec_fn, &rhs, params.solver_tolerance, params.max_iterations)?
+                // CPU assembly fallback.
+                let matrix = assembly::assemble_interaction_matrix(
+                    dipoles,
+                    k,
+                    self.use_fcd,
+                    self.cell_size,
+                    self.lattice.as_ref(),
+                    params.k_bloch,
+                    substrate,
+                );
+                if let Some(session) = self.backend.create_session(3 * n) {
+                    // GPU matvec with CPU-assembled matrix.
+                    session
+                        .upload_matrix(&matrix)
+                        .map_err(|e| SolverError::LinAlgError(e.to_string()))?;
+                    let matvec_fn = move |x: &ndarray::Array1<Complex64>| -> Result<ndarray::Array1<Complex64>, SolverError> {
+                        session.matvec(x.view()).map_err(|e| SolverError::LinAlgError(e.to_string()))
+                    };
+                    iterative::solve_gmres(&matvec_fn, &rhs, params.solver_tolerance, params.max_iterations)?
+                } else {
+                    // Pure CPU cached matvec.
+                    let backend = Arc::clone(&self.backend);
+                    let matvec_fn = move |x: &ndarray::Array1<Complex64>| -> Result<ndarray::Array1<Complex64>, SolverError> {
+                        backend.matvec(&matrix, x).map_err(|e| SolverError::LinAlgError(e.to_string()))
+                    };
+                    iterative::solve_gmres(&matvec_fn, &rhs, params.solver_tolerance, params.max_iterations)?
+                }
             }
         } else {
             // Matrix exceeds budget: on-the-fly matvec — O(N) memory, no assembly.
