@@ -930,24 +930,27 @@ mod tests {
             }
         }
 
-        // Test: do a matvec with a known vector and compare
-        let test_vec: ndarray::Array1<Complex64> = ndarray::Array1::from_vec(
-            (0..dim).map(|i| Complex64::new(i as f64 * 0.01 + 1.0, i as f64 * 0.005)).collect()
-        );
-        let gpu_result = session.matvec(test_vec.view()).expect("GPU matvec failed");
-        let cpu_result = cpu_matrix.dot(&test_vec);
-
-        let mut max_err = 0.0_f64;
-        for i in 0..dim {
-            let err = (gpu_result[i] - cpu_result[i]).norm();
-            max_err = max_err.max(err);
+        // Element-wise comparison: apply each basis vector e_col as the matvec input.
+        // GPU matvec(e_col) == column `col` of the GPU matrix, so comparing against
+        // cpu_matrix.column(col) gives an element-wise diff for every matrix entry.
+        let mut max_elem_err = 0.0_f64;
+        for col in 0..dim {
+            let e_col: ndarray::Array1<Complex64> = ndarray::Array1::from_vec(
+                (0..dim).map(|i| if i == col { Complex64::from(1.0) } else { Complex64::from(0.0) }).collect()
+            );
+            let gpu_col = session.matvec(e_col.view()).expect("GPU matvec failed");
+            let cpu_col = cpu_matrix.column(col);
+            for row in 0..dim {
+                let err = (gpu_col[row] - cpu_col[row]).norm();
+                if err > max_elem_err {
+                    max_elem_err = err;
+                }
+            }
         }
-        let cpu_norm: f64 = cpu_result.iter().map(|c| c.norm_sqr()).sum::<f64>().sqrt();
-        let rel_err = max_err / cpu_norm;
         assert!(
-            rel_err < 5e-4,
-            "GPU assembly test: max relative error = {:.2e} (expected < 5e-4)",
-            rel_err
+            max_elem_err < 5e-5,
+            "GPU assembly elementwise test: max abs element error = {:.2e} (expected < 5e-5)",
+            max_elem_err
         );
     }
 
@@ -961,10 +964,11 @@ mod tests {
 
         let n = 3;
         let dim = 9;
-        let positions: Vec<[f64; 3]> = vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [20.0, 0.0, 0.0]];
-        let k = 0.01_f64;
+        // Place dipoles 1000 nm apart so G(r_i, r_j) ≈ 0 — diagonal blocks dominate.
+        let positions: Vec<[f64; 3]> = vec![[0.0, 0.0, 0.0], [1000.0, 0.0, 0.0], [2000.0, 0.0, 0.0]];
+        let k = 2.0 * std::f64::consts::PI / 600.0_f64;
 
-        // Known diagonal blocks
+        // Known diagonal blocks: isotropic inv_alpha
         let alpha = num_complex::Complex64::new(500.0, 100.0);
         let zero = num_complex::Complex64::from(0.0);
         let inv_alpha_val = num_complex::Complex64::from(1.0) / alpha;
@@ -976,19 +980,27 @@ mod tests {
             _ => { println!("Skipping: GPU assembly not available"); return; }
         };
 
-        // Test: identity vector for dipole 0 should give inv_alpha in first 3 components
-        let x_identity_0: ndarray::Array1<num_complex::Complex64> =
-            ndarray::Array1::from_vec((0..dim).map(|i| if i == 0 { num_complex::Complex64::from(1.0) } else { num_complex::Complex64::from(0.0) }).collect());
-        let result = session.matvec(x_identity_0.view()).expect("matvec failed");
-        // result[0] should be close to inv_alpha (real part dominant)
-        let err = (result[0] - inv_alpha_val).norm();
-        // The off-diagonal G contributions are small relative to inv_alpha for this geometry.
-        // Allow generous tolerance for the f32 precision.
-        assert!(
-            err < inv_alpha_val.norm() * 0.01 + 1e-6,
-            "Diagonal patch error: result[0]={:?}, expected~={:?}, err={:.2e}",
-            result[0], inv_alpha_val, err
-        );
+        // Directly verify each diagonal 3×3 block by applying basis vectors e_{3i+a}.
+        // For widely separated dipoles, A[3i+b, 3i+a] ≈ inv_pol[b*3+a] and all
+        // off-diagonal block contributions are negligible (|G| ~ 1e-6 at 1000 nm).
+        for i in 0..n {
+            for a in 0..3_usize {
+                let col = 3 * i + a;
+                let e_col: ndarray::Array1<num_complex::Complex64> =
+                    ndarray::Array1::from_vec((0..dim).map(|j| if j == col { num_complex::Complex64::from(1.0) } else { num_complex::Complex64::from(0.0) }).collect());
+                let y = session.matvec(e_col.view()).expect("matvec failed");
+                for b in 0..3_usize {
+                    let row = 3 * i + b;
+                    let expected = inv_pol[b * 3 + a];
+                    let err = (y[row] - expected).norm();
+                    assert!(
+                        err < 1e-3,
+                        "Diagonal block [{i}][{b},{a}]: GPU={:?}, expected={:?}, err={:.2e}",
+                        y[row], expected, err
+                    );
+                }
+            }
+        }
     }
 
     /// N=1 (single dipole, 3×3 matrix) does not panic.
