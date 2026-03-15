@@ -412,6 +412,7 @@ impl OpticalSolver for CdaSolver {
 
         Ok(DipoleResponse {
             wavelength_nm,
+            environment_n: params.environment_n,
             moments,
             local_fields,
         })
@@ -423,10 +424,7 @@ impl OpticalSolver for CdaSolver {
         response: &DipoleResponse,
         plane: &NearFieldPlane,
     ) -> Result<NearFieldMap, SolverError> {
-        let k = Self::wavenumber(
-            response.wavelength_nm,
-            1.0, // TODO: pass params through
-        );
+        let k = Self::wavenumber(response.wavelength_nm, response.environment_n);
 
         crate::fields::compute_near_field_map(dipoles, response, plane, k, &self.incident_field)
     }
@@ -438,7 +436,7 @@ impl OpticalSolver for CdaSolver {
         n_theta: usize,
         n_phi: usize,
     ) -> FarFieldMap {
-        let k = Self::wavenumber(response.wavelength_nm, 1.0);
+        let k = Self::wavenumber(response.wavelength_nm, response.environment_n);
         crate::fields::compute_far_field(dipoles, response, k, n_theta, n_phi)
     }
 

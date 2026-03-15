@@ -414,7 +414,7 @@ fn test_far_field_x_dipole_has_node_along_x() {
     moments[[0, 0]] = px; // x-component only
     let local_fields = Array2::zeros((1, 3));
 
-    let resp = DipoleResponse { wavelength_nm: wl, moments, local_fields };
+    let resp = DipoleResponse { wavelength_nm: wl, environment_n: 1.0, moments, local_fields };
     let dipoles = [Dipole::isotropic([0.0, 0.0, 0.0], px)];
 
     // Use n_theta=3, n_phi=4 so θ=π/2 (it=1) and φ=0 (ip=0) is sampled exactly
@@ -446,6 +446,7 @@ fn test_far_field_z_direction_has_maximum_for_x_dipole() {
     moments[[0, 0]] = px;
     let resp = DipoleResponse {
         wavelength_nm: wl,
+        environment_n: 1.0,
         moments,
         local_fields: Array2::zeros((1, 3)),
     };

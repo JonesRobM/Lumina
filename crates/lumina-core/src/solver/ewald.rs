@@ -474,7 +474,6 @@ pub(crate) fn bessel_y0(x: f64) -> f64 {
 #[inline]
 pub(crate) fn bessel_y1(x: f64) -> f64 {
     debug_assert!(x > 0.0, "bessel_y1: x must be positive");
-    use std::f64::consts::PI;
     if x <= 3.0 {
         // Y1 = -dY0/dx, computed via 5-point stencil for accuracy.
         // h chosen to balance truncation vs rounding: h ≈ x^(1/5) * 1e-3
@@ -1040,6 +1039,14 @@ mod tests {
         // A&S Table 9.1: Y₁(1) ≈ -0.7812, Y₁(2) ≈ -0.1070
         assert!((bessel_y1(1.0) - (-0.7812_f64)).abs() < 1e-4);
         assert!((bessel_y1(2.0) - (-0.1070_f64)).abs() < 1e-4);
+        // Small-x coverage: verifies the 5-point stencil doesn't produce NaN or
+        // diverge when x is small (the stencil guard ensures x - 2h > 0 always).
+        // Reference: Wolfram Alpha BesselY[1, x].
+        // Tolerance 1e-2 for x=0.1 (near the log singularity, stencil accuracy degrades).
+        assert!((bessel_y1(0.1) - (-6.4590_f64)).abs() < 1e-2,
+            "Y₁(0.1) = {:.4}, expected ≈ -6.4590", bessel_y1(0.1));
+        assert!((bessel_y1(0.5) - (-1.4715_f64)).abs() < 1e-3,
+            "Y₁(0.5) = {:.4}, expected ≈ -1.4715", bessel_y1(0.5));
     }
 
     #[test]
@@ -1110,5 +1117,81 @@ mod tests {
         let r = [3.0, 0.0, 0.0];   // rho = 0
         let g = recip_space_1d(r, [0.0, 0.0, 0.0], k, [10.0, 0.0, 0.0]);
         for row in &g { for val in row { assert!(val.norm() < 1e-30); } }
+    }
+
+    /// Reference implementation for three independent tensor elements.
+    ///
+    /// Computes G_xx, G_yy, and G_xy directly from the spectral sum formula
+    /// without the c_delta/c_ee/c_cross/c_rr abstraction used in `recip_space_1d`.
+    /// Used in tensor-element tests to catch prefactor bugs (e.g. missing /ρ in c_cross).
+    ///
+    /// Chain along x̂, displacement r = [Δx, ρ, 0] (ρ > 0).
+    /// - G_xx = (1/2πa₁) Σ_m exp(iG_m Δx) (k²−G_m²) K₀(κ_m ρ)
+    /// - G_yy = (1/2πa₁) Σ_m exp(iG_m Δx) (G_m² K₀ + κ_m K₁/ρ)
+    /// - G_xy = (1/2πa₁) Σ_m exp(iG_m Δx) (−i G_m) κ_m K₁(κ_m ρ)/ρ
+    fn recip_1d_reference_elements(
+        dx: f64,
+        rho: f64,
+        k: f64,
+        a1: f64,
+        m_max: i64,
+    ) -> (Complex64, Complex64, Complex64) {
+        use std::f64::consts::PI;
+        let two_pi_over_a1 = 2.0 * PI / a1;
+        let norm = 1.0 / (2.0 * PI * a1);
+        let (mut gxx, mut gyy, mut gxy) = (Complex64::from(0.0), Complex64::from(0.0), Complex64::from(0.0));
+        for m in -m_max..=m_max {
+            let g_m = m as f64 * two_pi_over_a1;
+            let kappa = csqrt_positive_imag(Complex64::new(g_m * g_m - k * k, 0.0));
+            let k0 = bessel_k0_cplx(kappa * rho);
+            let k1 = bessel_k1_cplx(kappa * rho);
+            let k1_rho = kappa * k1 / rho;
+            let phase = Complex64::new(0.0, g_m * dx).exp();
+            gxx += phase * Complex64::from(k * k - g_m * g_m) * k0;
+            gyy += phase * (Complex64::from(g_m * g_m) * k0 + k1_rho);
+            gxy += phase * Complex64::new(0.0, -g_m) * k1_rho;
+        }
+        (gxx * norm, gyy * norm, gxy * norm)
+    }
+
+    #[test]
+    fn test_1d_recip_tensor_elements_xx_yy_xy() {
+        // Verify specific tensor elements against a reference that computes each
+        // sum formula directly without the c_delta/c_ee/c_cross/c_rr abstraction.
+        //
+        // The G_xy element is particularly important: the c_cross bug (missing /ρ)
+        // would give a value off by a factor of ρ = 3, so a 3× error.
+        // The test catches any such prefactor mistake.
+        let k  = 0.01_f64;  // nm⁻¹, λ ≈ 628 nm
+        let a1 = [10.0_f64, 0.0, 0.0];
+        let r  = [5.0_f64, 3.0, 0.0]; // Δx = 5 nm, ρ = 3 nm
+
+        let g = recip_space_1d(r, [0.0; 3], k, a1);
+
+        let (ref_xx, ref_yy, ref_xy) =
+            recip_1d_reference_elements(r[0], r[1], k, a1[0], 50);
+
+        let tol = 1e-8;
+
+        assert!(
+            (g[0][0] - ref_xx).norm() < tol,
+            "G_xx mismatch: got {:?}, expected {:?}, diff = {:.2e}",
+            g[0][0], ref_xx, (g[0][0] - ref_xx).norm()
+        );
+        assert!(
+            (g[1][1] - ref_yy).norm() < tol,
+            "G_yy mismatch: got {:?}, expected {:?}, diff = {:.2e}",
+            g[1][1], ref_yy, (g[1][1] - ref_yy).norm()
+        );
+        assert!(
+            (g[0][1] - ref_xy).norm() < tol,
+            "G_xy mismatch: got {:?}, expected {:?}, diff = {:.2e} (old c_cross bug gives 3× error)",
+            g[0][1], ref_xy, (g[0][1] - ref_xy).norm()
+        );
+        // Symmetry: G[0][1] == G[1][0]
+        assert!(
+            (g[0][1] - g[1][0]).norm() < 1e-12,
+            "G_xy != G_yx: off-diagonal symmetry broken"
+        );
     }
 }

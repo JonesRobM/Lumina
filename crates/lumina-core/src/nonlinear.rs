@@ -208,6 +208,7 @@ pub fn compute_shg_response(
     let far_field: Option<FarFieldMap> = if calc_far_field {
         let response_2omega = DipoleResponse {
             wavelength_nm: harmonic_nm,
+            environment_n: params_2omega.environment_n,
             moments: driven_moments.clone(),
             local_fields: Array2::zeros((n, 3)),
         };
@@ -393,6 +394,7 @@ pub fn compute_thg_response(
     let far_field: Option<FarFieldMap> = if calc_far_field {
         let response_3omega = DipoleResponse {
             wavelength_nm: harmonic_nm,
+            environment_n: params_3omega.environment_n,
             moments: driven_moments.clone(),
             local_fields: Array2::zeros((n, 3)),
         };
@@ -435,6 +437,7 @@ mod tests {
         }
         DipoleResponse {
             wavelength_nm,
+            environment_n: 1.0,
             moments: Array2::zeros((n, 3)),
             local_fields,
         }

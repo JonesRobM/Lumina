@@ -191,6 +191,12 @@ pub struct FarFieldMap {
 pub struct DipoleResponse {
     /// Wavelength (nm) at which this was computed.
     pub wavelength_nm: f64,
+    /// Refractive index of the surrounding medium at this wavelength.
+    ///
+    /// Carried here so that post-processing steps (`compute_near_field`,
+    /// `compute_far_field`) use the correct wavenumber k = 2πn/λ without
+    /// requiring `SimulationParams` to be threaded through again.
+    pub environment_n: f64,
     /// Complex dipole moments, shape (N, 3).
     pub moments: Array2<Complex64>,
     /// Local electric field at each dipole, shape (N, 3).
