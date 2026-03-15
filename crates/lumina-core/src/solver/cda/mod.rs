@@ -12,12 +12,12 @@
 //! - **FFT matvec** (block-Toeplitz convolution via `rustfft`): Used when
 //!   $N > 1000$, dipoles are on a regular cubic grid, and no periodic BC,
 //!   substrate, or FCD correction is active. $O(N \log N)$ per matvec.
-//!   Falls back to on-the-fly if the grid is irregular.
+//!   When the grid is irregular the solver falls through to GPU or CPU assembly.
 //! - **Iterative solve** (GMRES): Used when $N > 1000$ and FFT path is
 //!   not available. The sub-strategy is chosen by comparing the matrix
 //!   size $(3N)^2 \times 16$ bytes against `matrix_memory_budget` (default 2 GiB):
-//!   - **Within budget + GPU**: assemble once on CPU, upload to GPU, GMRES
-//!     matvec on GPU (fast).
+//!   - **Within budget + GPU assembly** (no lattice/substrate/FCD): assemble
+//!     on GPU via compute shader, GMRES matvec on GPU (fast).
 //!   - **Within budget, CPU only**: assemble once, BLAS matvec reused across
 //!     all GMRES iterations.
 //!   - **Exceeds budget**: on-the-fly matvec — $O(N)$ peak memory, no
@@ -287,15 +287,45 @@ impl OpticalSolver for CdaSolver {
             && params.substrate_runtime.is_none()
             && !self.use_fcd
         {
-            // FFT path: O(N log N) for regular cubic grids; falls back to on-the-fly
-            // if detect_regular_grid returns None (non-uniform or irregular spacing).
+            // FFT path: O(N log N) for regular cubic grids; falls back to GPU
+            // assembly or on-the-fly if the grid is irregular.
             if let Some(plan) = fft_matvec::FftMatvecPlan::try_build(dipoles, self.cell_size, k) {
                 let matvec_fn = |x: &ndarray::Array1<Complex64>| -> Result<ndarray::Array1<Complex64>, SolverError> {
                     Ok(plan.matvec(dipoles, x.view()))
                 };
                 iterative::solve_gmres(&matvec_fn, &rhs, params.solver_tolerance, params.max_iterations)?
+            } else if matrix_bytes <= self.matrix_memory_budget {
+                // Grid not regular — try GPU assembly (conditions match: no FCD,
+                // no substrate, no Ewald), then CPU assembly.
+                let diagonal_blocks = assembly::compute_diagonal_blocks(dipoles);
+                let positions: Vec<[f64; 3]> = dipoles.iter().map(|d| d.position).collect();
+                let gpu_session = self.backend.assemble_and_create_session(&positions, k, &diagonal_blocks);
+
+                if let Some(Ok(session)) = gpu_session {
+                    // GPU assembled matrix: GMRES matvec on GPU.
+                    let matvec_fn = move |x: &ndarray::Array1<Complex64>| -> Result<ndarray::Array1<Complex64>, SolverError> {
+                        session.matvec(x.view()).map_err(|e| SolverError::LinAlgError(e.to_string()))
+                    };
+                    iterative::solve_gmres(&matvec_fn, &rhs, params.solver_tolerance, params.max_iterations)?
+                } else {
+                    // CPU assembly fallback (no GPU backend available).
+                    let matrix = assembly::assemble_interaction_matrix(
+                        dipoles,
+                        k,
+                        self.use_fcd,
+                        self.cell_size,
+                        self.lattice.as_ref(),
+                        params.k_bloch,
+                        substrate,
+                    );
+                    let backend = Arc::clone(&self.backend);
+                    let matvec_fn = move |x: &ndarray::Array1<Complex64>| -> Result<ndarray::Array1<Complex64>, SolverError> {
+                        backend.matvec(&matrix, x).map_err(|e| SolverError::LinAlgError(e.to_string()))
+                    };
+                    iterative::solve_gmres(&matvec_fn, &rhs, params.solver_tolerance, params.max_iterations)?
+                }
             } else {
-                // Grid not regular — fall through to on-the-fly.
+                // Matrix exceeds budget: on-the-fly matvec — O(N) memory, no assembly.
                 let lattice_ref = self.lattice.as_ref();
                 let matvec_fn = |x: &ndarray::Array1<Complex64>| -> Result<ndarray::Array1<Complex64>, SolverError> {
                     Ok(assembly::matvec_on_the_fly(
@@ -312,54 +342,33 @@ impl OpticalSolver for CdaSolver {
                 iterative::solve_gmres(&matvec_fn, &rhs, params.solver_tolerance, params.max_iterations)?
             }
         } else if matrix_bytes <= self.matrix_memory_budget {
-            // Matrix fits in budget: try GPU assembly first, then CPU assembly.
-            let diagonal_blocks = assembly::compute_diagonal_blocks(dipoles);
-            let positions: Vec<[f64; 3]> = dipoles.iter().map(|d| d.position).collect();
-
-            // GPU assembly: only when no FCD, no substrate, no Ewald periodic BC.
-            let gpu_session = if !self.use_fcd
-                && params.substrate_runtime.is_none()
-                && self.lattice.is_none()
-            {
-                self.backend.assemble_and_create_session(&positions, k, &diagonal_blocks)
-            } else {
-                None
-            };
-
-            if let Some(Ok(session)) = gpu_session {
-                // GPU assembled matrix: GMRES matvec on GPU.
+            // Lattice, substrate, or FCD active: GPU assembly not supported.
+            // Matrix fits in budget: assemble once on CPU and use BLAS matvec.
+            let matrix = assembly::assemble_interaction_matrix(
+                dipoles,
+                k,
+                self.use_fcd,
+                self.cell_size,
+                self.lattice.as_ref(),
+                params.k_bloch,
+                substrate,
+            );
+            if let Some(session) = self.backend.create_session(3 * n) {
+                // GPU matvec with CPU-assembled matrix.
+                session
+                    .upload_matrix(&matrix)
+                    .map_err(|e| SolverError::LinAlgError(e.to_string()))?;
                 let matvec_fn = move |x: &ndarray::Array1<Complex64>| -> Result<ndarray::Array1<Complex64>, SolverError> {
                     session.matvec(x.view()).map_err(|e| SolverError::LinAlgError(e.to_string()))
                 };
                 iterative::solve_gmres(&matvec_fn, &rhs, params.solver_tolerance, params.max_iterations)?
             } else {
-                // CPU assembly fallback.
-                let matrix = assembly::assemble_interaction_matrix(
-                    dipoles,
-                    k,
-                    self.use_fcd,
-                    self.cell_size,
-                    self.lattice.as_ref(),
-                    params.k_bloch,
-                    substrate,
-                );
-                if let Some(session) = self.backend.create_session(3 * n) {
-                    // GPU matvec with CPU-assembled matrix.
-                    session
-                        .upload_matrix(&matrix)
-                        .map_err(|e| SolverError::LinAlgError(e.to_string()))?;
-                    let matvec_fn = move |x: &ndarray::Array1<Complex64>| -> Result<ndarray::Array1<Complex64>, SolverError> {
-                        session.matvec(x.view()).map_err(|e| SolverError::LinAlgError(e.to_string()))
-                    };
-                    iterative::solve_gmres(&matvec_fn, &rhs, params.solver_tolerance, params.max_iterations)?
-                } else {
-                    // Pure CPU cached matvec.
-                    let backend = Arc::clone(&self.backend);
-                    let matvec_fn = move |x: &ndarray::Array1<Complex64>| -> Result<ndarray::Array1<Complex64>, SolverError> {
-                        backend.matvec(&matrix, x).map_err(|e| SolverError::LinAlgError(e.to_string()))
-                    };
-                    iterative::solve_gmres(&matvec_fn, &rhs, params.solver_tolerance, params.max_iterations)?
-                }
+                // Pure CPU cached matvec.
+                let backend = Arc::clone(&self.backend);
+                let matvec_fn = move |x: &ndarray::Array1<Complex64>| -> Result<ndarray::Array1<Complex64>, SolverError> {
+                    backend.matvec(&matrix, x).map_err(|e| SolverError::LinAlgError(e.to_string()))
+                };
+                iterative::solve_gmres(&matvec_fn, &rhs, params.solver_tolerance, params.max_iterations)?
             }
         } else {
             // Matrix exceeds budget: on-the-fly matvec — O(N) memory, no assembly.

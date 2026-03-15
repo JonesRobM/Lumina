@@ -602,7 +602,7 @@ impl ComputeBackend for GpuBackend {
                 state.queue.write_buffer(&session.matrix_buf, offset as u64, row_bytes);
             }
         }
-        state.queue.submit(std::iter::empty());
+        // write_buffer is host-coherent in wgpu and does not need an explicit submit.
 
         drop(state);
 
@@ -891,7 +891,6 @@ mod tests {
         // Diagonal blocks: simple isotropic polarisability
         let alpha = Complex64::new(1000.0, 200.0);
         let zero = Complex64::from(0.0);
-        let _pol: [Complex64; 9] = [alpha, zero, zero, zero, alpha, zero, zero, zero, alpha];
         // inv_alpha = 1/alpha on diagonal
         let inv_alpha = Complex64::from(1.0) / alpha;
         let inv_pol: [Complex64; 9] = [inv_alpha, zero, zero, zero, inv_alpha, zero, zero, zero, inv_alpha];

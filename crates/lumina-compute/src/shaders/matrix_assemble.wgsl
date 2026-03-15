@@ -17,11 +17,6 @@ struct Params {
 }
 @group(0) @binding(2) var<uniform> params : Params;
 
-// Complex multiply: (a + ib)(c + id)
-fn cmul(a: vec2<f32>, b: vec2<f32>) -> vec2<f32> {
-    return vec2<f32>(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
-}
-
 // Compute G_alpha_beta for displacement vector (rx, ry, rz) at wavenumber k.
 fn greens_component(rx: f32, ry: f32, rz: f32, k: f32, alpha: u32, beta: u32) -> vec2<f32> {
     let r_sq = rx * rx + ry * ry + rz * rz;

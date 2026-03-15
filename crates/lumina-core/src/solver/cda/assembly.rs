@@ -319,7 +319,7 @@ pub fn matvec_on_the_fly(
 
 /// Compute the 3×3 inverse polarisability block for each dipole.
 ///
-/// Returns a `Vec` of length N, each a column-major `[Complex64; 9]`.
+/// Returns a `Vec` of length N, each a row-major `[Complex64; 9]`.
 /// This is a pure inversion of each dipole's pre-built polarisability tensor;
 /// no k, FCD, or cell_size dependency.
 pub fn compute_diagonal_blocks(dipoles: &[Dipole]) -> Vec<[Complex64; 9]> {
