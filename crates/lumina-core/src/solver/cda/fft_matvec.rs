@@ -21,9 +21,10 @@ pub fn detect_regular_grid(dipoles: &[Dipole], cell_size: f64) -> Option<(usize,
         return None;
     }
 
-    // Handle single dipole edge case.
+    // Single dipole: direct solver handles N≤iterative_threshold; FFT path
+    // is unreachable in normal operation, but return None to be safe.
     if dipoles.len() == 1 {
-        return Some((1, 1, 1));
+        return None;
     }
 
     // Find bounding box.
@@ -60,6 +61,13 @@ pub fn detect_regular_grid(dipoles: &[Dipole], cell_size: f64) -> Option<(usize,
         {
             return None;
         }
+    }
+
+    // Every grid node must be occupied; sparse geometries (spheres, cylinders,
+    // shells) have dipoles aligned to a regular spacing but missing interior
+    // nodes — the block-Toeplitz structure breaks for non-full grids.
+    if dipoles.len() != nx * ny * nz {
+        return None;
     }
 
     Some((nx, ny, nz))
@@ -152,8 +160,7 @@ impl FftMatvecPlan {
                         let cn = dn.rem_euclid(pad_nz as isize) as usize;
                         let flat = cl * (pad_ny * pad_nz) + cm * pad_nz + cn;
 
-                        let g_val = g[alpha][beta];
-                        buf[flat] = Complex64::new(g_val.re, g_val.im);
+                        buf[flat] = g[alpha][beta];
                     }
                 }
             }
@@ -218,7 +225,7 @@ impl FftMatvecPlan {
 
             for j in 0..n {
                 let xj = x[3 * j + beta];
-                buf[self.grid_index[j]] = Complex64::new(xj.re, xj.im);
+                buf[self.grid_index[j]] = xj;
             }
 
             // Forward FFT of the scattered input.
