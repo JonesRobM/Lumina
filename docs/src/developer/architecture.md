@@ -1,12 +1,12 @@
 # Architecture Overview
 
-Lumina is organised as a Rust workspace with six crates.
+Lumina is organised as a Rust workspace with seven crates.
 
 ## Crate Dependency Graph
 
 ```
-lumina-gui ──┐
-lumina-cli ──┤
+lumina-gui ──┬── lumina-chat ──┬── lumina-core
+lumina-cli ──┤                 └── lumina-geometry
              ├── lumina-core ──┬── lumina-compute
              │                 ├── lumina-geometry
              │                 └── lumina-materials
@@ -21,6 +21,7 @@ lumina-cli ──┤
 | `lumina-compute` | Library | Device abstraction: CPU, GPU, MPI |
 | `lumina-geometry` | Library | Shapes, file parsers (OBJ, XYZ), discretisation, transforms |
 | `lumina-materials` | Library | Material data providers (J&C, Palik), spline interpolation |
+| `lumina-chat` | Library | OpenAI-compatible chat client, provider config, context snapshots |
 | `lumina-gui` | Binary | Interactive egui dashboard |
 | `lumina-cli` | Binary | Headless CLI for HPC/batch runs |
 

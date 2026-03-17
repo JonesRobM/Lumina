@@ -68,3 +68,35 @@ View interactive plots powered by `egui_plot`:
 - **Far-field polar plot** — E-plane and H-plane radiation pattern cuts
 
 Export results to CSV or JSON via the file dialog (native file picker via `rfd`).
+
+### Chat
+
+An AI assistant panel powered by any OpenAI-compatible provider. Configure it under the **Settings** tab, then switch to the **Chat** tab to ask questions about your simulation.
+
+#### Settings tab
+
+| Field | Description |
+|-------|-------------|
+| Provider | Preset selector: Ollama (local), Groq, OpenRouter, or Custom |
+| Base URL | Full versioned URL prefix (e.g. `https://api.groq.com/openai/v1`) |
+| Model | Model identifier passed verbatim to the provider |
+| API Key | Optional; stored in plaintext in the platform config directory |
+
+Click **Save** to persist settings to `<config_dir>/lumina/chat.toml`.
+
+#### Chat tab
+
+- Type a message and press **Enter** to send (Shift+Enter inserts a newline).
+- Tokens stream in real time; the input is disabled while a response is arriving.
+- **Attach context** — injects the current scene geometry and simulation results as a structured message, then sends immediately. Use this before asking questions about your simulation.
+- **Clear** — wipes the conversation history. Any in-flight stream completes silently in the background.
+
+#### Free providers
+
+| Provider | Free tier | Setup |
+|----------|-----------|-------|
+| [Ollama](https://ollama.com) | Fully free, runs locally | `ollama serve` + pull a model |
+| [Groq](https://console.groq.com) | Free API key, generous rate limits | Sign up, copy key |
+| [OpenRouter](https://openrouter.ai) | Free-tier models available | Sign up, copy key |
+
+> **Note:** API keys are stored in plaintext. Avoid using paid keys with high blast radius; free-tier keys are the intended use case.

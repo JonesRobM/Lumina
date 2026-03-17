@@ -1,5 +1,6 @@
 //! GUI panels for the Lumina dashboard.
 
+pub mod chat;
 pub mod results;
 pub mod scene;
 pub mod simulation;

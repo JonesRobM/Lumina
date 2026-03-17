@@ -25,3 +25,4 @@ lumina-core = { workspace = true }
 lumina-geometry = { workspace = true }
 lumina-materials = { workspace = true }
 lumina-compute = { workspace = true }
+lumina-chat = { workspace = true, features = ["gui"] }

@@ -4,6 +4,7 @@ use std::sync::mpsc;
 use eframe::egui;
 use num_complex::Complex64;
 
+use lumina_chat::context::ContextSnapshot;
 use lumina_core::types::{CrossSections, FarFieldMap, NearFieldMap};
 use lumina_geometry::scene::SceneSpec;
 
@@ -19,6 +20,8 @@ pub struct LuminaApp {
     pub simulation_state: panels::simulation::SimulationPanel,
     /// State for the results panel.
     pub results_state: panels::results::ResultsPanel,
+    /// State for the chat panel.
+    pub chat_panel: panels::chat::ChatPanel,
 
     /// Channel receiver for simulation results from background thread.
     result_rx: Option<mpsc::Receiver<SimulationMessage>>,
@@ -46,6 +49,7 @@ pub enum Panel {
     Scene,
     Simulation,
     Results,
+    Chat,
 }
 
 impl Default for LuminaApp {
@@ -55,6 +59,7 @@ impl Default for LuminaApp {
             scene_panel: panels::scene::ScenePanel::default(),
             simulation_state: panels::simulation::SimulationPanel::default(),
             results_state: panels::results::ResultsPanel::default(),
+            chat_panel: panels::chat::ChatPanel::default(),
             result_rx: None,
         }
     }
@@ -634,6 +639,17 @@ impl LuminaApp {
             let _ = tx.send(SimulationMessage::Complete { spectra, near_field, far_field, shg_spectra, thg_spectra });
         });
     }
+
+    /// Build a context snapshot from the current scene and results, then send it to the chat.
+    fn attach_context(&mut self) {
+        // Note: THG data intentionally omitted from context snapshot (future enhancement).
+        let snapshot = ContextSnapshot::from_scene(
+            &self.scene_panel.scene,
+            self.results_state.spectra.as_deref(),
+            self.results_state.shg_spectra.as_deref(),
+        );
+        self.chat_panel.inject_context_snapshot(snapshot);
+    }
 }
 
 impl eframe::App for LuminaApp {
@@ -685,6 +701,7 @@ impl eframe::App for LuminaApp {
                 ui.selectable_value(&mut self.active_panel, Panel::Scene, "Scene");
                 ui.selectable_value(&mut self.active_panel, Panel::Simulation, "Simulation");
                 ui.selectable_value(&mut self.active_panel, Panel::Results, "Results");
+                ui.selectable_value(&mut self.active_panel, Panel::Chat, "Chat");
             });
 
         // Main content area.
@@ -699,10 +716,15 @@ impl eframe::App for LuminaApp {
                 }
             }
             Panel::Results => self.results_state.ui(ui),
+            Panel::Chat => self.chat_panel.ui(ui),
         });
 
         if should_launch.get() {
             self.launch_simulation();
+        }
+
+        if self.chat_panel.take_attach_requested() {
+            self.attach_context();
         }
     }
 }

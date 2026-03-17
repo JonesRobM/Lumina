@@ -256,6 +256,61 @@
 | 5 000 | 3.6 GB | **~11 MB** | 2 parallel wavelength threads |
 | 10 000 | 14.4 GB | **~43 MB** | 1 thread at a time |
 
+## v0.5.0 — Spectral Ewald, FFT Matvec & Sommerfeld Substrate
+
+### 1D Bessel Spectral Ewald Sum
+
+- [x] `recip_space_1d` in `EwaldGreens`: spectral reciprocal sum for 1D chains using K₀/K₁ Bessel functions at complex argument
+- [x] Branch-cut handling: K₀(iαρ) via (π/2)(−Y₀+iJ₀), K₁(iαρ) via −(π/2)(J₁+iY₁)
+- [x] Polynomial Bessel approximations (A&S) for Y₀, Y₁, J₀, J₁, J₂
+- [x] Reciprocity test for 1D chain reciprocal sum
+
+### FFT Block-Toeplitz Matvec
+
+- [x] `FftMatvecPlan` in `lumina-core`: circulant embedding in (2Nx×2Ny×2Nz), O(N log N) matvec
+- [x] `detect_regular_grid`: detects full-occupancy cubic dipole grids (N = Nx·Ny·Nz)
+- [x] Activated automatically when grid is regular and no lattice/substrate/FCD is in use
+- [x] Pre-built FFT plans via `rustfft`; circulant displacement uses `rem_euclid`
+
+### GPU Matrix Assembly Shader
+
+- [x] `matrix_assemble.wgsl`: `@workgroup_size(16,16)` WGSL shader fills off-diagonal Green's tensor blocks on GPU
+- [x] `assemble_and_create_session` in `GpuBackend`: full GPU assembly + CPU diagonal patch via `write_buffer`
+- [x] `compute_diagonal_blocks` in `assembly.rs`: per-dipole 3×3 inversion for radiative correction
+- [x] Dispatch priority: FFT → GPU assembly → CPU assembly (all within the no-FCD, no-lattice, no-substrate branch)
+- [x] GPU state mutex held in single scope to prevent interleave under parallel wavelength sweep
+
+### Sommerfeld Substrate
+
+- [x] `SommerfeldGreens` in `lumina-core`: G7K15 adaptive quadrature along Sommerfeld path, 3 segments per light line
+- [x] Bessel J₀/J₁/J₂ for the lateral spectral integrals
+- [x] `SubstrateRuntime` enum: `Fresnel { z_interface, delta_eps }` | `Sommerfeld { z_interface, greens }`
+- [x] `SubstrateSpec.use_sommerfeld: bool` (default `false`) — opt-in at CLI and GUI
+- [x] Sommerfeld path bypasses Ewald; `SubstrateRuntime::from_spec` constructs the correct variant per wavelength
+
+## v0.5.1 — AI Chat Panel
+
+### New crate: `lumina-chat`
+
+- [x] `ChatConfig`: provider name, base URL (no trailing slash), model, optional API key; serde round-trips to TOML
+- [x] Built-in presets: Ollama (`http://localhost:11434/v1`), Groq, OpenRouter
+- [x] `load()` / `save()` to `<config_dir>/lumina/chat.toml`; silent fallback to defaults on any error
+- [x] `Role` / `Message` types with `serde(rename_all = "lowercase")` for OpenAI wire format
+- [x] `ChatEvent`: `Token(String)`, `Done`, `Error(String)`
+- [x] `ChatClient`: background OS thread + `current_thread` tokio runtime; `std::sync::mpsc` task/event channels
+- [x] SSE streaming via `reqwest 0.12`; `parse_data_line` extracts `choices[0].delta.content`
+- [x] `ContextSnapshot`: clones scene + spectra into a markdown message for the "Attach context" action
+- [x] 11 unit tests (config round-trip, presets, SSE parsing, context message format)
+
+### GUI changes (`lumina-gui`)
+
+- [x] `Panel::Chat` added; **Chat** entry in left nav
+- [x] `ChatPanel`: Settings tab (provider ComboBox, URL/model/key fields, Save) + Chat tab (streaming message history)
+- [x] "Attach context" button injects `ContextSnapshot` as a user message and triggers `client.send`
+- [x] Auto-scroll to bottom on new tokens; spinner on last message while streaming
+- [x] `LuminaApp::attach_context()` accesses `scene_panel` and `chat_panel` as disjoint field projections (no borrow conflict)
+- [x] `egui::Context` injected lazily on first `update()` frame (no eframe dependency at `ChatClient::new`)
+
 ## v1.0 — Multi-Method & Cross-Platform
 
 - [ ] Boundary Element Method (BEM) solver

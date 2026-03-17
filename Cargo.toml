@@ -6,6 +6,7 @@ members = [
     "crates/lumina-materials",
     "crates/lumina-gui",
     "crates/lumina-cli",
+    "crates/lumina-chat",
 ]
 resolver = "2"
 
@@ -59,6 +60,11 @@ rustfft = "6"
 # Testing
 approx = "0.5"
 
+# HTTP / async
+reqwest = { version = "0.12", features = ["json", "stream"] }
+tokio   = { version = "1",    features = ["rt", "macros"] }
+dirs    = "6"
+
 # Workspace crates
 lumina-core = { path = "crates/lumina-core" }
 lumina-compute = { path = "crates/lumina-compute" }
@@ -66,3 +72,4 @@ lumina-geometry = { path = "crates/lumina-geometry" }
 lumina-materials = { path = "crates/lumina-materials" }
 lumina-gui = { path = "crates/lumina-gui" }
 lumina-cli = { path = "crates/lumina-cli" }
+lumina-chat = { path = "crates/lumina-chat" }

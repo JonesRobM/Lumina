@@ -25,5 +25,8 @@ output/
 results/
 .data/
 
+# Git worktrees
+.worktrees/
+
 # Allow docs/images for README assets
 !docs/images/
