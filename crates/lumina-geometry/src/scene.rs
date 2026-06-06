@@ -156,17 +156,18 @@ pub enum ShapeSpec {
 impl ShapeSpec {
     /// Discretise this shape into object-local positions centred at the origin.
     ///
-    /// Returns `(positions, labels)` where:
+    /// Returns `(positions, labels, fill_fractions)` where:
     /// - For XYZ imports: `labels[i]` is the atom-type string (e.g. `"Au"`).
     /// - For [`ShapeSpec::CoreShell`]: `labels[i]` is the **resolved material name**
     ///   (e.g. `"Au_JC"`, `"Ag_JC"`) and should be used directly without
     ///   `species_map` lookup.
     /// - For all other shapes: `labels[i]` is `None`.
+    /// - `fill_fractions[i]` is 1.0 for interior dipoles, < 1.0 for surface dipoles.
     fn discretise_local(
         &self,
         spacing: f64,
         obj_name: &str,
-    ) -> Result<(Vec<[f64; 3]>, Vec<Option<String>>), SceneError> {
+    ) -> Result<(Vec<[f64; 3]>, Vec<Option<String>>, Vec<f64>), SceneError> {
         match self {
             ShapeSpec::CoreShell { base, core_material, shells } => {
                 let outer = core_shell_outer_primitive(base, shells);
@@ -180,6 +181,7 @@ impl ShapeSpec {
                 }
                 let mut positions = Vec::with_capacity(pts.len());
                 let mut labels = Vec::with_capacity(pts.len());
+                let mut fracs = Vec::with_capacity(pts.len());
                 for pt in &pts {
                     let local = [
                         pt.position[0] - cx,
@@ -189,8 +191,9 @@ impl ShapeSpec {
                     let mat = shell_material_at(&local, base, core_material, shells);
                     positions.push(local);
                     labels.push(Some(mat));
+                    fracs.push(pt.fill_fraction);
                 }
-                Ok((positions, labels))
+                Ok((positions, labels, fracs))
             }
             ShapeSpec::File { path } => {
                 let p = std::path::Path::new(path);
@@ -222,7 +225,8 @@ impl ShapeSpec {
                         let labels: Vec<Option<String>> =
                             parsed.iter().map(|p| p.label.clone()).collect();
                         let centred = centre_positions(positions);
-                        Ok((centred, labels))
+                        let fracs = vec![1.0; centred.len()];
+                        Ok((centred, labels, fracs))
                     }
                     "obj" => {
                         let content =
@@ -243,9 +247,10 @@ impl ShapeSpec {
                         }
                         let positions: Vec<[f64; 3]> =
                             pts.iter().map(|p| p.position).collect();
+                        let fracs: Vec<f64> = pts.iter().map(|p| p.fill_fraction).collect();
                         let labels = vec![None; positions.len()];
                         let centred = centre_positions(positions);
-                        Ok((centred, labels))
+                        Ok((centred, labels, fracs))
                     }
                     other => Err(SceneError::UnsupportedFormat {
                         name: obj_name.to_string(),
@@ -269,8 +274,9 @@ impl ShapeSpec {
                     .iter()
                     .map(|p| [p.position[0] - cx, p.position[1] - cy, p.position[2] - cz])
                     .collect();
+                let fracs: Vec<f64> = pts.iter().map(|p| p.fill_fraction).collect();
                 let labels = vec![None; positions.len()];
-                Ok((positions, labels))
+                Ok((positions, labels, fracs))
             }
         }
     }
@@ -412,7 +418,7 @@ impl ObjectSpec {
     /// Useful for GUI preview rendering without building the full scene.
     /// Returns an error if the shape is empty or a file cannot be read.
     pub fn world_positions(&self) -> Result<Vec<[f64; 3]>, SceneError> {
-        let (local_pos, _) = self.shape.discretise_local(self.dipole_spacing, &self.name)?;
+        let (local_pos, _, _) = self.shape.discretise_local(self.dipole_spacing, &self.name)?;
         Ok(self.transform.apply(&local_pos))
     }
 }
@@ -476,6 +482,9 @@ pub struct SceneDipoles {
     /// [`ShapeSpec::Ellipsoid`] objects; `None` for all other shapes.
     /// Length always equals `positions.len()`.
     pub hints: Vec<Option<DipolePolarisabilityHint>>,
+    /// Fill fraction for each dipole: 1.0 for interior dipoles, < 1.0 for surface dipoles.
+    /// Parallel to `positions`. Always in (0, 1].
+    pub fill_fractions: Vec<f64>,
 }
 
 impl SceneSpec {
@@ -497,9 +506,10 @@ impl SceneSpec {
         let mut materials = Vec::new();
         let mut spacings = Vec::new();
         let mut hints: Vec<Option<DipolePolarisabilityHint>> = Vec::new();
+        let mut fill_fractions: Vec<f64> = Vec::new();
 
         for obj in &self.objects {
-            let (local_pos, labels) =
+            let (local_pos, labels, fracs) =
                 obj.shape.discretise_local(obj.dipole_spacing, &obj.name)?;
 
             let world_pos = obj.transform.apply(&local_pos);
@@ -520,7 +530,11 @@ impl SceneSpec {
             // they bypass species_map (which is irrelevant for primitive shells).
             let is_core_shell = matches!(obj.shape, ShapeSpec::CoreShell { .. });
 
-            for (pos, label) in world_pos.into_iter().zip(labels.into_iter()) {
+            for ((pos, label), frac) in world_pos
+                .into_iter()
+                .zip(labels.into_iter())
+                .zip(fracs.into_iter())
+            {
                 positions.push(pos);
                 let mat = if is_core_shell {
                     label.unwrap_or_else(|| obj.material.clone())
@@ -537,10 +551,17 @@ impl SceneSpec {
                 materials.push(mat);
                 spacings.push(obj.dipole_spacing);
                 hints.push(hint_for_obj.clone());
+                fill_fractions.push(frac);
             }
         }
 
-        Ok(SceneDipoles { positions, materials, spacings, hints })
+        let n = positions.len();
+        debug_assert_eq!(materials.len(),     n, "SceneDipoles: materials length mismatch");
+        debug_assert_eq!(spacings.len(),      n, "SceneDipoles: spacings length mismatch");
+        debug_assert_eq!(hints.len(),         n, "SceneDipoles: hints length mismatch");
+        debug_assert_eq!(fill_fractions.len(), n, "SceneDipoles: fill_fractions length mismatch");
+
+        Ok(SceneDipoles { positions, materials, spacings, hints, fill_fractions })
     }
 }
 
@@ -978,6 +999,44 @@ mod tests {
         } else {
             panic!("expected CoreShell shape");
         }
+    }
+
+    fn sphere_scene(radius: f64, spacing: f64) -> SceneSpec {
+        SceneSpec {
+            objects: vec![ObjectSpec {
+                name: "test_sphere".into(),
+                shape: ShapeSpec::Sphere { radius },
+                material: "Au_JC".into(),
+                dipole_spacing: spacing,
+                transform: ObjectTransform::default(),
+                species_map: Default::default(),
+            }],
+        }
+    }
+
+    #[test]
+    fn test_fill_fractions_length_matches_positions() {
+        let geom = sphere_scene(10.0, 2.0).build_geometry().unwrap();
+        assert_eq!(
+            geom.fill_fractions.len(),
+            geom.positions.len(),
+            "fill_fractions must be parallel to positions"
+        );
+    }
+
+    #[test]
+    fn test_fill_fractions_all_in_range() {
+        let geom = sphere_scene(10.0, 2.0).build_geometry().unwrap();
+        for &f in &geom.fill_fractions {
+            assert!(f > 0.0 && f <= 1.0, "fill_fraction out of range: {}", f);
+        }
+    }
+
+    #[test]
+    fn test_some_surface_fill_fractions_less_than_one() {
+        let geom = sphere_scene(10.0, 2.0).build_geometry().unwrap();
+        let has_partial = geom.fill_fractions.iter().any(|&f| f < 1.0);
+        assert!(has_partial, "Expected surface dipoles with fill_fraction < 1");
     }
 
     /// Species map must correctly assign different materials to different labels.

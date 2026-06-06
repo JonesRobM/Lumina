@@ -327,16 +327,18 @@ impl LuminaApp {
                             format!("Material error at λ={wl:.1} nm: {e}")
                         })?;
                         let volume = geom.spacings[i].powi(3);
+                        let f = geom.fill_fractions[i];
                         let dipole = if let Some(hint) = &geom.hints[i] {
                             // Anisotropic path: ellipsoidal depolarisation factors.
                             let tensor = ellipsoid_polarisability_tensor(
                                 volume, hint.depol_factors, eps, epsilon_m, k, hint.rotation,
                             );
-                            Dipole { position: geom.positions[i], polarisability: tensor }
+                            Dipole { position: geom.positions[i], polarisability: tensor.map(|v| v * f) }
                         } else {
                             // Isotropic path: standard spherical CM.
                             let alpha_cm = clausius_mossotti(volume, eps, epsilon_m);
-                            let alpha = radiative_correction(alpha_cm, k);
+                            let alpha_rrcm = radiative_correction(alpha_cm, k);
+                            let alpha = alpha_rrcm * f;
                             Dipole::isotropic(geom.positions[i], alpha)
                         };
                         dipoles.push(dipole);
@@ -484,17 +486,19 @@ impl LuminaApp {
                         for i in 0..n {
                             let eps = resolve_eps(&geom.materials[i], wl).ok()?;
                             let volume = geom.spacings[i].powi(3);
+                            let f = geom.fill_fractions[i];
                             let dipole = if let Some(hint) = &geom.hints[i] {
                                 let tensor = ellipsoid_polarisability_tensor(
                                     volume, hint.depol_factors, eps, epsilon_m, k_omega,
                                     hint.rotation,
                                 );
-                                Dipole { position: geom.positions[i], polarisability: tensor }
+                                Dipole { position: geom.positions[i], polarisability: tensor.map(|v| v * f) }
                             } else {
-                                let alpha = radiative_correction(
+                                let alpha_rrcm = radiative_correction(
                                     clausius_mossotti(volume, eps, epsilon_m),
                                     k_omega,
                                 );
+                                let alpha = alpha_rrcm * f;
                                 Dipole::isotropic(geom.positions[i], alpha)
                             };
                             dipoles_omega.push(dipole);
@@ -505,17 +509,19 @@ impl LuminaApp {
                         for i in 0..n {
                             let eps = resolve_eps(&geom.materials[i], wl_2omega).ok()?;
                             let volume = geom.spacings[i].powi(3);
+                            let f = geom.fill_fractions[i];
                             let dipole = if let Some(hint) = &geom.hints[i] {
                                 let tensor = ellipsoid_polarisability_tensor(
                                     volume, hint.depol_factors, eps, epsilon_m, k_2omega,
                                     hint.rotation,
                                 );
-                                Dipole { position: geom.positions[i], polarisability: tensor }
+                                Dipole { position: geom.positions[i], polarisability: tensor.map(|v| v * f) }
                             } else {
-                                let alpha = radiative_correction(
+                                let alpha_rrcm = radiative_correction(
                                     clausius_mossotti(volume, eps, epsilon_m),
                                     k_2omega,
                                 );
+                                let alpha = alpha_rrcm * f;
                                 Dipole::isotropic(geom.positions[i], alpha)
                             };
                             dipoles_2omega.push(dipole);
@@ -574,17 +580,19 @@ impl LuminaApp {
                         for i in 0..n {
                             let eps = resolve_eps(&geom.materials[i], wl).ok()?;
                             let volume = geom.spacings[i].powi(3);
+                            let f = geom.fill_fractions[i];
                             let dipole = if let Some(hint) = &geom.hints[i] {
                                 let tensor = ellipsoid_polarisability_tensor(
                                     volume, hint.depol_factors, eps, epsilon_m, k_omega,
                                     hint.rotation,
                                 );
-                                Dipole { position: geom.positions[i], polarisability: tensor }
+                                Dipole { position: geom.positions[i], polarisability: tensor.map(|v| v * f) }
                             } else {
-                                let alpha = radiative_correction(
+                                let alpha_rrcm = radiative_correction(
                                     clausius_mossotti(volume, eps, epsilon_m),
                                     k_omega,
                                 );
+                                let alpha = alpha_rrcm * f;
                                 Dipole::isotropic(geom.positions[i], alpha)
                             };
                             dipoles_omega.push(dipole);
@@ -595,17 +603,19 @@ impl LuminaApp {
                         for i in 0..n {
                             let eps = resolve_eps(&geom.materials[i], wl_3omega).ok()?;
                             let volume = geom.spacings[i].powi(3);
+                            let f = geom.fill_fractions[i];
                             let dipole = if let Some(hint) = &geom.hints[i] {
                                 let tensor = ellipsoid_polarisability_tensor(
                                     volume, hint.depol_factors, eps, epsilon_m, k_3omega,
                                     hint.rotation,
                                 );
-                                Dipole { position: geom.positions[i], polarisability: tensor }
+                                Dipole { position: geom.positions[i], polarisability: tensor.map(|v| v * f) }
                             } else {
-                                let alpha = radiative_correction(
+                                let alpha_rrcm = radiative_correction(
                                     clausius_mossotti(volume, eps, epsilon_m),
                                     k_3omega,
                                 );
+                                let alpha = alpha_rrcm * f;
                                 Dipole::isotropic(geom.positions[i], alpha)
                             };
                             dipoles_3omega.push(dipole);

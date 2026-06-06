@@ -128,14 +128,18 @@ impl EwaldGreens {
         let is_2d = self.lattice.is_2d();
         let eta = self.lattice.eta();
 
-        // 1D chains: use a direct lattice sum (no erfc) with at least 20 shells
-        // for ~2 % convergence at optical wavelengths.  The Bessel-function-based
-        // 1D spectral correction is provided by recip_space.
-        let n_shells = if is_2d {
-            self.lattice.truncation_real
-        } else {
-            self.lattice.truncation_real.max(20)
-        };
+        // 1D chains: recip_space_1d (the Bessel spectral sum) computes the
+        // *complete* periodic G for a chain — no real-space contribution is
+        // needed or correct. Returning zero here lets evaluate() = recip_space_1d.
+        //
+        // History: v0.4.1 added a 20-shell direct sum to fix an erfc-zeroing bug.
+        // v0.5.0 then added recip_space_1d (the complete spectral sum). Adding
+        // both produced evaluate() ≈ 2 × G_per. The direct sum is now removed.
+        if !is_2d {
+            return [[Complex64::from(0.0); 3]; 3];
+        }
+
+        let n_shells = self.lattice.truncation_real;
         let lattice_points = self.lattice.real_lattice_points(n_shells);
         let zero = Complex64::from(0.0);
         let mut g = [[zero; 3]; 3];
@@ -1193,5 +1197,64 @@ mod tests {
             (g[0][1] - g[1][0]).norm() < 1e-12,
             "G_xy != G_yx: off-diagonal symmetry broken"
         );
+    }
+
+    /// C1: 1D Ewald magnitude validation against brute-force direct lattice sum.
+    ///
+    /// The existing tensor-element tests compare two implementations of the same
+    /// spectral formula, which catches structural bugs but not normalisation errors.
+    /// This test compares the *combined* Ewald sum (real_space + recip_space_1d)
+    /// against an independent brute-force sum:
+    ///
+    ///   G_direct(r) = Σ_{n=−200}^{200} G_free(r − n·a₁) exp(i k_bloch · n·a₁)
+    ///
+    /// The two sums must agree to within 1 % on the dominant tensor elements.
+    /// A normalisation bug in recip_space_1d would appear as a multi-percent
+    /// discrepancy here.
+    #[test]
+    fn test_1d_ewald_magnitude_vs_direct_sum() {
+        use std::f64::consts::PI;
+
+        let a  = 100.0_f64;              // chain period (nm)
+        let k  = 2.0 * PI / 600.0_f64;  // λ = 600 nm (nm⁻¹)
+        let a1 = [a, 0.0, 0.0];
+        // Zone-boundary k_bloch: Bloch phase = (−1)^n → absolute convergence
+        // of the direct sum for near-field dominant terms.
+        let kb = [PI / a, 0.0, 0.0];
+
+        // Test two transverse displacements (x_par = 0, different ρ).
+        // G_yy is the dominant transverse element and unambiguously non-zero.
+        for (r, label) in [
+            ([0.0_f64, 20.0, 0.0], "rho=20nm"),
+            ([0.0_f64, 40.0, 0.0], "rho=40nm"),
+        ] {
+            let lat     = LatticeSpec::chain(a1);
+            let eg      = EwaldGreens::new(lat);
+            let g_ewald = eg.evaluate(r, kb, k);
+
+            // Brute-force direct sum with N = 200 shells.
+            let mut g_direct = [[Complex64::from(0.0); 3]; 3];
+            for n in -200_i64..=200 {
+                let rn    = [n as f64 * a, 0.0, 0.0];
+                let s     = [r[0] - rn[0], r[1] - rn[1], r[2] - rn[2]];
+                let s_sq  = s[0]*s[0] + s[1]*s[1] + s[2]*s[2];
+                if s_sq < 1e-20 { continue; }
+                let phase = Complex64::new((kb[0] * rn[0]).cos(), (kb[0] * rn[0]).sin());
+                let g_s   = dyadic_greens_tensor_at(&s, k);
+                for i in 0..3 { for j in 0..3 { g_direct[i][j] += phase * g_s[i][j]; } }
+            }
+
+            // Compare G_yy (dominant transverse element).
+            let ewald  = g_ewald[1][1];
+            let direct = g_direct[1][1];
+            let mag    = direct.norm();
+            assert!(mag > 1e-10, "G_yy direct sum is near-zero ({label}): {mag:.2e}");
+            let rel_err = (ewald - direct).norm() / mag;
+            assert!(
+                rel_err < 0.01,
+                "1D Ewald G_yy magnitude mismatch ({label}): \
+                 Ewald={ewald:.4e}, Direct={direct:.4e}, rel_err={rel_err:.3e}",
+            );
+        }
     }
 }

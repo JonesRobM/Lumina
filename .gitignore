@@ -28,5 +28,10 @@ results/
 # Git worktrees
 .worktrees/
 
+# Claude Code configuration (personal, not project artefacts)
+CLAUDE.md
+CLAUDE.md.bak
+.claude/
+
 # Allow docs/images for README assets
 !docs/images/

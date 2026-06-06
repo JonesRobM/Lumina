@@ -14,6 +14,56 @@ use crate::primitives::Primitive;
 pub struct LatticePoint {
     /// Position in 3D space (nm).
     pub position: [f64; 3],
+    /// Fraction of this dipole cell's volume inside the shape, ∈ (0, 1].
+    /// 1.0 for interior dipoles; < 1.0 for dipoles straddling the surface.
+    pub fill_fraction: f64,
+}
+
+/// Compute the fraction of a cubic dipole cell's volume inside a shape.
+///
+/// Samples a 5×5×5 = 125-point grid within `[centre ± spacing/2]³`.
+/// Subpoints are placed at `centre[axis] + (k/4.0 − 0.5) * spacing` for k = 0..=4.
+/// Returns `count_inside / 125`.
+///
+/// Fast-path: if all 8 cell corners satisfy `contains_fn`, returns 1.0 immediately.
+///
+/// # Precondition
+/// `spacing > 0.0` — guaranteed by the caller's existing assertion.
+fn fill_fraction_grid(
+    centre: [f64; 3],
+    spacing: f64,
+    contains_fn: impl Fn([f64; 3]) -> bool,
+) -> f64 {
+    let h = spacing * 0.5;
+    // Fast-path: all 8 corners inside → cell is fully interior.
+    // Valid for convex shapes (Sphere, Cuboid, Ellipsoid, Cylinder).
+    // For Helix (non-convex), this over-counts when spacing ≳ wire_radius,
+    // which violates the CDA validity criterion anyway.
+    let all_inside = [-h, h].iter().all(|&dx| {
+        [-h, h].iter().all(|&dy| {
+            [-h, h].iter().all(|&dz| {
+                contains_fn([centre[0] + dx, centre[1] + dy, centre[2] + dz])
+            })
+        })
+    });
+    if all_inside {
+        return 1.0;
+    }
+    // Full 5×5×5 subsample.
+    let mut count = 0u32;
+    for kx in 0..5u32 {
+        let x = centre[0] + (kx as f64 / 4.0 - 0.5) * spacing;
+        for ky in 0..5u32 {
+            let y = centre[1] + (ky as f64 / 4.0 - 0.5) * spacing;
+            for kz in 0..5u32 {
+                let z = centre[2] + (kz as f64 / 4.0 - 0.5) * spacing;
+                if contains_fn([x, y, z]) {
+                    count += 1;
+                }
+            }
+        }
+    }
+    count as f64 / 125.0
 }
 
 /// Discretise a primitive shape into a cubic lattice of dipole positions.
@@ -48,7 +98,8 @@ pub fn discretise_primitive(primitive: &Primitive, spacing: f64) -> Vec<LatticeP
                 let z = cz + iz as f64 * spacing;
                 let p = [x, y, z];
                 if primitive.contains(&p) {
-                    points.push(LatticePoint { position: p });
+                    let ff = fill_fraction_grid(p, spacing, |q| primitive.contains(&q));
+                    points.push(LatticePoint { position: p, fill_fraction: ff });
                 }
             }
         }
@@ -92,7 +143,10 @@ pub fn discretise_mesh(mesh: &ObjMesh, spacing: f64) -> Vec<LatticePoint> {
                 let z = cz + iz as f64 * spacing;
                 let p = [x, y, z];
                 if mesh_contains(&mesh.vertices, &mesh.faces, &p) {
-                    points.push(LatticePoint { position: p });
+                    let verts = &mesh.vertices;
+                    let faces = &mesh.faces;
+                    let ff = fill_fraction_grid(p, spacing, |q| mesh_contains(verts, faces, &q));
+                    points.push(LatticePoint { position: p, fill_fraction: ff });
                 }
             }
         }
@@ -295,5 +349,84 @@ mod tests {
             assert!(p.position[1].abs() <= 5.0 + 1e-10);
             assert!(p.position[2].abs() <= 5.0 + 1e-10);
         }
+    }
+
+    #[test]
+    fn test_fill_fraction_grid_interior_returns_one() {
+        use crate::primitives::Sphere;
+        let sphere = Primitive::Sphere(Sphere {
+            centre: [0.0, 0.0, 0.0],
+            radius: 50.0,
+        });
+        let f = fill_fraction_grid([0.0, 0.0, 0.0], 2.0, |p| sphere.contains(&p));
+        assert_eq!(f, 1.0, "Interior cell should have fill_fraction = 1.0");
+    }
+
+    #[test]
+    fn test_fill_fraction_grid_surface_is_partial() {
+        use crate::primitives::Sphere;
+        let sphere = Primitive::Sphere(Sphere {
+            centre: [0.0, 0.0, 0.0],
+            radius: 10.0,
+        });
+        let f = fill_fraction_grid([9.0, 0.0, 0.0], 4.0, |p| sphere.contains(&p));
+        assert!(
+            f > 0.0 && f < 1.0,
+            "Surface cell should have 0 < fill_fraction < 1, got {}",
+            f
+        );
+    }
+
+    #[test]
+    fn test_fill_fraction_grid_exact_value() {
+        use crate::primitives::Sphere;
+        let sphere = Primitive::Sphere(Sphere {
+            centre: [0.0, 0.0, 0.0],
+            radius: 10.0,
+        });
+        // Grid for centre=[9,0,0], spacing=4: x∈{7,8,9,10,11}, y∈{-2,-1,0,1,2}, z∈{-2,-1,0,1,2}
+        // Points inside sphere (x²+y²+z² ≤ 100): computed from the 5×5×5=125 grid.
+        let f = fill_fraction_grid([9.0, 0.0, 0.0], 4.0, |p| sphere.contains(&p));
+        // The fast-path does NOT fire (x=11 corner is outside), so full grid runs.
+        assert_eq!(f, 76.0 / 125.0,
+            "fill_fraction_grid must return exact deterministic value");
+    }
+
+    #[test]
+    fn test_all_fill_fractions_in_range() {
+        use crate::primitives::Sphere;
+        let sphere = Primitive::Sphere(Sphere { centre: [0.0, 0.0, 0.0], radius: 10.0 });
+        let points = discretise_primitive(&sphere, 2.0);
+        for p in &points {
+            assert!(
+                p.fill_fraction > 0.0 && p.fill_fraction <= 1.0,
+                "fill_fraction out of range: {} at {:?}", p.fill_fraction, p.position
+            );
+        }
+    }
+
+    #[test]
+    fn test_interior_dipoles_have_fill_fraction_one() {
+        use crate::primitives::Sphere;
+        let sphere = Primitive::Sphere(Sphere { centre: [0.0, 0.0, 0.0], radius: 20.0 });
+        let points = discretise_primitive(&sphere, 2.0);
+        // The centre dipole of a large sphere should be fully interior.
+        let centre = points
+            .iter()
+            .find(|p| p.position[0].abs() < 0.5 && p.position[1].abs() < 0.5 && p.position[2].abs() < 0.5)
+            .expect("centre dipole must exist for R=20, d=2");
+        assert_eq!(
+            centre.fill_fraction, 1.0,
+            "Centre dipole of large sphere should have fill_fraction = 1.0"
+        );
+    }
+
+    #[test]
+    fn test_some_surface_dipoles_have_partial_fill() {
+        use crate::primitives::Sphere;
+        let sphere = Primitive::Sphere(Sphere { centre: [0.0, 0.0, 0.0], radius: 10.0 });
+        let points = discretise_primitive(&sphere, 2.0);
+        let has_partial = points.iter().any(|p| p.fill_fraction < 1.0);
+        assert!(has_partial, "Expected some surface dipoles with fill_fraction < 1.0");
     }
 }
