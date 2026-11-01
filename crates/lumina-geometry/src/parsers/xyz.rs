@@ -91,7 +91,7 @@ mod tests {
         assert!((points[1].position[0] - 0.288).abs() < 1e-10);
     }
 
-    // ── Mackay icosahedron generator ────────────────────────────────────
+    // -- Mackay icosahedron generator ------------------------------------
 
     /// Generate Mackay icosahedron coordinates for shell number `k`.
     ///
@@ -100,10 +100,10 @@ mod tests {
     /// triangular faces of each shell, following the standard close-packed
     /// Mackay construction.
     ///
-    /// Returns positions in angstroms (Au nearest-neighbour = 2.884 Å).
+    /// Returns positions in angstroms (Au nearest-neighbour = 2.884 Angstrom).
     fn mackay_icosahedron(k: usize) -> Vec<[f64; 3]> {
-        // Au lattice constant 4.078 Å → nn distance = a/√2
-        let nn: f64 = 4.078 / std::f64::consts::SQRT_2; // ≈ 2.884 Å
+        // Au lattice constant 4.078 Angstrom -> nn distance = a/sqrt2
+        let nn: f64 = 4.078 / std::f64::consts::SQRT_2; // ~= 2.884 Angstrom
 
         // 12 vertices of a regular icosahedron (unit vectors)
         let phi: f64 = (1.0 + 5.0_f64.sqrt()) / 2.0; // golden ratio
@@ -184,12 +184,12 @@ mod tests {
     }
 
     /// Find the 30 edges of an icosahedron from its 12 vertices.
-    /// Two vertices are connected if their dot product equals 1/√5
-    /// (angular separation ≈ 63.43°, the edge angle).
+    /// Two vertices are connected if their dot product equals 1/sqrt5
+    /// (angular separation ~= 63.43deg, the edge angle).
     fn find_icosahedron_edges(vertices: &[[f64; 3]; 12]) -> Vec<[usize; 2]> {
         let mut edges = Vec::new();
         // For unit vectors on an icosahedron, connected vertices have
-        // dot product = 1/√5 ≈ 0.4472
+        // dot product = 1/sqrt5 ~= 0.4472
         let target_dot = 1.0 / 5.0_f64.sqrt();
         for i in 0..12 {
             for j in (i + 1)..12 {
@@ -241,12 +241,12 @@ mod tests {
         s
     }
 
-    // ── Tests ───────────────────────────────────────────────────────────
+    // -- Tests -----------------------------------------------------------
 
-    /// Verify Mackay atom counts: N(k) = (10k³ + 15k² + 11k + 3) / 3
+    /// Verify Mackay atom counts: N(k) = (10k^3 + 15k^2 + 11k + 3) / 3
     #[test]
     fn test_mackay_atom_counts() {
-        // Known counts: k=1→13, k=2→55, k=3→147, k=4→309, k=5→561, k=6→923
+        // Known counts: k=1->13, k=2->55, k=3->147, k=4->309, k=5->561, k=6->923
         let expected = [(1, 13), (2, 55), (3, 147), (4, 309), (5, 561), (6, 923)];
         for (k, n) in expected {
             let positions = mackay_icosahedron(k);
@@ -284,8 +284,8 @@ mod tests {
             origin
         );
 
-        // Positions are in nm (Å * 0.1)
-        let nn_nm = 4.078 / std::f64::consts::SQRT_2 * 0.1; // ≈ 0.2884 nm
+        // Positions are in nm (Angstrom * 0.1)
+        let nn_nm = 4.078 / std::f64::consts::SQRT_2 * 0.1; // ~= 0.2884 nm
         // Shell-1 vertex atoms should be at distance nn_nm from origin
         let r1 = (points[1].position[0].powi(2)
             + points[1].position[1].powi(2)

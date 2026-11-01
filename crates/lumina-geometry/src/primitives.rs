@@ -62,7 +62,7 @@ pub struct Helix {
     pub pitch: f64,
     /// Number of turns.
     pub turns: f64,
-    /// Wire radius (nm) — cross-section of the helical wire.
+    /// Wire radius (nm) -- cross-section of the helical wire.
     pub wire_radius: f64,
 }
 
@@ -173,8 +173,8 @@ impl Primitive {
                 let pv = dp[0] * v[0] + dp[1] * v[1] + dp[2] * v[2];
 
                 // Find nearest point on helix centreline by scanning parameter t
-                // The centreline is: C(t) = base + t*pitch/(2π)*ax + R*(cos(t)*u + sin(t)*v)
-                // where t ranges from 0 to 2π*turns.
+                // The centreline is: C(t) = base + t*pitch/(2pi)*ax + R*(cos(t)*u + sin(t)*v)
+                // where t ranges from 0 to 2pi*turns.
                 let t_max = 2.0 * std::f64::consts::PI * h.turns;
                 // Initial estimate from axial position
                 let t_guess = if h.pitch > 1e-15 {

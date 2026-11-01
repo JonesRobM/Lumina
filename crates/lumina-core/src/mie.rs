@@ -232,7 +232,7 @@ mod tests {
         assert!(c_abs.abs() < c_ext * 0.01, "Lossless sphere should have negligible absorption");
         assert!(
             (c_ext - c_sca).abs() / c_ext < 0.01,
-            "C_ext ≈ C_sca for lossless sphere"
+            "C_ext ~= C_sca for lossless sphere"
         );
     }
 

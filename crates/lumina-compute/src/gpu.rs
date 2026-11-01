@@ -17,7 +17,7 @@
 //! # Precision
 //!
 //! WGSL has no native f64 support, so all GPU computation uses f32 (Complex32).
-//! The f64 ↔ f32 conversion happens at the Rust boundary. This limits the
+//! The f64 <-> f32 conversion happens at the Rust boundary. This limits the
 //! GMRES residual floor to ~1e-7, which is adequate for iterative solvers
 //! where Arnoldi/Givens orthogonalisation remains in f64 on the CPU.
 //!
@@ -27,7 +27,7 @@
 //! threads (parallel wavelength sweeps) may each hold their own `GpuSession`
 //! with independent buffers. Access to the shared wgpu device and command
 //! queue is serialised through `Arc<Mutex<GpuState>>`, so GPU commands are
-//! submitted one at a time — correct and race-free.
+//! submitted one at a time -- correct and race-free.
 
 use std::borrow::Cow;
 use std::sync::{Arc, Mutex};
@@ -39,7 +39,7 @@ use wgpu;
 
 use crate::backend::{BackendType, ComputeBackend, ComputeError, DeviceInfo, MatvecSession};
 
-// ─── Shader parameters ─────────────────────────────────────────────────────
+// --- Shader parameters -----------------------------------------------------
 
 /// Uniform buffer parameters passed to the WGSL shader.
 #[repr(C)]
@@ -61,7 +61,7 @@ struct AssemblyParams {
     _pad: f32,
 }
 
-// ─── Internal state ─────────────────────────────────────────────────────────
+// --- Internal state ---------------------------------------------------------
 
 /// Internal wgpu state shared between [`GpuBackend`] and all [`GpuSession`]s.
 ///
@@ -76,7 +76,7 @@ struct GpuState {
     assembly_bg_layout: wgpu::BindGroupLayout,
 }
 
-// ─── Public types ───────────────────────────────────────────────────────────
+// --- Public types -----------------------------------------------------------
 
 /// GPU compute backend using wgpu.
 ///
@@ -110,7 +110,7 @@ pub struct GpuSession {
     state: Arc<Mutex<GpuState>>,
 }
 
-// ─── GpuBackend implementation ──────────────────────────────────────────────
+// --- GpuBackend implementation ----------------------------------------------
 
 impl GpuBackend {
     /// Create a new GPU backend asynchronously.
@@ -220,7 +220,7 @@ impl GpuBackend {
             cache: None,
         });
 
-        // ── Assembly shader pipeline ───────────────────────────────────────────
+        // -- Assembly shader pipeline -------------------------------------------
         let assembly_shader_source = include_str!("shaders/matrix_assemble.wgsl");
         let assembly_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("matrix_assemble_shader"),
@@ -360,7 +360,7 @@ impl GpuBackend {
         });
         state.queue.write_buffer(&params_buf, 0, bytemuck::bytes_of(&params));
 
-        // Pre-build the bind group — reused for every matvec in this session.
+        // Pre-build the bind group -- reused for every matvec in this session.
         let bind_group = state.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("session_bind_group"),
             layout: &state.bind_group_layout,
@@ -399,7 +399,7 @@ impl GpuBackend {
     }
 }
 
-// ─── MatvecSession for GpuSession ───────────────────────────────────────────
+// --- MatvecSession for GpuSession -------------------------------------------
 
 impl MatvecSession for GpuSession {
     /// Upload the interaction matrix to the GPU matrix buffer.
@@ -410,7 +410,7 @@ impl MatvecSession for GpuSession {
     fn upload_matrix(&self, matrix: &Array2<Complex64>) -> Result<(), ComputeError> {
         if matrix.nrows() != self.dim || matrix.ncols() != self.dim {
             return Err(ComputeError::DeviceError(format!(
-                "Session expects {}×{} matrix, got {}×{}",
+                "Session expects {}x{} matrix, got {}x{}",
                 self.dim, self.dim, matrix.nrows(), matrix.ncols()
             )));
         }
@@ -437,7 +437,7 @@ impl MatvecSession for GpuSession {
         let input_data = vector_to_f32(x);
         let vec_size = (self.dim * std::mem::size_of::<[f32; 2]>()) as u64;
 
-        // Lock for the entire GPU operation — serialises concurrent wavelength threads.
+        // Lock for the entire GPU operation -- serialises concurrent wavelength threads.
         let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
 
         // Write input vector (reuses pre-allocated buffer).
@@ -488,7 +488,7 @@ impl MatvecSession for GpuSession {
     }
 }
 
-// ─── ComputeBackend for GpuBackend ──────────────────────────────────────────
+// --- ComputeBackend for GpuBackend ------------------------------------------
 
 impl ComputeBackend for GpuBackend {
     fn device_info(&self) -> DeviceInfo {
@@ -525,7 +525,7 @@ impl ComputeBackend for GpuBackend {
 
         let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
 
-        // ── Upload positions (as vec4<f32>) ────────────────────────────────────
+        // -- Upload positions (as vec4<f32>) ------------------------------------
         let pos_data: Vec<[f32; 4]> = positions
             .iter()
             .map(|p| [p[0] as f32, p[1] as f32, p[2] as f32, 0.0f32])
@@ -539,7 +539,7 @@ impl ComputeBackend for GpuBackend {
         });
         state.queue.write_buffer(&pos_buf, 0, pos_bytes);
 
-        // ── Upload assembly params ─────────────────────────────────────────────
+        // -- Upload assembly params ---------------------------------------------
         let asm_params = AssemblyParams {
             dim: dim as u32,
             n_dipoles: n as u32,
@@ -554,7 +554,7 @@ impl ComputeBackend for GpuBackend {
         });
         state.queue.write_buffer(&asm_params_buf, 0, bytemuck::bytes_of(&asm_params));
 
-        // ── Build assembly bind group ──────────────────────────────────────────
+        // -- Build assembly bind group ------------------------------------------
         let assembly_bg = state.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("assembly_bind_group"),
             layout: &state.assembly_bg_layout,
@@ -565,7 +565,7 @@ impl ComputeBackend for GpuBackend {
             ],
         });
 
-        // ── Dispatch assembly shader ───────────────────────────────────────────
+        // -- Dispatch assembly shader -------------------------------------------
         let mut encoder = state.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("assembly_encoder"),
         });
@@ -582,16 +582,16 @@ impl ComputeBackend for GpuBackend {
         state.queue.submit(std::iter::once(encoder.finish()));
         state.device.poll(wgpu::Maintain::Wait);
 
-        // ── Patch diagonal blocks (α⁻¹ per dipole) ────────────────────────────
-        // The shader wrote zero to diagonal blocks; patch with α⁻¹ now.
-        // Each 3×3 block starts at offset (3i * dim + 3i) * sizeof(vec2<f32>).
+        // -- Patch diagonal blocks (alpha^-1 per dipole) ----------------------------
+        // The shader wrote zero to diagonal blocks; patch with alpha^-1 now.
+        // Each 3x3 block starts at offset (3i * dim + 3i) * sizeof(vec2<f32>).
         // The lock is held continuously from the assembly dispatch above so that
         // no other thread can interleave between the submit/poll and the patch.
         let elem_size = std::mem::size_of::<[f32; 2]>();
         for (i, block) in diagonal_blocks.iter().enumerate() {
             // block is [Complex64; 9] in row-major order
             let patch: Vec<[f32; 2]> = block.iter().map(|c| [c.re as f32, c.im as f32]).collect();
-            // Write each row of the 3×3 block
+            // Write each row of the 3x3 block
             for row_in_block in 0..3 {
                 let global_row = 3 * i + row_in_block;
                 let global_col_start = 3 * i;
@@ -615,7 +615,7 @@ impl ComputeBackend for GpuBackend {
         fill_fn: &(dyn Fn(usize, usize) -> Complex64 + Send + Sync),
     ) -> Result<Array2<Complex64>, ComputeError> {
         // Matrix assembly stays on CPU (Rayon). The GPU backend only accelerates
-        // matvec — assembly is branching-heavy and GPU-unfriendly.
+        // matvec -- assembly is branching-heavy and GPU-unfriendly.
         use rayon::prelude::*;
 
         let data: Vec<Complex64> = (0..rows * cols)
@@ -643,7 +643,7 @@ impl ComputeBackend for GpuBackend {
         let dim = matrix.nrows();
         if dim != matrix.ncols() || dim != vector.len() {
             return Err(ComputeError::DeviceError(format!(
-                "Dimension mismatch: matrix {}×{}, vector {}",
+                "Dimension mismatch: matrix {}x{}, vector {}",
                 matrix.nrows(),
                 matrix.ncols(),
                 vector.len()
@@ -655,7 +655,7 @@ impl ComputeBackend for GpuBackend {
     }
 }
 
-// ─── Conversion helpers ─────────────────────────────────────────────────────
+// --- Conversion helpers -----------------------------------------------------
 
 /// Convert a Complex64 matrix to flat `[f32; 2]` pairs in row-major order.
 fn matrix_to_f32(matrix: &Array2<Complex64>) -> Vec<[f32; 2]> {
@@ -685,7 +685,7 @@ fn f32_to_vector(data: &[[f32; 2]], dim: usize) -> Array1<Complex64> {
     )
 }
 
-// ─── Tests ──────────────────────────────────────────────────────────────────
+// --- Tests ------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -782,10 +782,10 @@ mod tests {
         let expected_norm: f64 = expected.iter().map(|c| c.norm_sqr()).sum::<f64>().sqrt();
         let max_err = (0..dim).map(|i| (result[i] - expected[i]).norm()).fold(0.0_f64, f64::max);
         let rel_err = max_err / expected_norm;
-        assert!(rel_err < 1e-4, "300×300 matvec rel_err={:.2e}", rel_err);
+        assert!(rel_err < 1e-4, "300x300 matvec rel_err={:.2e}", rel_err);
     }
 
-    // ─── New session tests ───────────────────────────────────────────────
+    // --- New session tests -----------------------------------------------
 
     /// Session matvec must match CPU reference to within f32 precision floor.
     #[test]
@@ -962,7 +962,7 @@ mod tests {
 
         let n = 3;
         let dim = 9;
-        // Place dipoles 1000 nm apart so G(r_i, r_j) ≈ 0 — diagonal blocks dominate.
+        // Place dipoles 1000 nm apart so G(r_i, r_j) ~= 0 -- diagonal blocks dominate.
         let positions: Vec<[f64; 3]> = vec![[0.0, 0.0, 0.0], [1000.0, 0.0, 0.0], [2000.0, 0.0, 0.0]];
         let k = 2.0 * std::f64::consts::PI / 600.0_f64;
 
@@ -978,8 +978,8 @@ mod tests {
             _ => { println!("Skipping: GPU assembly not available"); return; }
         };
 
-        // Directly verify each diagonal 3×3 block by applying basis vectors e_{3i+a}.
-        // For widely separated dipoles, A[3i+b, 3i+a] ≈ inv_pol[b*3+a] and all
+        // Directly verify each diagonal 3x3 block by applying basis vectors e_{3i+a}.
+        // For widely separated dipoles, A[3i+b, 3i+a] ~= inv_pol[b*3+a] and all
         // off-diagonal block contributions are negligible (|G| ~ 1e-6 at 1000 nm).
         for i in 0..n {
             for a in 0..3_usize {
@@ -1001,7 +1001,7 @@ mod tests {
         }
     }
 
-    /// N=1 (single dipole, 3×3 matrix) does not panic.
+    /// N=1 (single dipole, 3x3 matrix) does not panic.
     #[test]
     fn test_gpu_assembly_n1_edge_case() {
         let gpu = match try_gpu() {
@@ -1031,7 +1031,7 @@ mod tests {
         }
     }
 
-    /// Parallel wavelength threads each get their own session — no panics, results match CPU.
+    /// Parallel wavelength threads each get their own session -- no panics, results match CPU.
     #[test]
     fn test_parallel_wavelengths_gpu() {
         use std::sync::Arc;

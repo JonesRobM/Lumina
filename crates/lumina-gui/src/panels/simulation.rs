@@ -10,7 +10,7 @@ pub enum IncidentPolarisation {
     X,
     /// y-polarised.
     Y,
-    /// z-propagating, circular (used for CD — internally runs x + y separately).
+    /// z-propagating, circular (used for CD -- internally runs x + y separately).
     Circular,
 }
 
@@ -45,27 +45,27 @@ pub struct SimulationPanel {
     pub substrate_material: String,
     /// Whether to compute the SHG spectrum.
     pub enable_shg: bool,
-    /// χ^(2) symmetry class applied to every dipole.
+    /// chi^(2) symmetry class applied to every dipole.
     pub shg_symmetry: String,
-    /// χ_zzz real part (nm³).
+    /// chi_zzz real part (nm^3).
     pub chi_zzz_re: f64,
-    /// χ_zzz imaginary part (nm³).
+    /// chi_zzz imaginary part (nm^3).
     pub chi_zzz_im: f64,
-    /// χ_zxx real part (nm³).
+    /// chi_zxx real part (nm^3).
     pub chi_zxx_re: f64,
-    /// χ_zxx imaginary part (nm³).
+    /// chi_zxx imaginary part (nm^3).
     pub chi_zxx_im: f64,
     /// Whether to compute the THG spectrum.
     pub enable_thg: bool,
-    /// χ^(3) symmetry class applied to every dipole.
+    /// chi^(3) symmetry class applied to every dipole.
     pub thg_symmetry: String,
-    /// χ_xxxx real part (nm⁶).
+    /// chi_xxxx real part (nm^6).
     pub chi3_xxxx_re: f64,
-    /// χ_xxxx imaginary part (nm⁶).
+    /// chi_xxxx imaginary part (nm^6).
     pub chi3_xxxx_im: f64,
-    /// χ_xxyy real part (nm⁶).
+    /// chi_xxyy real part (nm^6).
     pub chi3_xxyy_re: f64,
-    /// χ_xxyy imaginary part (nm⁶).
+    /// chi_xxyy imaginary part (nm^6).
     pub chi3_xxyy_im: f64,
     /// Whether to show debug-level output during simulation.
     pub debug_output: bool,
@@ -196,7 +196,7 @@ impl SimulationPanel {
 
         // CD checkbox (only meaningful with circular or combined runs)
         ui.horizontal(|ui| {
-            ui.checkbox(&mut self.compute_cd, "Compute circular dichroism (ΔC_ext)");
+            ui.checkbox(&mut self.compute_cd, "Compute circular dichroism (DeltaC_ext)");
         });
         if self.compute_cd {
             ui.label(
@@ -366,7 +366,7 @@ impl SimulationPanel {
         });
         if self.debug_output {
             ui.label(
-                egui::RichText::new("  Shows per-wavelength timing, matrix size, ε values.")
+                egui::RichText::new("  Shows per-wavelength timing, matrix size, eps values.")
                     .weak()
                     .small(),
             );

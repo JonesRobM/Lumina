@@ -31,8 +31,8 @@ pub struct LatticeSpec {
     pub a1: [f64; 3],
     /// Second lattice vector in nm. `None` for 1D chains.
     pub a2: Option<[f64; 3]>,
-    /// Ewald splitting parameter η (nm⁻¹). Auto-computed from cell geometry
-    /// if not supplied: η = √(π / A_cell) for 2D, √(π / |a₁|) for 1D.
+    /// Ewald splitting parameter eta (nm^-1). Auto-computed from cell geometry
+    /// if not supplied: eta = sqrt(pi / A_cell) for 2D, sqrt(pi / |a1|) for 1D.
     #[serde(default)]
     pub ewald_eta: Option<f64>,
     /// Number of real-space shells to sum over (default 5).
@@ -71,11 +71,11 @@ impl LatticeSpec {
         self.a2.is_some()
     }
 
-    /// Unit cell area (nm²) for 2D, or |a₁| (nm) for 1D.
+    /// Unit cell area (nm^2) for 2D, or |a1| (nm) for 1D.
     pub fn cell_measure(&self) -> f64 {
         match self.a2 {
             Some(a2) => {
-                // |a1 × a2|  (z-component for xy-plane lattice)
+                // |a1 x a2|  (z-component for xy-plane lattice)
                 let cx = self.a1[1] * a2[2] - self.a1[2] * a2[1];
                 let cy = self.a1[2] * a2[0] - self.a1[0] * a2[2];
                 let cz = self.a1[0] * a2[1] - self.a1[1] * a2[0];
@@ -88,11 +88,11 @@ impl LatticeSpec {
         }
     }
 
-    /// Optimal Ewald splitting parameter η (nm⁻¹).
+    /// Optimal Ewald splitting parameter eta (nm^-1).
     ///
     /// Uses the supplied value if set, otherwise auto-computes:
-    /// - 2D: η = √(π / A_cell)
-    /// - 1D: η = √(π / |a₁|)
+    /// - 2D: eta = sqrt(pi / A_cell)
+    /// - 1D: eta = sqrt(pi / |a1|)
     pub fn eta(&self) -> f64 {
         if let Some(eta) = self.ewald_eta {
             return eta;
@@ -103,11 +103,11 @@ impl LatticeSpec {
 
     /// Reciprocal lattice vectors for a 2D planar array.
     ///
-    /// For lattice vectors **a₁**, **a₂** in the xy plane, the reciprocal
-    /// vectors satisfy **b**ᵢ · **a**ⱼ = 2π δᵢⱼ:
+    /// For lattice vectors **a1**, **a2** in the xy plane, the reciprocal
+    /// vectors satisfy **b**_i * **a**_j = 2pi delta_i_j:
     ///
-    /// **b₁** = 2π (**a₂ × ẑ**) / (**a₁ · (a₂ × ẑ)**)
-    /// **b₂** = 2π (**ẑ × a₁**) / (**a₂ · (ẑ × a₁)**)
+    /// **b1** = 2pi (**a2 x z_hat**) / (**a1 * (a2 x z_hat)**)
+    /// **b2** = 2pi (**z_hat x a1**) / (**a2 * (z_hat x a1)**)
     ///
     /// Returns `None` for 1D lattices.
     pub fn reciprocal_vectors(&self) -> Option<([f64; 3], [f64; 3])> {
@@ -115,15 +115,15 @@ impl LatticeSpec {
         let a1 = self.a1;
         let two_pi = 2.0 * std::f64::consts::PI;
 
-        // Cross product a1 × a2 to get the area normal
+        // Cross product a1 x a2 to get the area normal
         let cx = a1[1] * a2[2] - a1[2] * a2[1];
         let cy = a1[2] * a2[0] - a1[0] * a2[2];
         let cz = a1[0] * a2[1] - a1[1] * a2[0];
         let area = (cx * cx + cy * cy + cz * cz).sqrt();
 
-        // b1 = 2π (a2 × ẑ) / (a1 · (a2 × ẑ))
-        // For a lattice in xy: ẑ = [0,0,1]
-        // a2 × ẑ = [a2y, -a2x, 0]
+        // b1 = 2pi (a2 x z_hat) / (a1 * (a2 x z_hat))
+        // For a lattice in xy: z_hat = [0,0,1]
+        // a2 x z_hat = [a2y, -a2x, 0]
         let a2_x_z = [a2[1], -a2[0], 0.0];
         let denom1 = a1[0] * a2_x_z[0] + a1[1] * a2_x_z[1];
         let b1 = [
@@ -132,8 +132,8 @@ impl LatticeSpec {
             0.0,
         ];
 
-        // b2 = 2π (ẑ × a1) / (a2 · (ẑ × a1))
-        // ẑ × a1 = [-a1y, a1x, 0]
+        // b2 = 2pi (z_hat x a1) / (a2 * (z_hat x a1))
+        // z_hat x a1 = [-a1y, a1x, 0]
         let z_x_a1 = [-a1[1], a1[0], 0.0];
         let denom2 = a2[0] * z_x_a1[0] + a2[1] * z_x_a1[1];
         let b2 = [
@@ -148,7 +148,7 @@ impl LatticeSpec {
 
     /// Reciprocal lattice vector for a 1D chain.
     ///
-    /// Returns **b₁** = 2π **a₁** / |**a₁**|²
+    /// Returns **b1** = 2pi **a1** / |**a1**|^2
     /// Returns `None` for 2D lattices.
     pub fn reciprocal_vector_1d(&self) -> Option<[f64; 3]> {
         if self.a2.is_some() {
@@ -162,9 +162,9 @@ impl LatticeSpec {
 
     /// Generate the real-space lattice points within `n_shells` shells.
     ///
-    /// For 2D: returns all **R** = m₁**a₁** + m₂**a₂** with |m₁|,|m₂| ≤ n_shells.
-    /// For 1D: returns all **R** = m₁**a₁** with |m₁| ≤ n_shells.
-    /// The origin (m₁ = m₂ = 0) **is** included (caller filters it if needed).
+    /// For 2D: returns all **R** = m1**a1** + m2**a2** with |m1|,|m2| <= n_shells.
+    /// For 1D: returns all **R** = m1**a1** with |m1| <= n_shells.
+    /// The origin (m1 = m2 = 0) **is** included (caller filters it if needed).
     pub fn real_lattice_points(&self, n_shells: usize) -> Vec<[f64; 3]> {
         let ns = n_shells as i64;
         match self.a2 {
@@ -197,8 +197,8 @@ impl LatticeSpec {
 
     /// Generate the reciprocal-space lattice points within `n_shells` shells.
     ///
-    /// For 2D: returns all **G** = n₁**b₁** + n₂**b₂** with |n₁|,|n₂| ≤ n_shells.
-    /// For 1D: returns all **G** = n₁**b₁** with |n₁| ≤ n_shells.
+    /// For 2D: returns all **G** = n1**b1** + n2**b2** with |n1|,|n2| <= n_shells.
+    /// For 1D: returns all **G** = n1**b1** with |n1| <= n_shells.
     /// The origin **is** included.
     pub fn recip_lattice_points(&self, n_shells: usize) -> Vec<[f64; 3]> {
         let ns = n_shells as i64;

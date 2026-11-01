@@ -7,9 +7,9 @@
 Lumina bridges the gap between ab initio material properties and macroscopic electromagnetic observables. Given a nanostructure geometry and its material properties, it computes:
 
 - **Extinction, absorption, and scattering cross-sections** as a function of wavelength.
-- **SHG and THG spectra** — self-consistent second- and third-harmonic generation via χ^(2) and χ^(3) tensors.
+- **SHG and THG spectra** -- self-consistent second- and third-harmonic generation via chi^(2) and chi^(3) tensors.
 - **Near-field intensity maps** showing the electric field enhancement around the structure.
-- **Far-field radiation patterns** at ω, 2ω, and 3ω.
+- **Far-field radiation patterns** at omega, 2omega, and 3omega.
 - **Circular dichroism** (differential extinction for left/right circularly polarised light).
 - **Dipole moment distributions** for detailed analysis of the optical response.
 
@@ -21,9 +21,9 @@ Lumina bridges the gap between ab initio material properties and macroscopic ele
 
 ## Key Features
 
-- **Modular solver architecture** — the CDA is the first solver; future methods (BEM, FDTD, T-matrix) plug in via the same trait.
-- **GPU acceleration** — matrix-vector products offload to the GPU via wgpu compute shaders, with automatic CPU fallback.
-- **GMRES iterative solver** — matrix-free GMRES(m) with Rayon-parallel matrix assembly for systems with thousands of dipoles.
-- **Interactive GUI** — real-time parameter sweeping and visualisation with spectra, near-field heatmaps, and far-field polar plots.
-- **HPC-ready CLI** — headless operation via TOML configuration files with JSON and CSV export.
-- **Extensible materials** — tabulated data (Johnson & Christy Au/Ag/Cu, Palik TiO\\(_2\\)/SiO\\(_2\\)), cubic spline interpolation, and custom dielectrics.
+- **Modular solver architecture** -- the CDA is the first solver; future methods (BEM, FDTD, T-matrix) plug in via the same trait.
+- **GPU acceleration** -- matrix-vector products offload to the GPU via wgpu compute shaders, with automatic CPU fallback.
+- **GMRES iterative solver** -- matrix-free GMRES(m) with Rayon-parallel matrix assembly for systems with thousands of dipoles.
+- **Interactive GUI** -- real-time parameter sweeping and visualisation with spectra, near-field heatmaps, and far-field polar plots.
+- **HPC-ready CLI** -- headless operation via TOML configuration files with JSON and CSV export.
+- **Extensible materials** -- tabulated data (Johnson & Christy Au/Ag/Cu, Palik TiO\\(_2\\)/SiO\\(_2\\)), cubic spline interpolation, and custom dielectrics.

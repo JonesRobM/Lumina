@@ -1,7 +1,7 @@
 //! Core message and event types for the chat client.
 //!
 //! Note: `ChatTask` (the internal worker task) lives in `client.rs` because it
-//! depends on `ChatConfig` — keeping it there avoids a circular module dependency.
+//! depends on `ChatConfig` -- keeping it there avoids a circular module dependency.
 
 /// Role of a message participant. Serialised to lowercase for the OpenAI wire format.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

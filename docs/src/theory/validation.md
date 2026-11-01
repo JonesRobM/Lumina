@@ -20,7 +20,7 @@ For the standard test case (\\(R = 10\\) nm, \\(d = 3\\) nm), \\(N \approx 170\\
 
 ### Material Data
 
-Gold optical constants are taken from Johnson & Christy (1972), covering 188–892 nm (43 data points). The tabulated \\((n, k)\\) values are converted to the complex dielectric function:
+Gold optical constants are taken from Johnson & Christy (1972), covering 188-892 nm (43 data points). The tabulated \\((n, k)\\) values are converted to the complex dielectric function:
 
 \\[
 \epsilon_1 = n^2 - k^2, \qquad \epsilon_2 = 2nk
@@ -46,16 +46,16 @@ A dielectric sphere (\\(R = 10\\) nm, \\(d = 3\\) nm, \\(N \approx 170\\)) is te
 
 | Material | \\(\epsilon\\) | \\(\lambda\\) (nm) | CDA \\(C_{\text{ext}}\\) | Mie \\(C_{\text{ext}}\\) | Error |
 |----------|---------------|---------------------|--------------------------|--------------------------|-------|
-| TiO\\(_2\\)-like | \\(4.0 + 0.0i\\) | 500, 600, 700 | — | — | \\(\lesssim 15\%\\) |
-| Lossy dielectric | \\(4.0 + 0.5i\\) | 500, 600, 700 | — | — | \\(\lesssim 15\%\\) |
-| High-index lossy | \\(6.0 + 1.0i\\) | 500, 600, 700 | — | — | \\(\lesssim 15\%\\) |
-| Near resonance | \\(-1.0 + 3.0i\\) | 500, 600, 700 | — | — | \\(\lesssim 13\%\\) |
+| TiO\\(_2\\)-like | \\(4.0 + 0.0i\\) | 500, 600, 700 | -- | -- | \\(\lesssim 15\%\\) |
+| Lossy dielectric | \\(4.0 + 0.5i\\) | 500, 600, 700 | -- | -- | \\(\lesssim 15\%\\) |
+| High-index lossy | \\(6.0 + 1.0i\\) | 500, 600, 700 | -- | -- | \\(\lesssim 15\%\\) |
+| Near resonance | \\(-1.0 + 3.0i\\) | 500, 600, 700 | -- | -- | \\(\lesssim 13\%\\) |
 
 Finer discretisation (\\(d \leq 2\\) nm) reduces errors to \\(<5\%\\) for all dielectric cases.
 
-### Gold Sphere — Interband Region
+### Gold Sphere -- Interband Region
 
-Gold in the interband region (400–520 nm) has large \\(\epsilon_2\\), giving moderate \\(|\epsilon_1|/\epsilon_2\\) ratios. The CDA is well-behaved here.
+Gold in the interband region (400-520 nm) has large \\(\epsilon_2\\), giving moderate \\(|\epsilon_1|/\epsilon_2\\) ratios. The CDA is well-behaved here.
 
 | \\(\lambda\\) (nm) | \\(\epsilon_1\\) | \\(\epsilon_2\\) | \\(|\epsilon_1|/\epsilon_2\\) | CDA Error |
 |---------------------|-----------------|-----------------|-------------------------------|-----------|
@@ -66,7 +66,7 @@ Gold in the interband region (400–520 nm) has large \\(\epsilon_2\\), giving m
 
 All pass the 30% tolerance threshold at \\(d = 3\\) nm.
 
-### Gold Sphere — Drude Region (Known Limitation)
+### Gold Sphere -- Drude Region (Known Limitation)
 
 At wavelengths above \\(\sim 550\\) nm, gold enters the Drude regime where \\(|\epsilon_1| \gg \epsilon_2\\). The CDA with RRCM fails to converge for these cases:
 
@@ -84,10 +84,10 @@ For a dielectric sphere (\\(\epsilon = 4.0 + 0.5i\\), \\(R = 8\\) nm, \\(\lambda
 
 | Spacing \\(d\\) (nm) | \\(N\\) | CDA \\(C_{\text{ext}}\\) | Mie \\(C_{\text{ext}}\\) | Error |
 |-----------------------|--------|--------------------------|--------------------------|-------|
-| 4.0 | \\(\sim 30\\) | — | — | \\(\sim 10\%\\) |
-| 3.0 | \\(\sim 80\\) | — | — | \\(\sim 5\%\\) |
-| 2.5 | \\(\sim 120\\) | — | — | \\(\sim 3\%\\) |
-| 2.0 | \\(\sim 260\\) | — | — | \\(\sim 1.5\%\\) |
+| 4.0 | \\(\sim 30\\) | -- | -- | \\(\sim 10\%\\) |
+| 3.0 | \\(\sim 80\\) | -- | -- | \\(\sim 5\%\\) |
+| 2.5 | \\(\sim 120\\) | -- | -- | \\(\sim 3\%\\) |
+| 2.0 | \\(\sim 260\\) | -- | -- | \\(\sim 1.5\%\\) |
 
 For metallic particles (\\(\epsilon = -10 + 1.5i\\)), convergence is non-monotonic and the errors remain large (\\(> 50\%\\)) even at \\(d = 1.5\\) nm with \\(N \approx 600\\) dipoles. This is characteristic of the staircase surface artefact described below.
 
@@ -107,7 +107,7 @@ This smooths the \\(1/R^3\\) near-field singularity that amplifies surface stair
 
 v0.1.1 also adds a restarted GMRES(m) solver for systems with \\(N > 1000\\) dipoles, enabling finer discretisation. GMRES agrees with the direct LU solver to machine precision (\\(\sim 10^{-13}\\) relative error) and is activated automatically when \\(N\\) exceeds the iterative threshold (default 1000).
 
-### FCD Results — Gold Sphere
+### FCD Results -- Gold Sphere
 
 The FCD method with \\(d = 2\\) nm (\\(N \approx 515\\) dipoles) shows improved accuracy in the interband region compared to the standard point-dipole CDA:
 
@@ -119,7 +119,7 @@ The FCD method with \\(d = 2\\) nm (\\(N \approx 515\\) dipoles) shows improved 
 | 550 | \\(-5.93\\) | \\(2.10\\) | 2.8 | \\(\sim 50\%\\) | \\(\sim 81\%\\) |
 | 600 | \\(-9.42\\) | \\(1.50\\) | 6.3 | \\(> 100\%\\) | \\(\sim 112\%\\) |
 
-The FCD provides a meaningful improvement (\\(5\text{–}10\\) percentage points) in the interband region (\\(|\epsilon_1|/\epsilon_2 < 3\\)). However, in the Drude region (\\(|\epsilon_1|/\epsilon_2 > 5\\)), the errors remain large. This confirms that the staircase artefact is not fully resolved by volume-averaging alone — future releases will investigate surface averaging and smooth boundary representations.
+The FCD provides a meaningful improvement (\\(5\text{-}10\\) percentage points) in the interband region (\\(|\epsilon_1|/\epsilon_2 < 3\\)). However, in the Drude region (\\(|\epsilon_1|/\epsilon_2 > 5\\)), the errors remain large. This confirms that the staircase artefact is not fully resolved by volume-averaging alone -- future releases will investigate surface averaging and smooth boundary representations.
 
 ### Geometry Completions
 
@@ -147,15 +147,15 @@ The CDA with RRCM is reliable when the metallicity ratio \\(|\epsilon_1|/\epsilo
 | \\(|\epsilon_1|/\epsilon_2\\) | Accuracy | Example |
 |-------------------------------|----------|---------|
 | \\(< 1\\) | Excellent (\\(< 15\%\\)) | Dielectrics, Au at 420 nm |
-| \\(1 \text{–} 3\\) | Good (\\(15\text{–}30\%\\)) | Au at 510 nm |
-| \\(3 \text{–} 5\\) | Fair (\\(30\text{–}50\%\\)) | Au at 550 nm |
+| \\(1 \text{-} 3\\) | Good (\\(15\text{-}30\%\\)) | Au at 510 nm |
+| \\(3 \text{-} 5\\) | Fair (\\(30\text{-}50\%\\)) | Au at 550 nm |
 | \\(> 5\\) | Poor (\\(> 100\%\\)) | Au at 600+ nm, Ag in the UV |
 
 ### Mitigation Strategies
 
 The following improvements address the staircase limitation:
 
-- **Filtered Coupled Dipole (FCD)** (v0.1.1): Replaces the free-space Green's function with a volume-averaged version for near-field interactions, reducing errors by 5–10 percentage points in the interband region.
+- **Filtered Coupled Dipole (FCD)** (v0.1.1): Replaces the free-space Green's function with a volume-averaged version for near-field interactions, reducing errors by 5-10 percentage points in the interband region.
 - **GMRES iterative solver** (v0.1.1): Enables finer discretisation (\\(N > 10^4\\)) that partially compensates for the staircase.
 - **GPU-accelerated GMRES** (v0.2.0): Makes large-N computations practical by offloading the matvec to the GPU.
 - **Surface averaging** (planned, v0.2.1+): Assigns reduced polarisabilities to dipoles that partially overlap the surface boundary.
@@ -200,11 +200,11 @@ GMRES solutions computed with GPU matvec (f32) vs CPU matvec (f64) agree to:
 | 1 000 | \\(1.3 \times 10^{-6}\\) |
 | 3 000 | \\(1.9 \times 10^{-6}\\) |
 
-For CDA applications where the discretisation error is typically 5–25%, the f32 precision is more than adequate. The GPU GMRES tolerance should be set to \\(\geq 10^{-6}\\) (the default).
+For CDA applications where the discretisation error is typically 5-25%, the f32 precision is more than adequate. The GPU GMRES tolerance should be set to \\(\geq 10^{-6}\\) (the default).
 
 ### Rayon-Parallel Assembly
 
-v0.2.0 parallelises the off-diagonal Green's tensor computation using Rayon `par_iter`. The assembled matrix is bit-identical to the sequential version — parallelism does not affect numerical results.
+v0.2.0 parallelises the off-diagonal Green's tensor computation using Rayon `par_iter`. The assembled matrix is bit-identical to the sequential version -- parallelism does not affect numerical results.
 
 ## Test Suite
 
@@ -222,21 +222,21 @@ cargo test --workspace --exclude lumina-gui --features gpu
 
 Three integration tests:
 
-1. **`test_cda_vs_mie_gold_sphere`** — Validates CDA against Mie theory for a gold sphere (\\(R = 10\\) nm, \\(d = 3\\) nm) at four wavelengths in the interband region (420–510 nm). Tolerance: 30%.
+1. **`test_cda_vs_mie_gold_sphere`** -- Validates CDA against Mie theory for a gold sphere (\\(R = 10\\) nm, \\(d = 3\\) nm) at four wavelengths in the interband region (420-510 nm). Tolerance: 30%.
 
-2. **`test_cda_vs_mie_dielectric_sphere`** — Validates CDA against Mie theory for a dielectric sphere with four different \\(\epsilon\\) values at three wavelengths (500–700 nm). Tolerance: 30%.
+2. **`test_cda_vs_mie_dielectric_sphere`** -- Validates CDA against Mie theory for a dielectric sphere with four different \\(\epsilon\\) values at three wavelengths (500-700 nm). Tolerance: 30%.
 
-3. **`test_finer_discretisation_improves_accuracy`** — Confirms that refining the lattice spacing from 4 nm to 2 nm monotonically reduces the CDA error for a dielectric sphere (\\(\epsilon = 4.0 + 0.5i\\), \\(R = 8\\) nm).
+3. **`test_finer_discretisation_improves_accuracy`** -- Confirms that refining the lattice spacing from 4 nm to 2 nm monotonically reduces the CDA error for a dielectric sphere (\\(\epsilon = 4.0 + 0.5i\\), \\(R = 8\\) nm).
 
 ### `cda_diagnostic.rs`
 
 Diagnostic tests for debugging and characterisation:
 
-1. **Single-dipole Rayleigh limit** — Verifies exact agreement with Mie theory for a single dipole (zero CDA error).
+1. **Single-dipole Rayleigh limit** -- Verifies exact agreement with Mie theory for a single dipole (zero CDA error).
 
-2. **Dielectric sphere** — Tests a well-conditioned dielectric case (\\(\epsilon = 4.0 + 0.5i\\)) where the CDA should converge.
+2. **Dielectric sphere** -- Tests a well-conditioned dielectric case (\\(\epsilon = 4.0 + 0.5i\\)) where the CDA should converge.
 
-3. **Metallic progression** — Sweeps \\(|\epsilon_1|/\epsilon_2\\) from 2 to 10, demonstrating the systematic increase in CDA error for increasingly metallic particles.
+3. **Metallic progression** -- Sweeps \\(|\epsilon_1|/\epsilon_2\\) from 2 to 10, demonstrating the systematic increase in CDA error for increasingly metallic particles.
 
 ### `cda_convergence.rs`
 
@@ -246,8 +246,8 @@ Convergence comparison between RRCM and LDR polarisability prescriptions for die
 
 GPU vs CPU performance and correctness benchmark (requires `--features gpu`):
 
-1. **Matvec benchmark** — compares CPU and GPU matvec speed and verifies results agree within f32 tolerance at N = 300, 1000, 3000.
-2. **GMRES benchmark** — compares full GMRES solve on CPU (f64, tol=\\(10^{-10}\\)) vs GPU (f32, tol=\\(10^{-6}\\)) and verifies solution agreement.
+1. **Matvec benchmark** -- compares CPU and GPU matvec speed and verifies results agree within f32 tolerance at N = 300, 1000, 3000.
+2. **GMRES benchmark** -- compares full GMRES solve on CPU (f64, tol=\\(10^{-10}\\)) vs GPU (f32, tol=\\(10^{-6}\\)) and verifies solution agreement.
 
 Run with timing output:
 

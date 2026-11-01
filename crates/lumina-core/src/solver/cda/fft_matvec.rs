@@ -2,8 +2,8 @@
 //!
 //! When dipoles lie on a regular cubic grid and no periodic BC, substrate,
 //! or FCD corrections are active, the interaction matrix is 3-level block-
-//! Toeplitz. Embedding in a (2Nx × 2Ny × 2Nz) circulant reduces the matvec
-//! from O(N²) to O(N log N) via 3D FFT convolution.
+//! Toeplitz. Embedding in a (2Nx x 2Ny x 2Nz) circulant reduces the matvec
+//! from O(N^2) to O(N log N) via 3D FFT convolution.
 
 use ndarray::{Array1, ArrayView1};
 use num_complex::Complex64;
@@ -21,7 +21,7 @@ pub fn detect_regular_grid(dipoles: &[Dipole], cell_size: f64) -> Option<(usize,
         return None;
     }
 
-    // Single dipole: direct solver handles N≤iterative_threshold; FFT path
+    // Single dipole: direct solver handles N<=iterative_threshold; FFT path
     // is unreachable in normal operation, but return None to be safe.
     if dipoles.len() == 1 {
         return None;
@@ -65,7 +65,7 @@ pub fn detect_regular_grid(dipoles: &[Dipole], cell_size: f64) -> Option<(usize,
 
     // Every grid node must be occupied; sparse geometries (spheres, cylinders,
     // shells) have dipoles aligned to a regular spacing but missing interior
-    // nodes — the block-Toeplitz structure breaks for non-full grids.
+    // nodes -- the block-Toeplitz structure breaks for non-full grids.
     if dipoles.len() != nx * ny * nz {
         return None;
     }
@@ -78,10 +78,10 @@ pub struct FftMatvecPlan {
     nx: usize,
     ny: usize,
     nz: usize,
-    /// Flat index into the (2Nx × 2Ny × 2Nz) padded grid for each dipole.
+    /// Flat index into the (2Nx x 2Ny x 2Nz) padded grid for each dipole.
     grid_index: Vec<usize>,
-    /// Precomputed FFT of 9 kernel components G_αβ (α,β ∈ {0,1,2}).
-    /// Shape: 9 × fft_len where fft_len = 2Nx · 2Ny · 2Nz.
+    /// Precomputed FFT of 9 kernel components G_alphabeta (alpha,beta in {0,1,2}).
+    /// Shape: 9 x fft_len where fft_len = 2Nx * 2Ny * 2Nz.
     kernel_fft: Vec<Vec<Complex64>>,
     fft_len: usize,
     fft_x: std::sync::Arc<dyn rustfft::Fft<f64>>,
@@ -187,16 +187,16 @@ impl FftMatvecPlan {
         })
     }
 
-    /// Compute the matrix-vector product A·x using FFT convolution.
+    /// Compute the matrix-vector product A*x using FFT convolution.
     ///
-    /// A = α⁻¹ (diagonal) − G (off-diagonal), so:
-    /// - Diagonal contribution: α⁻¹·x per dipole.
-    /// - Off-diagonal contribution: subtract FFT-convolution result (G·x).
+    /// A = alpha^-1 (diagonal) - G (off-diagonal), so:
+    /// - Diagonal contribution: alpha^-1*x per dipole.
+    /// - Off-diagonal contribution: subtract FFT-convolution result (G*x).
     pub fn matvec(&self, dipoles: &[Dipole], x: ArrayView1<Complex64>) -> Array1<Complex64> {
         let n = dipoles.len();
         let mut y = Array1::<Complex64>::zeros(3 * n);
 
-        // ── Diagonal: α⁻¹ · x ──────────────────────────────────────────────
+        // -- Diagonal: alpha^-1 * x ----------------------------------------------
         for i in 0..n {
             let inv_alpha = invert_3x3_pub(&dipoles[i].polarisability);
             for a in 0..3 {
@@ -206,20 +206,20 @@ impl FftMatvecPlan {
             }
         }
 
-        // ── Off-diagonal: −G·x via FFT convolution ─────────────────────────
-        // For each source component β, scatter x into buffer, FFT, multiply
-        // with each kernel row α, accumulate, IFFT, gather.
+        // -- Off-diagonal: -G*x via FFT convolution -------------------------
+        // For each source component beta, scatter x into buffer, FFT, multiply
+        // with each kernel row alpha, accumulate, IFFT, gather.
         let pad_ny = 2 * self.ny;
         let pad_nz = 2 * self.nz;
 
-        // Accumulators for each output component α (in frequency domain).
+        // Accumulators for each output component alpha (in frequency domain).
         // We accumulate pointwise multiplications before doing inverse FFT.
         let mut acc: Vec<Vec<Complex64>> = vec![
             vec![Complex64::new(0.0f64, 0.0f64); self.fft_len]; 3
         ];
 
         for beta in 0..3usize {
-            // Scatter: place x[3j+β] at grid position of dipole j.
+            // Scatter: place x[3j+beta] at grid position of dipole j.
             let mut buf: Vec<Complex64> =
                 vec![Complex64::new(0.0f64, 0.0f64); self.fft_len];
 
@@ -231,7 +231,7 @@ impl FftMatvecPlan {
             // Forward FFT of the scattered input.
             fft3d_forward(&mut buf, 2 * self.nx, pad_ny, pad_nz, self.fft_x.as_ref(), self.fft_y.as_ref(), self.fft_z.as_ref());
 
-            // Accumulate into each output component α.
+            // Accumulate into each output component alpha.
             for alpha in 0..3usize {
                 let k_fft = &self.kernel_fft[alpha * 3 + beta];
                 for idx in 0..self.fft_len {
@@ -246,7 +246,7 @@ impl FftMatvecPlan {
         for alpha in 0..3usize {
             fft3d_inverse(&mut acc[alpha], 2 * self.nx, pad_ny, pad_nz, self.ifft_x.as_ref(), self.ifft_y.as_ref(), self.ifft_z.as_ref());
 
-            // Gather: subtract (A = α⁻¹ − G, so off-diagonal part is −G).
+            // Gather: subtract (A = alpha^-1 - G, so off-diagonal part is -G).
             for i in 0..n {
                 let gathered = acc[alpha][self.grid_index[i]];
                 let val = Complex64::new(gathered.re * norm, gathered.im * norm);
@@ -386,11 +386,12 @@ mod tests {
         let zero = Complex64::from(0.0);
         Dipole {
             position: pos,
+            cell_size: 2.0,
             polarisability: [alpha, zero, zero, zero, alpha, zero, zero, zero, alpha],
         }
     }
 
-    /// Build an N×N×N regular cubic grid of dipoles with the given spacing.
+    /// Build an NxNxN regular cubic grid of dipoles with the given spacing.
     fn make_grid(n: usize, spacing: f64, alpha: Complex64) -> Vec<Dipole> {
         let mut dipoles = Vec::with_capacity(n * n * n);
         for i in 0..n {
@@ -437,7 +438,7 @@ mod tests {
         let n = dipoles.len(); // 125
 
         let plan = FftMatvecPlan::try_build(&dipoles, spacing, k)
-            .expect("5×5×5 regular grid should build a plan");
+            .expect("5x5x5 regular grid should build a plan");
 
         // Build a deterministic test vector.
         let x: Array1<Complex64> = Array1::from_iter((0..3 * n).map(|i| {
@@ -454,7 +455,6 @@ mod tests {
             &x,
             k,
             false,
-            spacing,
             None,
             [0.0; 3],
             None,
@@ -472,7 +472,7 @@ mod tests {
         let rel_err = diff_norm / ref_norm;
         assert!(
             rel_err < 1e-10,
-            "FFT matvec relative error {:.2e} exceeds 1e-10 for 5×5×5 grid",
+            "FFT matvec relative error {:.2e} exceeds 1e-10 for 5x5x5 grid",
             rel_err
         );
     }
@@ -488,7 +488,7 @@ mod tests {
         let n = dipoles.len(); // 1000
 
         let plan = FftMatvecPlan::try_build(&dipoles, spacing, k)
-            .expect("10×10×10 regular grid should build a plan");
+            .expect("10x10x10 regular grid should build a plan");
 
         let x: Array1<Complex64> = Array1::from_iter((0..3 * n).map(|i| {
             Complex64::new(
@@ -504,7 +504,6 @@ mod tests {
             &x,
             k,
             false,
-            spacing,
             None,
             [0.0; 3],
             None,
@@ -521,7 +520,7 @@ mod tests {
         let rel_err = diff_norm / ref_norm;
         assert!(
             rel_err < 1e-10,
-            "FFT matvec relative error {:.2e} exceeds 1e-10 for 10×10×10 grid",
+            "FFT matvec relative error {:.2e} exceeds 1e-10 for 10x10x10 grid",
             rel_err
         );
     }

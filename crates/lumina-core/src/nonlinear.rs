@@ -21,7 +21,7 @@
 //!
 //! # SHG Workflow
 //!
-//! 1. Solve the linear CDA system at $\omega$ — obtain [`DipoleResponse`]
+//! 1. Solve the linear CDA system at $\omega$ -- obtain [`DipoleResponse`]
 //!    (which stores `local_fields`).
 //! 2. Assign a [`Chi2Tensor`] to each dipole. For a uniform structure use
 //!    `vec![chi2; n_dipoles]`.
@@ -30,7 +30,7 @@
 //!
 //! # THG Workflow
 //!
-//! 1. Solve the linear CDA system at $\omega$ — obtain [`DipoleResponse`].
+//! 1. Solve the linear CDA system at $\omega$ -- obtain [`DipoleResponse`].
 //! 2. Assign a [`Chi3Tensor`] to each dipole.
 //! 3. Build dipoles with polarisability evaluated at $3\omega = \lambda/3$.
 //! 4. Call [`compute_thg_response`].
@@ -54,8 +54,8 @@ use crate::types::{
 ///   E_{\text{loc},b,i}(\omega)\, E_{\text{loc},c,i}(\omega)$$
 ///
 /// # Arguments
-/// * `local_fields`  — Local electric fields at $\omega$, shape $(N, 3)$.
-/// * `chi2_tensors`  — One [`Chi2Tensor`] per dipole; length must equal $N$.
+/// * `local_fields`  -- Local electric fields at $\omega$, shape $(N, 3)$.
+/// * `chi2_tensors`  -- One [`Chi2Tensor`] per dipole; length must equal $N$.
 ///
 /// # Returns
 /// Source moment array of shape $(N, 3)$.
@@ -92,15 +92,15 @@ pub fn compute_shg_sources(
 /// re-radiated dipole moments at the harmonic frequency.
 ///
 /// # Arguments
-/// * `solver`         — CDA solver instance (for configuration and backend).
-/// * `omega_response` — Linear dipole response at $\omega$ (contains local fields).
-/// * `dipoles_2omega` — Dipoles with polarisability evaluated at $2\omega$.
+/// * `solver`         -- CDA solver instance (for configuration and backend).
+/// * `omega_response` -- Linear dipole response at $\omega$ (contains local fields).
+/// * `dipoles_2omega` -- Dipoles with polarisability evaluated at $2\omega$.
 ///                      Positions must match those used for `omega_response`.
-/// * `chi2_tensors`   — One [`Chi2Tensor`] per dipole; length $N$.
-/// * `params_2omega`  — Simulation parameters for the $2\omega$ solve.
+/// * `chi2_tensors`   -- One [`Chi2Tensor`] per dipole; length $N$.
+/// * `params_2omega`  -- Simulation parameters for the $2\omega$ solve.
 ///                      The harmonic wavelength is taken from
 ///                      `omega_response.wavelength_nm / 2`.
-/// * `calc_far_field` — If `true`, compute the far-field pattern at $2\omega$.
+/// * `calc_far_field` -- If `true`, compute the far-field pattern at $2\omega$.
 ///
 /// # Returns
 /// [`ShgResult`] with source moments, driven moments, SHG intensity, and
@@ -127,24 +127,29 @@ pub fn compute_shg_response(
     let harmonic_nm = fundamental_nm / 2.0;
     let k_2omega = 2.0 * std::f64::consts::PI * params_2omega.environment_n / harmonic_nm;
 
-    // Step 1: Nonlinear source moments p_NL from local fields at ω.
+    // Refuse an unsupported substrate/lattice combination before doing any work.
+    crate::solver::substrate::check_substrate_lattice_compatible(
+        solver.lattice.as_ref(),
+        params_2omega.substrate_runtime.as_ref(),
+    )?;
+
+    // Step 1: Nonlinear source moments p_NL from local fields at omega.
     let source_moments = compute_shg_sources(&omega_response.local_fields, chi2_tensors);
 
-    // Substrate runtime for the 2ω solve.
+    // Substrate runtime for the 2omega solve.
     let substrate = params_2omega.substrate_runtime.as_ref();
 
-    // Step 2: Interaction matrix at 2ω.
+    // Step 2: Interaction matrix at 2omega.
     let matrix = assembly::assemble_interaction_matrix(
         dipoles_2omega,
         k_2omega,
         solver.use_fcd,
-        solver.cell_size,
         solver.lattice.as_ref(),
         params_2omega.k_bloch,
         substrate,
     );
 
-    // Step 3: RHS = flat 3N vector of nonlinear sources (no incident field at 2ω).
+    // Step 3: RHS = flat 3N vector of nonlinear sources (no incident field at 2omega).
     let mut rhs = Array1::zeros(3 * n);
     for i in 0..n {
         for c in 0..3 {
@@ -152,8 +157,22 @@ pub fn compute_shg_response(
         }
     }
 
-    // Step 4: Solve A(2ω) · p(2ω) = p_NL.
-    let solution = if n <= solver.iterative_threshold {
+    // Step 4: Solve A(2omega) * p(2omega) = p_NL.
+    //
+    // Block-Jacobi preconditioning, as in the linear solver: A_ii = alpha^-1, so
+    // M^-1 = diag(alpha) and GMRES solves M^-1A*p = M^-1*p_NL for the same p. It costs one
+    // 3x3 multiply per dipole and helps whenever alpha varies between dipoles.
+    let precond = assembly::jacobi_preconditioner(dipoles_2omega);
+    let rhs_p = assembly::apply_preconditioner(&precond, &rhs);
+
+    // The direct path is gated on the memory budget too: LU needs working space on
+    // top of the already-assembled matrix. (Unlike the linear solver this function
+    // has no on-the-fly fallback -- the matrix is always assembled above.)
+    let matrix_bytes = (3 * n as u64).pow(2) * 16;
+
+    let solution = if n <= solver.iterative_threshold
+        && matrix_bytes <= solver.matrix_memory_budget
+    {
         direct::solve_direct(&matrix, &rhs)
             .map_err(|e| SolverError::LinAlgError(e.to_string()))?
     } else if let Some(session) = solver.backend.create_session(3 * n) {
@@ -166,9 +185,12 @@ pub fn compute_shg_response(
                     .matvec(x.view())
                     .map_err(|e| SolverError::LinAlgError(e.to_string()))
             };
+        let preconditioned = |x: &Array1<Complex64>| -> Result<Array1<Complex64>, SolverError> {
+            Ok(assembly::apply_preconditioner(&precond, &matvec_fn(x)?))
+        };
         iterative::solve_gmres(
-            &matvec_fn,
-            &rhs,
+            &preconditioned,
+            &rhs_p,
             params_2omega.solver_tolerance,
             params_2omega.max_iterations,
         )?
@@ -180,9 +202,12 @@ pub fn compute_shg_response(
                     .matvec(&matrix, x)
                     .map_err(|e| SolverError::LinAlgError(e.to_string()))
             };
+        let preconditioned = |x: &Array1<Complex64>| -> Result<Array1<Complex64>, SolverError> {
+            Ok(assembly::apply_preconditioner(&precond, &matvec_fn(x)?))
+        };
         iterative::solve_gmres(
-            &matvec_fn,
-            &rhs,
+            &preconditioned,
+            &rhs_p,
             params_2omega.solver_tolerance,
             params_2omega.max_iterations,
         )?
@@ -196,7 +221,7 @@ pub fn compute_shg_response(
         }
     }
 
-    // Step 6: Total SHG intensity ∝ Σᵢ |p_i(2ω)|².
+    // Step 6: Total SHG intensity prop to sum_i |p_i(2omega)|^2.
     let mut shg_intensity = 0.0_f64;
     for i in 0..n {
         for c in 0..3 {
@@ -204,7 +229,7 @@ pub fn compute_shg_response(
         }
     }
 
-    // Step 7: Optional far-field pattern at 2ω.
+    // Step 7: Optional far-field pattern at 2omega.
     let far_field: Option<FarFieldMap> = if calc_far_field {
         let response_2omega = DipoleResponse {
             wavelength_nm: harmonic_nm,
@@ -240,8 +265,8 @@ pub fn compute_shg_response(
 ///   E_{\text{loc},b,i}(\omega)\, E_{\text{loc},c,i}(\omega)\, E_{\text{loc},d,i}(\omega)$$
 ///
 /// # Arguments
-/// * `local_fields`  — Local electric fields at $\omega$, shape $(N, 3)$.
-/// * `chi3_tensors`  — One [`Chi3Tensor`] per dipole; length must equal $N$.
+/// * `local_fields`  -- Local electric fields at $\omega$, shape $(N, 3)$.
+/// * `chi3_tensors`  -- One [`Chi3Tensor`] per dipole; length must equal $N$.
 ///
 /// # Returns
 /// Source moment array of shape $(N, 3)$.
@@ -278,15 +303,15 @@ pub fn compute_thg_sources(
 /// re-radiated dipole moments at the harmonic frequency.
 ///
 /// # Arguments
-/// * `solver`         — CDA solver instance (for configuration and backend).
-/// * `omega_response` — Linear dipole response at $\omega$ (contains local fields).
-/// * `dipoles_3omega` — Dipoles with polarisability evaluated at $3\omega$.
+/// * `solver`         -- CDA solver instance (for configuration and backend).
+/// * `omega_response` -- Linear dipole response at $\omega$ (contains local fields).
+/// * `dipoles_3omega` -- Dipoles with polarisability evaluated at $3\omega$.
 ///                      Positions must match those used for `omega_response`.
-/// * `chi3_tensors`   — One [`Chi3Tensor`] per dipole; length $N$.
-/// * `params_3omega`  — Simulation parameters for the $3\omega$ solve.
+/// * `chi3_tensors`   -- One [`Chi3Tensor`] per dipole; length $N$.
+/// * `params_3omega`  -- Simulation parameters for the $3\omega$ solve.
 ///                      The harmonic wavelength is taken from
 ///                      `omega_response.wavelength_nm / 3`.
-/// * `calc_far_field` — If `true`, compute the far-field pattern at $3\omega$.
+/// * `calc_far_field` -- If `true`, compute the far-field pattern at $3\omega$.
 ///
 /// # Returns
 /// [`ThgResult`] with source moments, driven moments, THG intensity, and
@@ -313,24 +338,29 @@ pub fn compute_thg_response(
     let harmonic_nm = fundamental_nm / 3.0;
     let k_3omega = 2.0 * std::f64::consts::PI * params_3omega.environment_n / harmonic_nm;
 
-    // Step 1: Nonlinear source moments p_NL from local fields at ω.
+    // Refuse an unsupported substrate/lattice combination before doing any work.
+    crate::solver::substrate::check_substrate_lattice_compatible(
+        solver.lattice.as_ref(),
+        params_3omega.substrate_runtime.as_ref(),
+    )?;
+
+    // Step 1: Nonlinear source moments p_NL from local fields at omega.
     let source_moments = compute_thg_sources(&omega_response.local_fields, chi3_tensors);
 
-    // Substrate runtime for the 3ω solve.
+    // Substrate runtime for the 3omega solve.
     let substrate = params_3omega.substrate_runtime.as_ref();
 
-    // Step 2: Interaction matrix at 3ω.
+    // Step 2: Interaction matrix at 3omega.
     let matrix = assembly::assemble_interaction_matrix(
         dipoles_3omega,
         k_3omega,
         solver.use_fcd,
-        solver.cell_size,
         solver.lattice.as_ref(),
         params_3omega.k_bloch,
         substrate,
     );
 
-    // Step 3: RHS = flat 3N vector of nonlinear sources (no incident field at 3ω).
+    // Step 3: RHS = flat 3N vector of nonlinear sources (no incident field at 3omega).
     let mut rhs = Array1::zeros(3 * n);
     for i in 0..n {
         for c in 0..3 {
@@ -338,8 +368,22 @@ pub fn compute_thg_response(
         }
     }
 
-    // Step 4: Solve A(3ω) · p(3ω) = p_NL.
-    let solution = if n <= solver.iterative_threshold {
+    // Step 4: Solve A(3omega) * p(3omega) = p_NL.
+    //
+    // Block-Jacobi preconditioning, as in the linear solver: A_ii = alpha^-1, so
+    // M^-1 = diag(alpha) and GMRES solves M^-1A*p = M^-1*p_NL for the same p. It costs one
+    // 3x3 multiply per dipole and helps whenever alpha varies between dipoles.
+    let precond = assembly::jacobi_preconditioner(dipoles_3omega);
+    let rhs_p = assembly::apply_preconditioner(&precond, &rhs);
+
+    // The direct path is gated on the memory budget too: LU needs working space on
+    // top of the already-assembled matrix. (Unlike the linear solver this function
+    // has no on-the-fly fallback -- the matrix is always assembled above.)
+    let matrix_bytes = (3 * n as u64).pow(2) * 16;
+
+    let solution = if n <= solver.iterative_threshold
+        && matrix_bytes <= solver.matrix_memory_budget
+    {
         direct::solve_direct(&matrix, &rhs)
             .map_err(|e| SolverError::LinAlgError(e.to_string()))?
     } else if let Some(session) = solver.backend.create_session(3 * n) {
@@ -352,9 +396,12 @@ pub fn compute_thg_response(
                     .matvec(x.view())
                     .map_err(|e| SolverError::LinAlgError(e.to_string()))
             };
+        let preconditioned = |x: &Array1<Complex64>| -> Result<Array1<Complex64>, SolverError> {
+            Ok(assembly::apply_preconditioner(&precond, &matvec_fn(x)?))
+        };
         iterative::solve_gmres(
-            &matvec_fn,
-            &rhs,
+            &preconditioned,
+            &rhs_p,
             params_3omega.solver_tolerance,
             params_3omega.max_iterations,
         )?
@@ -366,9 +413,12 @@ pub fn compute_thg_response(
                     .matvec(&matrix, x)
                     .map_err(|e| SolverError::LinAlgError(e.to_string()))
             };
+        let preconditioned = |x: &Array1<Complex64>| -> Result<Array1<Complex64>, SolverError> {
+            Ok(assembly::apply_preconditioner(&precond, &matvec_fn(x)?))
+        };
         iterative::solve_gmres(
-            &matvec_fn,
-            &rhs,
+            &preconditioned,
+            &rhs_p,
             params_3omega.solver_tolerance,
             params_3omega.max_iterations,
         )?
@@ -382,7 +432,7 @@ pub fn compute_thg_response(
         }
     }
 
-    // Step 6: Total THG intensity ∝ Σᵢ |p_i(3ω)|².
+    // Step 6: Total THG intensity prop to sum_i |p_i(3omega)|^2.
     let mut thg_intensity = 0.0_f64;
     for i in 0..n {
         for c in 0..3 {
@@ -390,7 +440,7 @@ pub fn compute_thg_response(
         }
     }
 
-    // Step 7: Optional far-field pattern at 3ω.
+    // Step 7: Optional far-field pattern at 3omega.
     let far_field: Option<FarFieldMap> = if calc_far_field {
         let response_3omega = DipoleResponse {
             wavelength_nm: harmonic_nm,
@@ -443,7 +493,7 @@ mod tests {
         }
     }
 
-    /// Zero χ^(2) → zero source moments, regardless of local field.
+    /// Zero chi^(2) -> zero source moments, regardless of local field.
     #[test]
     fn test_zero_chi2_gives_zero_sources() {
         let response = make_response(600.0, vec![[1.0, 0.5, 0.2]; 4]);
@@ -459,20 +509,20 @@ mod tests {
         }
     }
 
-    /// Single dipole: χ_xxx = 1, E = [E₀, 0, 0].
-    /// Expected: p_x = E₀², p_y = p_z = 0.
+    /// Single dipole: chi_xxx = 1, E = [E0, 0, 0].
+    /// Expected: p_x = E0^2, p_y = p_z = 0.
     #[test]
     fn test_shg_source_xxx_contraction() {
         let e0 = 2.5_f64;
         let response = make_response(600.0, vec![[e0, 0.0, 0.0]]);
         let mut chi2 = Chi2Tensor::zero();
-        chi2.components[0 * 9 + 0 * 3 + 0] = Complex64::new(1.0, 0.0); // χ_xxx = 1
+        chi2.components[0 * 9 + 0 * 3 + 0] = Complex64::new(1.0, 0.0); // chi_xxx = 1
         let sources = compute_shg_sources(&response.local_fields, &[chi2]);
 
         let expected = Complex64::new(e0 * e0, 0.0);
         assert!(
             (sources[[0, 0]] - expected).norm() < 1e-12,
-            "p_x should equal chi_xxx * E₀²"
+            "p_x should equal chi_xxx * E0^2"
         );
         assert!(sources[[0, 1]].norm() < 1e-12, "p_y should be zero");
         assert!(sources[[0, 2]].norm() < 1e-12, "p_z should be zero");
@@ -485,26 +535,26 @@ mod tests {
         let chi_zxx = Complex64::new(0.5, 0.0);
         let t = Chi2Tensor::isotropic_surface(chi_zzz, chi_zxx);
 
-        // χ_zzz at (2,2,2) → index 26
-        assert!((t.components[26] - chi_zzz).norm() < 1e-14, "χ_zzz");
-        // χ_zxx at (2,0,0) → index 18
-        assert!((t.components[18] - chi_zxx).norm() < 1e-14, "χ_zxx");
-        // χ_zyy at (2,1,1) → index 22
-        assert!((t.components[22] - chi_zxx).norm() < 1e-14, "χ_zyy");
-        // χ_xxz at (0,0,2) → index 2
-        assert!((t.components[2] - chi_zxx).norm() < 1e-14, "χ_xxz");
-        // χ_xzx at (0,2,0) → index 6
-        assert!((t.components[6] - chi_zxx).norm() < 1e-14, "χ_xzx");
-        // χ_yyz at (1,1,2) → index 14
-        assert!((t.components[14] - chi_zxx).norm() < 1e-14, "χ_yyz");
-        // χ_yzy at (1,2,1) → index 16
-        assert!((t.components[16] - chi_zxx).norm() < 1e-14, "χ_yzy");
+        // chi_zzz at (2,2,2) -> index 26
+        assert!((t.components[26] - chi_zzz).norm() < 1e-14, "chi_zzz");
+        // chi_zxx at (2,0,0) -> index 18
+        assert!((t.components[18] - chi_zxx).norm() < 1e-14, "chi_zxx");
+        // chi_zyy at (2,1,1) -> index 22
+        assert!((t.components[22] - chi_zxx).norm() < 1e-14, "chi_zyy");
+        // chi_xxz at (0,0,2) -> index 2
+        assert!((t.components[2] - chi_zxx).norm() < 1e-14, "chi_xxz");
+        // chi_xzx at (0,2,0) -> index 6
+        assert!((t.components[6] - chi_zxx).norm() < 1e-14, "chi_xzx");
+        // chi_yyz at (1,1,2) -> index 14
+        assert!((t.components[14] - chi_zxx).norm() < 1e-14, "chi_yyz");
+        // chi_yzy at (1,2,1) -> index 16
+        assert!((t.components[16] - chi_zxx).norm() < 1e-14, "chi_yzy");
 
         let nonzero = t.components.iter().filter(|c| c.norm() > 1e-14).count();
-        assert_eq!(nonzero, 7, "C_∞v tensor has exactly 7 non-zero elements");
+        assert_eq!(nonzero, 7, "C_infv tensor has exactly 7 non-zero elements");
     }
 
-    /// End-to-end: zero χ^(2) → zero SHG intensity from the full solver.
+    /// End-to-end: zero chi^(2) -> zero SHG intensity from the full solver.
     #[test]
     fn test_shg_response_zero_chi2() {
         let solver = CdaSolver {
@@ -512,9 +562,9 @@ mod tests {
             ..CdaSolver::default()
         };
 
-        // Single isotropic dipole at origin with unit polarisability at 2ω.
+        // Single isotropic dipole at origin with unit polarisability at 2omega.
         let dipole_2omega =
-            Dipole::isotropic([0.0, 0.0, 0.0], Complex64::new(1.0, 0.0));
+            Dipole::isotropic([0.0, 0.0, 0.0], Complex64::new(1.0, 0.0), 3.0);
 
         // Linear response at 600 nm with a non-zero local field.
         let omega_response = make_response(600.0, vec![[3.0, 1.0, 0.5]]);
@@ -541,16 +591,16 @@ mod tests {
         assert_eq!(result.harmonic_nm, 300.0);
     }
 
-    /// Non-zero χ^(2): SHG intensity scales as |E_loc|⁴.
+    /// Non-zero chi^(2): SHG intensity scales as |E_loc|^4.
     #[test]
     fn test_shg_intensity_scales_with_field() {
         let solver = CdaSolver {
             use_fcd: false,
             ..CdaSolver::default()
         };
-        let dipole = Dipole::isotropic([0.0, 0.0, 0.0], Complex64::new(1.0, 0.0));
+        let dipole = Dipole::isotropic([0.0, 0.0, 0.0], Complex64::new(1.0, 0.0), 3.0);
         let mut chi2 = Chi2Tensor::zero();
-        chi2.components[0 * 9 + 0 * 3 + 0] = Complex64::new(1.0, 0.0); // χ_xxx = 1
+        chi2.components[0 * 9 + 0 * 3 + 0] = Complex64::new(1.0, 0.0); // chi_xxx = 1
         let params = SimulationParams::default();
 
         // Field amplitude 1
@@ -564,7 +614,7 @@ mod tests {
         )
         .unwrap();
 
-        // Field amplitude 2 — SHG intensity should be 2⁴ = 16× larger.
+        // Field amplitude 2 -- SHG intensity should be 2^4 = 16x larger.
         let r2 = compute_shg_response(
             &solver,
             &make_response(600.0, vec![[2.0, 0.0, 0.0]]),
@@ -578,13 +628,13 @@ mod tests {
         let ratio = r2.shg_intensity / r1.shg_intensity;
         assert!(
             (ratio - 16.0).abs() < 1e-8,
-            "SHG intensity should scale as E⁴; expected ratio 16, got {ratio:.6}"
+            "SHG intensity should scale as E^4; expected ratio 16, got {ratio:.6}"
         );
     }
 
-    // ── THG tests ─────────────────────────────────────────────────────────────
+    // -- THG tests -------------------------------------------------------------
 
-    /// Zero χ^(3) → zero source moments, regardless of local field.
+    /// Zero chi^(3) -> zero source moments, regardless of local field.
     #[test]
     fn test_zero_chi3_gives_zero_sources() {
         let response = make_response(600.0, vec![[1.0, 0.5, 0.2]; 4]);
@@ -600,20 +650,20 @@ mod tests {
         }
     }
 
-    /// Single dipole: χ_xxxx = 1, E = [E₀, 0, 0].
-    /// Expected: p_x = E₀³, p_y = p_z = 0.
+    /// Single dipole: chi_xxxx = 1, E = [E0, 0, 0].
+    /// Expected: p_x = E0^3, p_y = p_z = 0.
     #[test]
     fn test_thg_source_xxxx_contraction() {
         let e0 = 2.0_f64;
         let response = make_response(600.0, vec![[e0, 0.0, 0.0]]);
         let mut chi3 = Chi3Tensor::zero();
-        chi3.components[0 * 27 + 0 * 9 + 0 * 3 + 0] = Complex64::new(1.0, 0.0); // χ_xxxx = 1
+        chi3.components[0 * 27 + 0 * 9 + 0 * 3 + 0] = Complex64::new(1.0, 0.0); // chi_xxxx = 1
         let sources = compute_thg_sources(&response.local_fields, &[chi3]);
 
         let expected = Complex64::new(e0 * e0 * e0, 0.0);
         assert!(
             (sources[[0, 0]] - expected).norm() < 1e-12,
-            "p_x should equal chi_xxxx * E₀³, got {}",
+            "p_x should equal chi_xxxx * E0^3, got {}",
             sources[[0, 0]]
         );
         assert!(sources[[0, 1]].norm() < 1e-12, "p_y should be zero");
@@ -627,29 +677,29 @@ mod tests {
         let chi_xxyy = Complex64::new(0.25, 0.0);
         let t = Chi3Tensor::isotropic_bulk(chi_xxxx, chi_xxyy);
 
-        // χ_xxxx at (0,0,0,0) → index 0
+        // chi_xxxx at (0,0,0,0) -> index 0
         assert!(
             (t.components[0] - chi_xxxx).norm() < 1e-14,
-            "χ_xxxx should equal chi_xxxx"
+            "chi_xxxx should equal chi_xxxx"
         );
-        // χ_xxyy at (0,0,1,1) → index 0*27+0*9+1*3+1 = 4
+        // chi_xxyy at (0,0,1,1) -> index 0*27+0*9+1*3+1 = 4
         assert!(
             (t.components[4] - chi_xxyy).norm() < 1e-14,
-            "χ_xxyy should equal chi_xxyy"
+            "chi_xxyy should equal chi_xxyy"
         );
-        // χ_xyxy at (0,1,0,1) → index 0*27+1*9+0*3+1 = 10
+        // chi_xyxy at (0,1,0,1) -> index 0*27+1*9+0*3+1 = 10
         assert!(
             (t.components[10] - chi_xxyy).norm() < 1e-14,
-            "χ_xyxy should equal chi_xxyy"
+            "chi_xyxy should equal chi_xxyy"
         );
-        // χ_xyyx at (0,1,1,0) → index 0*27+1*9+1*3+0 = 12
+        // chi_xyyx at (0,1,1,0) -> index 0*27+1*9+1*3+0 = 12
         assert!(
             (t.components[12] - chi_xxyy).norm() < 1e-14,
-            "χ_xyyx should equal chi_xxyy"
+            "chi_xyyx should equal chi_xxyy"
         );
     }
 
-    /// End-to-end: zero χ^(3) → zero THG intensity from the full solver.
+    /// End-to-end: zero chi^(3) -> zero THG intensity from the full solver.
     #[test]
     fn test_thg_response_zero_chi3() {
         let solver = CdaSolver {
@@ -657,9 +707,9 @@ mod tests {
             ..CdaSolver::default()
         };
 
-        // Single isotropic dipole at origin with unit polarisability at 3ω.
+        // Single isotropic dipole at origin with unit polarisability at 3omega.
         let dipole_3omega =
-            Dipole::isotropic([0.0, 0.0, 0.0], Complex64::new(1.0, 0.0));
+            Dipole::isotropic([0.0, 0.0, 0.0], Complex64::new(1.0, 0.0), 3.0);
 
         // Linear response at 600 nm with a non-zero local field.
         let omega_response = make_response(600.0, vec![[3.0, 1.0, 0.5]]);
@@ -686,16 +736,16 @@ mod tests {
         assert!((result.harmonic_nm - 200.0).abs() < 1e-10);
     }
 
-    /// Non-zero χ^(3): THG intensity scales as |E_loc|⁶.
+    /// Non-zero chi^(3): THG intensity scales as |E_loc|^6.
     #[test]
     fn test_thg_intensity_scales_with_field() {
         let solver = CdaSolver {
             use_fcd: false,
             ..CdaSolver::default()
         };
-        let dipole = Dipole::isotropic([0.0, 0.0, 0.0], Complex64::new(1.0, 0.0));
+        let dipole = Dipole::isotropic([0.0, 0.0, 0.0], Complex64::new(1.0, 0.0), 3.0);
         let mut chi3 = Chi3Tensor::zero();
-        chi3.components[0 * 27 + 0 * 9 + 0 * 3 + 0] = Complex64::new(1.0, 0.0); // χ_xxxx = 1
+        chi3.components[0 * 27 + 0 * 9 + 0 * 3 + 0] = Complex64::new(1.0, 0.0); // chi_xxxx = 1
         let params = SimulationParams::default();
 
         // Field amplitude 1
@@ -709,7 +759,7 @@ mod tests {
         )
         .unwrap();
 
-        // Field amplitude 2 — THG intensity should be 2⁶ = 64× larger.
+        // Field amplitude 2 -- THG intensity should be 2^6 = 64x larger.
         let r2 = compute_thg_response(
             &solver,
             &make_response(600.0, vec![[2.0, 0.0, 0.0]]),
@@ -723,7 +773,154 @@ mod tests {
         let ratio = r2.thg_intensity / r1.thg_intensity;
         assert!(
             (ratio - 64.0).abs() < 1e-6,
-            "THG intensity should scale as E⁶; expected ratio 64, got {ratio:.6}"
+            "THG intensity should scale as E^6; expected ratio 64, got {ratio:.6}"
         );
     }
+
+    /// C2: the guard must also cover the nonlinear entry points -- the SHG/THG
+    /// solves assemble their own interaction matrices at 2omega/3omega and would
+    /// otherwise reproduce the inconsistent periodic/non-periodic mixture.
+    fn sommerfeld_lattice_solver_and_params() -> (CdaSolver, SimulationParams) {
+        use std::sync::Arc;
+        use crate::solver::sommerfeld::SommerfeldGreens;
+        use crate::solver::substrate::SubstrateRuntime;
+        use lumina_geometry::lattice::LatticeSpec;
+
+        let solver = CdaSolver {
+            use_fcd: false,
+            lattice: Some(LatticeSpec::chain([100.0, 0.0, 0.0])),
+            ..CdaSolver::default()
+        };
+        let params = SimulationParams {
+            substrate_runtime: Some(SubstrateRuntime::Sommerfeld {
+                z_interface: 0.0,
+                greens: Arc::new(SommerfeldGreens::new(300.0, Complex64::new(2.25, 0.0), 1.0)),
+            }),
+            ..Default::default()
+        };
+        (solver, params)
+    }
+
+    #[test]
+    fn shg_rejects_sommerfeld_with_lattice() {
+        let (solver, params) = sommerfeld_lattice_solver_and_params();
+        let dipole = Dipole::isotropic([0.0, 0.0, 30.0], Complex64::new(1.0, 0.0), 3.0);
+        let err = compute_shg_response(
+            &solver,
+            &make_response(600.0, vec![[3.0, 1.0, 0.5]]),
+            &[dipole],
+            &[Chi2Tensor::zero()],
+            &params,
+            false,
+        )
+        .expect_err("SHG must refuse Sommerfeld + lattice");
+        assert!(matches!(err, SolverError::UnsupportedConfiguration(_)), "got {err:?}");
+    }
+
+    #[test]
+    fn thg_rejects_sommerfeld_with_lattice() {
+        let (solver, params) = sommerfeld_lattice_solver_and_params();
+        let dipole = Dipole::isotropic([0.0, 0.0, 30.0], Complex64::new(1.0, 0.0), 3.0);
+        let err = compute_thg_response(
+            &solver,
+            &make_response(600.0, vec![[3.0, 1.0, 0.5]]),
+            &[dipole],
+            &[Chi3Tensor::zero()],
+            &params,
+            false,
+        )
+        .expect_err("THG must refuse Sommerfeld + lattice");
+        assert!(matches!(err, SolverError::UnsupportedConfiguration(_)), "got {err:?}");
+    }
+
+    /// The harmonic solves have their own GMRES paths, separate from `solve_dipoles`.
+    /// They are now preconditioned the same way (M^-1 = diag(alpha)), so the iterative
+    /// result must match the direct one -- a misapplied preconditioner here would
+    /// silently corrupt every large SHG/THG job.
+    ///
+    /// Polarisabilities vary between dipoles so the preconditioner is genuinely
+    /// exercised; with a single alpha it is a scalar and does nothing.
+    fn harmonic_test_system() -> (Vec<Dipole>, DipoleResponse, SimulationParams) {
+        let mut dipoles = Vec::new();
+        let mut fields = Vec::new();
+        for i in 0..4 {
+            for j in 0..4 {
+                for k in 0..4 {
+                    let alpha = if (i + j + k) % 2 == 0 {
+                        Complex64::new(700.0, 90.0)
+                    } else {
+                        Complex64::new(35.0, 4.0)
+                    };
+                    dipoles.push(Dipole::isotropic(
+                        [i as f64 * 5.0, j as f64 * 5.0, k as f64 * 5.0],
+                        alpha,
+                        5.0,
+                    ));
+                    fields.push([1.0, 0.5, 0.25]);
+                }
+            }
+        }
+        let response = make_response(600.0, fields);
+        let params = SimulationParams {
+            max_iterations: 4000,
+            solver_tolerance: 1e-11,
+            ..Default::default()
+        };
+        (dipoles, response, params)
+    }
+
+    #[test]
+    fn shg_iterative_path_agrees_with_direct() {
+        let (dipoles, response, params) = harmonic_test_system();
+        let chi2 = vec![
+            Chi2Tensor::isotropic_surface(Complex64::new(1.0, 0.0), Complex64::new(0.3, 0.0));
+            dipoles.len()
+        ];
+
+        let direct = compute_shg_response(
+            &CdaSolver { iterative_threshold: 100_000, use_fcd: false, ..CdaSolver::default() },
+            &response, &dipoles, &chi2, &params, false,
+        ).expect("direct SHG");
+        let iterative = compute_shg_response(
+            &CdaSolver { iterative_threshold: 1, use_fcd: false, ..CdaSolver::default() },
+            &response, &dipoles, &chi2, &params, false,
+        ).expect("iterative SHG must converge");
+
+        let scale = direct.driven_moments.iter().fold(0.0_f64, |m, v| m.max(v.norm()));
+        assert!(scale > 1e-30, "direct SHG produced a zero response");
+        for (a, b) in direct.driven_moments.iter().zip(iterative.driven_moments.iter()) {
+            assert!(
+                (a - b).norm() / scale < 1e-6,
+                "SHG iterative disagrees with direct: {a:?} vs {b:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn thg_iterative_path_agrees_with_direct() {
+        let (dipoles, response, params) = harmonic_test_system();
+        let chi3 = vec![
+            Chi3Tensor::isotropic_bulk(Complex64::new(1.0, 0.0), Complex64::new(0.25, 0.0));
+            dipoles.len()
+        ];
+
+        let direct = compute_thg_response(
+            &CdaSolver { iterative_threshold: 100_000, use_fcd: false, ..CdaSolver::default() },
+            &response, &dipoles, &chi3, &params, false,
+        ).expect("direct THG");
+        let iterative = compute_thg_response(
+            &CdaSolver { iterative_threshold: 1, use_fcd: false, ..CdaSolver::default() },
+            &response, &dipoles, &chi3, &params, false,
+        ).expect("iterative THG must converge");
+
+        let scale = direct.driven_moments.iter().fold(0.0_f64, |m, v| m.max(v.norm()));
+        assert!(scale > 1e-30, "direct THG produced a zero response");
+        for (a, b) in direct.driven_moments.iter().zip(iterative.driven_moments.iter()) {
+            assert!(
+                (a - b).norm() / scale < 1e-6,
+                "THG iterative disagrees with direct: {a:?} vs {b:?}"
+            );
+        }
+    }
+
 }

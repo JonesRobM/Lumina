@@ -39,10 +39,10 @@ Select from built-in materials (Au, Ag, Cu via Johnson & Christy; TiO\(_2\), SiO
 
 Set the wavelength range, medium refractive index, and solver parameters. Additional controls:
 
-- **Incident polarisation** — select x-pol, y-pol, or circular
-- **Circular dichroism** — checkbox to compute \(\Delta C_\text{ext}\) (requires two solver calls per wavelength)
-- **GPU acceleration** — checkbox to enable GPU matvec (only visible when built with `--features gpu`)
-- **Debug output** — checkbox to show per-wavelength solver diagnostics (v0.2.1)
+- **Incident polarisation** -- select x-pol, y-pol, or circular
+- **Circular dichroism** -- checkbox to compute \(\Delta C_\text{ext}\) (requires two solver calls per wavelength)
+- **GPU acceleration** -- checkbox to enable GPU matvec (only visible when built with `--features gpu`)
+- **Debug output** -- checkbox to show per-wavelength solver diagnostics (v0.2.1)
 
 Launch the simulation and monitor progress via the progress bar. Wavelengths are solved in parallel using all available CPU cores.
 
@@ -63,9 +63,9 @@ The log updates in real time as wavelengths complete (note: completion order may
 
 View interactive plots powered by `egui_plot`:
 
-- **Spectra** — extinction, absorption, and scattering cross-sections vs wavelength (with optional CD curve)
-- **Near-field heatmap** — \(|E|^2 / |E_0|^2\) on the XY plane at peak extinction, log-scale colourmap
-- **Far-field polar plot** — E-plane and H-plane radiation pattern cuts
+- **Spectra** -- extinction, absorption, and scattering cross-sections vs wavelength (with optional CD curve)
+- **Near-field heatmap** -- \(|E|^2 / |E_0|^2\) on the XY plane at peak extinction, log-scale colourmap
+- **Far-field polar plot** -- E-plane and H-plane radiation pattern cuts
 
 Export results to CSV or JSON via the file dialog (native file picker via `rfd`).
 
@@ -88,8 +88,8 @@ Click **Save** to persist settings to `<config_dir>/lumina/chat.toml`.
 
 - Type a message and press **Enter** to send (Shift+Enter inserts a newline).
 - Tokens stream in real time; the input is disabled while a response is arriving.
-- **Attach context** — injects the current scene geometry and simulation results as a structured message, then sends immediately. Use this before asking questions about your simulation.
-- **Clear** — wipes the conversation history. Any in-flight stream completes silently in the background.
+- **Attach context** -- injects the current scene geometry and simulation results as a structured message, then sends immediately. Use this before asking questions about your simulation.
+- **Clear** -- wipes the conversation history. Any in-flight stream completes silently in the background.
 
 #### Free providers
 

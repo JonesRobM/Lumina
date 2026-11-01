@@ -5,6 +5,7 @@ use eframe::egui;
 use num_complex::Complex64;
 
 use lumina_chat::context::ContextSnapshot;
+use lumina_core::build_dipoles;
 use lumina_core::types::{CrossSections, FarFieldMap, NearFieldMap};
 use lumina_geometry::scene::SceneSpec;
 
@@ -112,7 +113,6 @@ impl LuminaApp {
             use lumina_core::solver::substrate::{SubstrateRuntime, SubstrateSpec};
             use lumina_core::solver::{NearFieldPlane, OpticalSolver, SolverError};
             use lumina_core::types::{
-                clausius_mossotti, ellipsoid_polarisability_tensor, radiative_correction,
                 Dipole, IncidentField, SimulationParams,
             };
             use lumina_materials::johnson_christy::JohnsonChristyMaterial;
@@ -128,7 +128,7 @@ impl LuminaApp {
                 }
             };
 
-            // ── Compute backend ──────────────────────────────────────────────
+            // -- Compute backend ----------------------------------------------
             let backend: Arc<dyn ComputeBackend> = if use_gpu {
                 #[cfg(feature = "gpu")]
                 {
@@ -153,7 +153,7 @@ impl LuminaApp {
                 Arc::new(lumina_compute::CpuBackend::new())
             };
 
-            // ── Build geometry ───────────────────────────────────────────────
+            // -- Build geometry -----------------------------------------------
             let geom = match scene.build_geometry() {
                 Ok(g) => g,
                 Err(e) => {
@@ -165,7 +165,7 @@ impl LuminaApp {
             let n = geom.positions.len();
             if n == 0 {
                 let _ = tx.send(SimulationMessage::Error(
-                    "Scene produced no dipoles — check shape parameters and dipole spacing.".into(),
+                    "Scene produced no dipoles -- check shape parameters and dipole spacing.".into(),
                 ));
                 return;
             }
@@ -181,7 +181,7 @@ impl LuminaApp {
                 scene.objects.len(), n, half_extent
             ));
 
-            // ── Material providers ───────────────────────────────────────────
+            // -- Material providers -------------------------------------------
             // Created once here; borrowed by the Rayon closure below.
             let gold   = JohnsonChristyMaterial::gold();
             let silver = JohnsonChristyMaterial::silver();
@@ -210,7 +210,7 @@ impl LuminaApp {
                 provider.dielectric_function(wl).map_err(|e| format!("{e}"))
             };
 
-            // ── Simulation parameters ────────────────────────────────────────
+            // -- Simulation parameters ----------------------------------------
             let params = SimulationParams {
                 wavelength_range: [wl_start, wl_end],
                 num_wavelengths: num_wl,
@@ -222,11 +222,11 @@ impl LuminaApp {
             let k_of = |wl: f64| 2.0 * std::f64::consts::PI * env_n / wl;
 
             dbg(format!(
-                "Wavelengths: {wl_start:.1}–{wl_end:.1} nm, {num_wl} points, \
+                "Wavelengths: {wl_start:.1}-{wl_end:.1} nm, {num_wl} points, \
                  n_env = {env_n:.3}, CD = {compute_cd}"
             ));
 
-            // ── Incident fields ──────────────────────────────────────────────
+            // -- Incident fields ----------------------------------------------
             let incident_x = IncidentField {
                 direction: [0.0, 0.0, 1.0],
                 polarisation: [1.0, 0.0, 0.0],
@@ -249,19 +249,15 @@ impl LuminaApp {
                 None
             };
 
-            let mut solver_x = CdaSolver::with_incident(
-                1000, true, geom.spacings[0], primary,
-            );
+            let mut solver_x = CdaSolver::with_incident(1000, true, primary);
             solver_x.backend = Arc::clone(&backend);
             solver_x.substrate = substrate_spec.clone();
 
-            let mut solver_y = CdaSolver::with_incident(
-                1000, true, geom.spacings[0], incident_y.clone(),
-            );
+            let mut solver_y = CdaSolver::with_incident(1000, true, incident_y.clone());
             solver_y.backend = Arc::clone(&backend);
             solver_y.substrate = substrate_spec.clone();
 
-            // ── Wavelength sweep ─────────────────────────────────────────────
+            // -- Wavelength sweep ---------------------------------------------
             let wavelengths: Vec<f64> = (0..num_wl)
                 .map(|i| wl_start + (wl_end - wl_start) * i as f64 / (num_wl - 1).max(1) as f64)
                 .collect();
@@ -274,7 +270,7 @@ impl LuminaApp {
             // Cap concurrent wavelength threads to avoid OOM.
             // On the CPU GMRES path the matrix is never assembled (on-the-fly
             // matvec), so memory per thread is O(N).  On the GPU path the
-            // matrix is assembled per thread (3N×3N×16 bytes); cap threads to
+            // matrix is assembled per thread (3Nx3Nx16 bytes); cap threads to
             // keep that within an 8 GiB budget.
             let matrix_bytes = (3u64 * n as u64).pow(2) * 16;
             const MEMORY_BUDGET: u64 = 8 * 1024 * 1024 * 1024; // 8 GiB
@@ -292,7 +288,7 @@ impl LuminaApp {
                 }
             };
 
-            dbg(format!("Solving wavelengths in parallel ({max_par} threads)…"));
+            dbg(format!("Solving wavelengths in parallel ({max_par} threads)..."));
 
             let results: Result<Vec<(CrossSections, Vec<Dipole>)>, String> = wl_pool.install(|| wavelengths
                 .par_iter()
@@ -313,7 +309,7 @@ impl LuminaApp {
                             Err(e) => {
                                 if let Ok(lock) = tx_par.lock() {
                                     let _ = lock.send(SimulationMessage::DebugLog(format!(
-                                        "Substrate material error at λ={wl:.1} nm: {e}"
+                                        "Substrate material error at lambda={wl:.1} nm: {e}"
                                     )));
                                 }
                             }
@@ -321,35 +317,15 @@ impl LuminaApp {
                     }
 
                     // Build per-dipole polarisabilities for this wavelength.
-                    let mut dipoles = Vec::with_capacity(n);
-                    for i in 0..n {
-                        let eps = resolve_eps(&geom.materials[i], wl).map_err(|e| {
-                            format!("Material error at λ={wl:.1} nm: {e}")
-                        })?;
-                        let volume = geom.spacings[i].powi(3);
-                        let f = geom.fill_fractions[i];
-                        let dipole = if let Some(hint) = &geom.hints[i] {
-                            // Anisotropic path: ellipsoidal depolarisation factors.
-                            let tensor = ellipsoid_polarisability_tensor(
-                                volume, hint.depol_factors, eps, epsilon_m, k, hint.rotation,
-                            );
-                            Dipole { position: geom.positions[i], polarisability: tensor.map(|v| v * f) }
-                        } else {
-                            // Isotropic path: standard spherical CM.
-                            let alpha_cm = clausius_mossotti(volume, eps, epsilon_m);
-                            let alpha_rrcm = radiative_correction(alpha_cm, k);
-                            let alpha = alpha_rrcm * f;
-                            Dipole::isotropic(geom.positions[i], alpha)
-                        };
-                        dipoles.push(dipole);
-                    }
+                    let dipoles = build_dipoles(&geom, wl, env_n, &resolve_eps)
+                        .map_err(|e| format!("Material error at lambda={wl:.1} nm: {e}"))?;
 
                     let mut cs = match solver_x.compute_cross_sections(&dipoles, wl, &params_wl) {
                         Ok(cs) => cs,
                         Err(SolverError::ConvergenceFailure { max_iter, residual }) => {
                             if let Ok(lock) = tx_par.lock() {
                                 let _ = lock.send(SimulationMessage::DebugLog(format!(
-                                    "WARNING: λ={wl:.1} nm did not converge after {max_iter} iterations \
+                                    "WARNING: lambda={wl:.1} nm did not converge after {max_iter} iterations \
                                      (residual: {residual:.2e}).",
                                 )));
                             }
@@ -361,7 +337,7 @@ impl LuminaApp {
                                 circular_dichroism: None,
                             }
                         }
-                        Err(e) => return Err(format!("Solver error at λ={wl:.1} nm: {e}")),
+                        Err(e) => return Err(format!("Solver error at lambda={wl:.1} nm: {e}")),
                     };
 
                     // Optional CD pass.
@@ -382,7 +358,7 @@ impl LuminaApp {
                         if debug {
                             let elapsed_ms = t0.elapsed().as_secs_f64() * 1e3;
                             let _ = lock.send(SimulationMessage::DebugLog(format!(
-                                "[{done}/{num_wl}] λ={wl:.1} nm  C_ext={:.3e}  {elapsed_ms:.1} ms",
+                                "[{done}/{num_wl}] lambda={wl:.1} nm  C_ext={:.3e}  {elapsed_ms:.1} ms",
                                 cs.extinction,
                             )));
                         }
@@ -393,7 +369,7 @@ impl LuminaApp {
                 .collect()
             );
 
-            // ── Collect results ──────────────────────────────────────────────
+            // -- Collect results ----------------------------------------------
             let (spectra, peak_dipoles, peak_wl) = match results {
                 Ok(pairs) => {
                     let mut peak_ext = 0.0_f64;
@@ -423,11 +399,11 @@ impl LuminaApp {
             };
 
             dbg(format!(
-                "Spectra complete: {:.2} s, peak C_ext at λ={peak_wl:.1} nm",
+                "Spectra complete: {:.2} s, peak C_ext at lambda={peak_wl:.1} nm",
                 sim_start.elapsed().as_secs_f64(),
             ));
 
-            // ── Near-field + far-field at peak wavelength ────────────────────
+            // -- Near-field + far-field at peak wavelength --------------------
             let mut near_field = None;
             let mut far_field = None;
 
@@ -458,7 +434,7 @@ impl LuminaApp {
                 }
             }
 
-            // ── SHG sweep (optional) ────────────────────────────────────────
+            // -- SHG sweep (optional) ----------------------------------------
             let shg_spectra: Vec<(f64, f64)> = if enable_shg {
                 use lumina_core::nonlinear::compute_shg_response;
                 use lumina_core::types::Chi2Tensor;
@@ -472,66 +448,24 @@ impl LuminaApp {
                 };
                 let chi2_tensors = vec![chi2; n];
 
-                dbg("SHG sweep…".to_string());
+                dbg("SHG sweep...".to_string());
 
                 let shg_results: Vec<Option<(f64, f64)>> = wl_pool.install(|| wavelengths
                     .par_iter()
                     .map(|&wl| {
                         let wl_2omega = wl / 2.0;
-                        let k_omega = k_of(wl);
-                        let k_2omega = k_of(wl_2omega);
 
-                        // Build dipoles at ω.
-                        let mut dipoles_omega = Vec::with_capacity(n);
-                        for i in 0..n {
-                            let eps = resolve_eps(&geom.materials[i], wl).ok()?;
-                            let volume = geom.spacings[i].powi(3);
-                            let f = geom.fill_fractions[i];
-                            let dipole = if let Some(hint) = &geom.hints[i] {
-                                let tensor = ellipsoid_polarisability_tensor(
-                                    volume, hint.depol_factors, eps, epsilon_m, k_omega,
-                                    hint.rotation,
-                                );
-                                Dipole { position: geom.positions[i], polarisability: tensor.map(|v| v * f) }
-                            } else {
-                                let alpha_rrcm = radiative_correction(
-                                    clausius_mossotti(volume, eps, epsilon_m),
-                                    k_omega,
-                                );
-                                let alpha = alpha_rrcm * f;
-                                Dipole::isotropic(geom.positions[i], alpha)
-                            };
-                            dipoles_omega.push(dipole);
-                        }
+                        // Build dipoles at omega.
+                        let dipoles_omega = build_dipoles(&geom, wl, env_n, &resolve_eps).ok()?;
 
-                        // Build dipoles at 2ω (skip wavelength if material out of range).
-                        let mut dipoles_2omega = Vec::with_capacity(n);
-                        for i in 0..n {
-                            let eps = resolve_eps(&geom.materials[i], wl_2omega).ok()?;
-                            let volume = geom.spacings[i].powi(3);
-                            let f = geom.fill_fractions[i];
-                            let dipole = if let Some(hint) = &geom.hints[i] {
-                                let tensor = ellipsoid_polarisability_tensor(
-                                    volume, hint.depol_factors, eps, epsilon_m, k_2omega,
-                                    hint.rotation,
-                                );
-                                Dipole { position: geom.positions[i], polarisability: tensor.map(|v| v * f) }
-                            } else {
-                                let alpha_rrcm = radiative_correction(
-                                    clausius_mossotti(volume, eps, epsilon_m),
-                                    k_2omega,
-                                );
-                                let alpha = alpha_rrcm * f;
-                                Dipole::isotropic(geom.positions[i], alpha)
-                            };
-                            dipoles_2omega.push(dipole);
-                        }
+                        // Build dipoles at 2omega (skip wavelength if material out of range).
+                        let dipoles_2omega = build_dipoles(&geom, wl_2omega, env_n, &resolve_eps).ok()?;
 
-                        // Linear solve at ω.
+                        // Linear solve at omega.
                         let omega_response =
                             solver_x.solve_dipoles(&dipoles_omega, wl, &params).ok()?;
 
-                        // SHG solve at 2ω.
+                        // SHG solve at 2omega.
                         let shg = compute_shg_response(
                             &solver_x,
                             &omega_response,
@@ -552,7 +486,7 @@ impl LuminaApp {
                 Vec::new()
             };
 
-            // ── THG sweep (optional) ────────────────────────────────────────
+            // -- THG sweep (optional) ----------------------------------------
             let thg_spectra: Vec<(f64, f64)> = if enable_thg {
                 use lumina_core::nonlinear::compute_thg_response;
                 use lumina_core::types::Chi3Tensor;
@@ -566,66 +500,24 @@ impl LuminaApp {
                 };
                 let chi3_tensors = vec![chi3; n];
 
-                dbg("THG sweep…".to_string());
+                dbg("THG sweep...".to_string());
 
                 let thg_results: Vec<Option<(f64, f64)>> = wl_pool.install(|| wavelengths
                     .par_iter()
                     .map(|&wl| {
                         let wl_3omega = wl / 3.0;
-                        let k_omega = k_of(wl);
-                        let k_3omega = k_of(wl_3omega);
 
-                        // Build dipoles at ω.
-                        let mut dipoles_omega = Vec::with_capacity(n);
-                        for i in 0..n {
-                            let eps = resolve_eps(&geom.materials[i], wl).ok()?;
-                            let volume = geom.spacings[i].powi(3);
-                            let f = geom.fill_fractions[i];
-                            let dipole = if let Some(hint) = &geom.hints[i] {
-                                let tensor = ellipsoid_polarisability_tensor(
-                                    volume, hint.depol_factors, eps, epsilon_m, k_omega,
-                                    hint.rotation,
-                                );
-                                Dipole { position: geom.positions[i], polarisability: tensor.map(|v| v * f) }
-                            } else {
-                                let alpha_rrcm = radiative_correction(
-                                    clausius_mossotti(volume, eps, epsilon_m),
-                                    k_omega,
-                                );
-                                let alpha = alpha_rrcm * f;
-                                Dipole::isotropic(geom.positions[i], alpha)
-                            };
-                            dipoles_omega.push(dipole);
-                        }
+                        // Build dipoles at omega.
+                        let dipoles_omega = build_dipoles(&geom, wl, env_n, &resolve_eps).ok()?;
 
-                        // Build dipoles at 3ω (skip wavelength if material out of range).
-                        let mut dipoles_3omega = Vec::with_capacity(n);
-                        for i in 0..n {
-                            let eps = resolve_eps(&geom.materials[i], wl_3omega).ok()?;
-                            let volume = geom.spacings[i].powi(3);
-                            let f = geom.fill_fractions[i];
-                            let dipole = if let Some(hint) = &geom.hints[i] {
-                                let tensor = ellipsoid_polarisability_tensor(
-                                    volume, hint.depol_factors, eps, epsilon_m, k_3omega,
-                                    hint.rotation,
-                                );
-                                Dipole { position: geom.positions[i], polarisability: tensor.map(|v| v * f) }
-                            } else {
-                                let alpha_rrcm = radiative_correction(
-                                    clausius_mossotti(volume, eps, epsilon_m),
-                                    k_3omega,
-                                );
-                                let alpha = alpha_rrcm * f;
-                                Dipole::isotropic(geom.positions[i], alpha)
-                            };
-                            dipoles_3omega.push(dipole);
-                        }
+                        // Build dipoles at 3omega (skip wavelength if material out of range).
+                        let dipoles_3omega = build_dipoles(&geom, wl_3omega, env_n, &resolve_eps).ok()?;
 
-                        // Linear solve at ω.
+                        // Linear solve at omega.
                         let omega_response =
                             solver_x.solve_dipoles(&dipoles_omega, wl, &params).ok()?;
 
-                        // THG solve at 3ω.
+                        // THG solve at 3omega.
                         let thg = compute_thg_response(
                             &solver_x,
                             &omega_response,

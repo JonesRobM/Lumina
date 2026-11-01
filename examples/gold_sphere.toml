@@ -9,14 +9,12 @@ environment_n = 1.0  # Vacuum
 
 [[geometry.object]]
 name = "Au_Sphere_20nm"
-type = "sphere"
-centre = [0.0, 0.0, 0.0]
-radius = 20.0
 material = "Au_JC"
 dipole_spacing = 2.0  # nm
+position = [0.0, 0.0, 0.0]
+shape = { type = "sphere", radius = 20.0 }
 
 [output]
 directory = "./output/gold_sphere"
 save_spectra = true
 save_near_field = true
-save_dipoles = false

@@ -17,21 +17,21 @@ Propagates E and B fields on a spatial grid in the time domain. Handles arbitrar
 
 ## Material Classes Beyond Plasmonics
 
-- **Ceramics** — High-refractive-index dielectrics (TiO2, Si3N4) for Mie resonances.
-- **Composites** — Effective medium theories (Maxwell-Garnett, Bruggeman) for mixed materials.
-- **2D Materials** — Surface conductivity models for graphene, MoS2, and other layered materials.
-- **Active Media** — Gain materials for lasing and loss compensation studies.
+- **Ceramics** -- High-refractive-index dielectrics (TiO2, Si3N4) for Mie resonances.
+- **Composites** -- Effective medium theories (Maxwell-Garnett, Bruggeman) for mixed materials.
+- **2D Materials** -- Surface conductivity models for graphene, MoS2, and other layered materials.
+- **Active Media** -- Gain materials for lasing and loss compensation studies.
 
 ## Advanced Physics
 
-- **Magnetic dipoles** — Extend beyond electric dipoles to include magnetic dipole and electric quadrupole contributions.
-- **Substrate effects** — Image dipole method or layered-medium Green's function for particles on or near surfaces.
-- **Thermal effects** — Temperature-dependent material properties and photothermal heating.
-- **Quantum corrections** — Nonlocal dielectric response and quantum tunnelling for sub-nanometre gaps.
+- **Magnetic dipoles** -- Extend beyond electric dipoles to include magnetic dipole and electric quadrupole contributions.
+- **Substrate effects** -- Image dipole method or layered-medium Green's function for particles on or near surfaces.
+- **Thermal effects** -- Temperature-dependent material properties and photothermal heating.
+- **Quantum corrections** -- Nonlocal dielectric response and quantum tunnelling for sub-nanometre gaps.
 
 ## Workflow & Infrastructure
 
 - **Python bindings** via PyO3 for integration with the scientific Python ecosystem.
 - **Jupyter widget** for interactive notebook-based simulations.
-- **Cloud deployment** — containerised solver for cloud HPC (AWS, Azure, GCP).
-- **Database** — Materials and results database with search and comparison tools.
+- **Cloud deployment** -- containerised solver for cloud HPC (AWS, Azure, GCP).
+- **Database** -- Materials and results database with search and comparison tools.

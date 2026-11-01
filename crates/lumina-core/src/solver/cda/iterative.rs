@@ -101,7 +101,7 @@ pub fn solve_gmres(
             if h_jp1_j > 1e-30 {
                 v_basis.push(w.mapv(|c| c / Complex64::from(h_jp1_j)));
             } else {
-                // Lucky breakdown — exact solution in the Krylov subspace
+                // Lucky breakdown -- exact solution in the Krylov subspace
                 v_basis.push(Array1::zeros(n));
             }
 

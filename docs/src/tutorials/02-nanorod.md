@@ -10,10 +10,10 @@
 
 A nanorod supports two distinct plasmon modes:
 
-- **Transverse mode** — electrons oscillate perpendicular to the rod axis (~520 nm for Au, similar to a sphere)
-- **Longitudinal mode** — electrons oscillate along the rod axis; resonance wavelength depends strongly on aspect ratio AR = length/diameter
+- **Transverse mode** -- electrons oscillate perpendicular to the rod axis (~520 nm for Au, similar to a sphere)
+- **Longitudinal mode** -- electrons oscillate along the rod axis; resonance wavelength depends strongly on aspect ratio AR = length/diameter
 
-Empirically, the longitudinal LSPR red-shifts by roughly 90–100 nm per unit of aspect ratio for gold nanorods in water. This tutorial reproduces that trend using the CDA.
+Empirically, the longitudinal LSPR red-shifts by roughly 90-100 nm per unit of aspect ratio for gold nanorods in water. This tutorial reproduces that trend using the CDA.
 
 ---
 
@@ -22,7 +22,7 @@ Empirically, the longitudinal LSPR red-shifts by roughly 90–100 nm per unit of
 Create `examples/nanorod_ar3.toml`:
 
 ```toml
-# Tutorial 2 — Au nanorod, AR=3, in water
+# Tutorial 2 -- Au nanorod, AR=3, in water
 [simulation]
 wavelengths   = { range = [400.0, 900.0], points = 100 }
 environment_n = 1.33        # water
@@ -33,7 +33,7 @@ type          = "cylinder"
 base_centre   = [0.0, 0.0, -30.0]   # rod centred at origin
 axis          = [0.0, 0.0, 1.0]      # along z
 length        = 60.0                  # nm
-radius        = 10.0                  # nm  → AR = length/(2r) = 3
+radius        = 10.0                  # nm  -> AR = length/(2r) = 3
 material      = "Au_JC"
 dipole_spacing = 2.0                  # nm
 
@@ -104,7 +104,7 @@ for ar, colour in zip([2, 3, 4, 5], colours):
     peak_wavelengths.append(df.loc[idx, "wavelength_nm"])
 
 ax.set_xlabel("Wavelength (nm)")
-ax.set_ylabel("Extinction Cross-Section (nm²)")
+ax.set_ylabel("Extinction Cross-Section (nm^2)")
 ax.set_title("Au nanorod: aspect ratio dependence of longitudinal LSPR")
 ax.legend()
 plt.tight_layout()
@@ -119,23 +119,23 @@ ax2.set_title("Plasmon red-shift with aspect ratio")
 # Linear fit
 m, b = np.polyfit([2, 3, 4, 5], peak_wavelengths, 1)
 ax2_x = np.array([1.5, 5.5])
-ax2.plot(ax2_x, m * ax2_x + b, "r--", label=f"slope ≈ {m:.0f} nm/AR")
+ax2.plot(ax2_x, m * ax2_x + b, "r--", label=f"slope ~= {m:.0f} nm/AR")
 ax2.legend()
 plt.tight_layout()
 plt.savefig("nanorod_redshift.png", dpi=150)
 print(f"Longitudinal LSPR red-shifts by ~{m:.0f} nm per unit aspect ratio")
 ```
 
-Expected output: roughly 80–100 nm red-shift per unit aspect ratio in water.
+Expected output: roughly 80-100 nm red-shift per unit aspect ratio in water.
 
 ---
 
 ## Step 4: Polarisation Dependence
 
-The longitudinal mode is excited when the incident electric field is **parallel to the rod axis**. By default, Lumina uses an x-polarised plane wave propagating along z. To excite the longitudinal mode of a z-oriented rod you need x-polarisation — this works by default. If your rod is oriented along x, rotate it using the `axis` parameter:
+The longitudinal mode is excited when the incident electric field is **parallel to the rod axis**. By default, Lumina uses an x-polarised plane wave propagating along z. To excite the longitudinal mode of a z-oriented rod you need x-polarisation -- this works by default. If your rod is oriented along x, rotate it using the `axis` parameter:
 
 ```toml
-axis = [1.0, 0.0, 0.0]   # rod along x → x-polarised wave excites longitudinal mode
+axis = [1.0, 0.0, 0.0]   # rod along x -> x-polarised wave excites longitudinal mode
 ```
 
 Since v0.1.3, the GUI simulation panel includes a polarisation selector (x-pol / y-pol / circular) that controls the incident field direction.
@@ -165,11 +165,11 @@ Switch the projection plane dropdown between **XY**, **XZ**, **YZ** to inspect t
 
 These values are consistent with published experimental data for chemically synthesised nanorods (Nikoobakht & El-Sayed 2003).
 
-> **Accuracy note:** CDA with d=2 nm gives ~15–25% error on the peak cross-section magnitude due to the staircase boundary. The peak *wavelength* is typically reproduced to within 5–10 nm because it is governed by the aspect ratio geometry rather than the fine surface discretisation.
+> **Accuracy note:** CDA with d=2 nm gives ~15-25% error on the peak cross-section magnitude due to the staircase boundary. The peak *wavelength* is typically reproduced to within 5-10 nm because it is governed by the aspect ratio geometry rather than the fine surface discretisation.
 
 ---
 
 ## Next Steps
 
-- [Tutorial 3: Near-Field Map](./03-near-field.md) — map the hotspots at the nanorod tips
-- [Tutorial 4: Chiral Helix](./04-chiral-helix.md) — a multi-turn helix with chiroptical response
+- [Tutorial 3: Near-Field Map](./03-near-field.md) -- map the hotspots at the nanorod tips
+- [Tutorial 4: Chiral Helix](./04-chiral-helix.md) -- a multi-turn helix with chiroptical response

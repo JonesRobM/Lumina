@@ -4,10 +4,10 @@
 
   <!-- Title -->
   <text x="250" y="30" font-family="Arial, sans-serif" font-size="16" font-weight="bold" text-anchor="middle" fill="#333">
-    Near-Field Intensity Map (|E|² at λ=520nm)
+    Near-Field Intensity Map (|E|^2 at lambda=520nm)
   </text>
 
-  <!-- Define gradient for heatmap (hot colormap: black → red → yellow → white) -->
+  <!-- Define gradient for heatmap (hot colormap: black -> red -> yellow -> white) -->
   <defs>
     <radialGradient id="hotGradient" cx="50%" cy="50%" r="50%">
       <stop offset="0%" style="stop-color:#ffffff; stop-opacity:1"/>
@@ -61,7 +61,7 @@
 
   <!-- Color scale legend -->
   <g transform="translate(420, 60)">
-    <text x="5" y="0" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#333">|E|²</text>
+    <text x="5" y="0" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#333">|E|^2</text>
 
     <!-- Color bar -->
     <defs>
@@ -82,6 +82,6 @@
 
   <!-- Info text -->
   <text x="250" y="50" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#666" font-style="italic">
-    40×40 grid, xy plane
+    40x40 grid, xy plane
   </text>
 </svg>

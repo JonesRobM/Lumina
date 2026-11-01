@@ -9,11 +9,10 @@ environment_n = 1.0
 
 [[geometry.object]]
 name = "Au_Sphere_Small"
-type = "sphere"
-centre = [0.0, 0.0, 0.0]
-radius = 10.0
 material = "Au_JC"
 dipole_spacing = 4.0
+position = [0.0, 0.0, 0.0]
+shape = { type = "sphere", radius = 10.0 }
 
 [output]
 directory = "./output/quick_test"

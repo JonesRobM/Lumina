@@ -1,9 +1,9 @@
 //! File format parsers for importing molecular and mesh geometries.
 //!
 //! Supported formats:
-//! - [`.xyz`](xyz) — XYZ molecular coordinate files
-//! - [`.cif`](cif) — Crystallographic Information Files
-//! - [`.obj`](obj) — Wavefront OBJ mesh files
+//! - [`.xyz`](xyz) -- XYZ molecular coordinate files
+//! - [`.cif`](cif) -- Crystallographic Information Files
+//! - [`.obj`](obj) -- Wavefront OBJ mesh files
 
 pub mod cif;
 pub mod obj;

@@ -37,11 +37,11 @@
   <line x1="100" y1="420" x2="700" y2="420" stroke="#333" stroke-width="2"/>
   <line x1="100" y1="80" x2="100" y2="420" stroke="#333" stroke-width="2"/>
 
-  <!-- Direct solver (LU) - O(N³) scaling -->
+  <!-- Direct solver (LU) - O(N^3) scaling -->
   <path d="M 120,410 L 160,400 L 200,380 L 240,340 L 280,280 L 320,200 L 360,110"
         fill="none" stroke="#e74c3c" stroke-width="3"/>
 
-  <!-- GMRES solver - O(N² log N) scaling -->
+  <!-- GMRES solver - O(N^2 log N) scaling -->
   <path d="M 120,410 L 160,405 L 200,395 L 240,380 L 280,360 L 320,335 L 360,310 L 400,285 L 440,260 L 480,240 L 520,220 L 560,202 L 600,185 L 640,170 L 680,155"
         fill="none" stroke="#3498db" stroke-width="3"/>
 
@@ -82,13 +82,13 @@
   </text>
 
   <!-- X-axis labels (log scale) -->
-  <text x="100" y="440" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#666">10²</text>
-  <text x="200" y="440" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#666">10³</text>
-  <text x="300" y="440" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#666">2×10³</text>
-  <text x="400" y="440" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#666">5×10³</text>
-  <text x="500" y="440" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#666">10⁴</text>
-  <text x="600" y="440" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#666">2×10⁴</text>
-  <text x="700" y="440" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#666">5×10⁴</text>
+  <text x="100" y="440" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#666">10^2</text>
+  <text x="200" y="440" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#666">10^3</text>
+  <text x="300" y="440" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#666">2x10^3</text>
+  <text x="400" y="440" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#666">5x10^3</text>
+  <text x="500" y="440" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#666">10^4</text>
+  <text x="600" y="440" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#666">2x10^4</text>
+  <text x="700" y="440" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#666">5x10^4</text>
 
   <!-- Y-axis labels (log scale) -->
   <text x="85" y="425" font-family="Arial, sans-serif" font-size="11" text-anchor="end" fill="#666">0.01s</text>
@@ -128,18 +128,18 @@
 
   <!-- Scaling annotations -->
   <g font-family="Arial, sans-serif" font-size="10" font-style="italic" fill="#7f8c8d">
-    <text x="340" y="130" transform="rotate(-60 340 130)">O(N³)</text>
-    <text x="580" y="180">O(N² log N)</text>
+    <text x="340" y="130" transform="rotate(-60 340 130)">O(N^3)</text>
+    <text x="580" y="180">O(N^2 log N)</text>
   </g>
 
   <!-- Performance notes -->
   <g transform="translate(110, 110)" font-family="Arial, sans-serif" font-size="10" fill="#34495e">
     <rect x="0" y="0" width="180" height="75" fill="#ecf0f1" stroke="#bdc3c7" stroke-width="1" rx="3"/>
     <text x="90" y="15" text-anchor="middle" font-weight="bold" font-size="11" fill="#2c3e50">Quick Facts</text>
-    <text x="10" y="32">• Direct: Fast for N &lt; 1000</text>
-    <text x="10" y="46">• GMRES: Scales to N &gt; 10⁴</text>
-    <text x="10" y="60">• FCD: ~15% overhead</text>
-    <text x="10" y="74">• Parallel: 12 threads</text>
+    <text x="10" y="32">* Direct: Fast for N &lt; 1000</text>
+    <text x="10" y="46">* GMRES: Scales to N &gt; 10^4</text>
+    <text x="10" y="60">* FCD: ~15% overhead</text>
+    <text x="10" y="74">* Parallel: 12 threads</text>
   </g>
 
   <!-- Memory note -->
@@ -148,10 +148,10 @@
       <tspan font-weight="bold">Memory:</tspan>
     </text>
     <text x="0" y="14" font-family="Arial, sans-serif" font-size="9" fill="#666">
-      Direct: ~10 GB @ N=10⁴
+      Direct: ~10 GB @ N=10^4
     </text>
     <text x="0" y="26" font-family="Arial, sans-serif" font-size="9" fill="#666">
-      GMRES: ~0.5 GB @ N=10⁴
+      GMRES: ~0.5 GB @ N=10^4
     </text>
   </g>
 </svg>

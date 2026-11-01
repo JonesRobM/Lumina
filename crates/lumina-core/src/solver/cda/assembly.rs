@@ -26,15 +26,16 @@ use lumina_geometry::lattice::LatticeSpec;
 ///
 /// # Arguments
 /// * `dipoles`   - Slice of dipoles with positions and polarisabilities.
-/// * `k`         - Wavenumber in the medium (nm⁻¹).
+/// * `k`         - Wavenumber in the medium (nm^-1).
 /// * `use_fcd`   - If true, use the FCD volume-averaged Green's function for
 ///   near-field interactions. Ignored for periodic assemblies.
-/// * `cell_size` - Dipole lattice spacing (nm). Used by FCD. Ignored if
-///   `use_fcd` is false.
+/// FCD's cell size is taken per dipole from [`Dipole::cell_size`] -- the averaging
+/// runs over the *source* cell, so a scene mixing spacings needs one value per
+/// dipole rather than a solver-wide scalar.
 /// * `lattice`   - If `Some`, uses the periodic Ewald Green's function instead
 ///   of the free-space Green's function.
-/// * `k_bloch`   - In-plane Bloch wavevector **k**∥ (nm⁻¹). Used only when
-///   `lattice` is `Some`. Pass `[0;3]` for the Γ point.
+/// * `k_bloch`   - In-plane Bloch wavevector **k**|| (nm^-1). Used only when
+///   `lattice` is `Some`. Pass `[0;3]` for the Gamma point.
 /// * `substrate` - If `Some`, adds the substrate correction (image-dipole or
 ///   Sommerfeld integral) for each dipole pair. When both `lattice` and
 ///   `substrate` are present, the Fresnel image-dipole sum is also
@@ -46,7 +47,6 @@ pub fn assemble_interaction_matrix(
     dipoles: &[Dipole],
     k: f64,
     use_fcd: bool,
-    cell_size: f64,
     lattice: Option<&LatticeSpec>,
     k_bloch: [f64; 3],
     substrate: Option<&SubstrateRuntime>,
@@ -56,8 +56,8 @@ pub fn assemble_interaction_matrix(
     let mut matrix = Array2::<Complex64>::zeros((dim, dim));
 
     // Diagonal blocks: inverse polarisability (cheap, sequential).
-    // For periodic arrays, the Ewald self-image sum (R≠0) is added to the
-    // diagonal in the off-diagonal loop below (i==j, R≠0 lattice images).
+    // For periodic arrays, the Ewald self-image sum (R!=0) is added to the
+    // diagonal in the off-diagonal loop below (i==j, R!=0 lattice images).
     for i in 0..n {
         let inv_alpha = invert_3x3(&dipoles[i].polarisability);
         for row in 0..3 {
@@ -67,7 +67,7 @@ pub fn assemble_interaction_matrix(
         }
     }
 
-    // Off-diagonal blocks: −G(r_i, r_j), computed in parallel.
+    // Off-diagonal blocks: -G(r_i, r_j), computed in parallel.
     // For periodic systems, each off-diagonal block also includes the sum
     // over lattice images via EwaldGreens.
     //
@@ -81,13 +81,13 @@ pub fn assemble_interaction_matrix(
         .map(|lat| std::sync::Arc::new(EwaldGreens::new(lat.clone())));
 
     (0..n).into_par_iter().for_each(|i| {
-        // Clone the Arc for this thread (cheap — increments ref-count only).
+        // Clone the Arc for this thread (cheap -- increments ref-count only).
         let ewald_ref = ewald.as_ref().map(std::sync::Arc::as_ref);
 
         for j in 0..n {
-            // ── Direct G contribution ──────────────────────────────────────
+            // -- Direct G contribution --------------------------------------
             // In free-space (no Ewald), the self-block i==j is skipped:
-            // the α⁻¹ diagonal is already set above and there is no
+            // the alpha^-1 diagonal is already set above and there is no
             // R=0 lattice-image contribution.
             let skip_direct = i == j && ewald_ref.is_none();
             if !skip_direct {
@@ -106,7 +106,8 @@ pub fn assemble_interaction_matrix(
                         &dipoles[i].position,
                         &dipoles[j].position,
                         k,
-                        cell_size,
+                        // The source cell: FCD averages G over V_j.
+                        dipoles[j].cell_size,
                     )
                 } else {
                     super::greens::dyadic_greens_tensor(
@@ -126,7 +127,7 @@ pub fn assemble_interaction_matrix(
                 }
             }
 
-            // ── Substrate contribution ──────────────────────────────────────
+            // -- Substrate contribution --------------------------------------
             // Runs for ALL (i, j) pairs, including the self-image i == j.
             if let Some(sub_rt) = substrate {
                 let rj = dipoles[j].position;
@@ -155,7 +156,7 @@ pub fn assemble_interaction_matrix(
                         }
                     }
                     SubstrateRuntime::Sommerfeld { z_interface, greens } => {
-                        // Full Sommerfeld reflected Green's tensor — no image position needed.
+                        // Full Sommerfeld reflected Green's tensor -- no image position needed.
                         let g_refl = greens.evaluate(ri, rj, *z_interface);
                         for (row, g_row) in g_refl.iter().enumerate() {
                             for (col, &g_val) in g_row.iter().enumerate() {
@@ -193,16 +194,16 @@ pub fn build_incident_field_vector(
     rhs
 }
 
-/// Compute the matrix-vector product **A · x** without explicitly assembling
+/// Compute the matrix-vector product **A * x** without explicitly assembling
 /// the $3N \times 3N$ interaction matrix.
 ///
-/// Functionally identical to `assemble_interaction_matrix(…).dot(x)` but
+/// Functionally identical to `assemble_interaction_matrix(...).dot(x)` but
 /// requires only $O(N)$ working memory instead of $O(N^2)$, making it safe
 /// for large systems (N > 3 000) where the full matrix would exhaust RAM.
 ///
 /// Each output row-block $i$ is independent, so the outer loop is
-/// parallelised with Rayon. The cost per call is $O(N^2)$ — the same as one
-/// explicit matrix–vector product.
+/// parallelised with Rayon. The cost per call is $O(N^2)$ -- the same as one
+/// explicit matrix-vector product.
 ///
 /// # Arguments
 /// Same as [`assemble_interaction_matrix`], plus `x` (the input vector, length $3N$).
@@ -211,7 +212,6 @@ pub fn matvec_on_the_fly(
     x: &Array1<Complex64>,
     k: f64,
     use_fcd: bool,
-    cell_size: f64,
     lattice: Option<&LatticeSpec>,
     k_bloch: [f64; 3],
     substrate: Option<&SubstrateRuntime>,
@@ -227,7 +227,7 @@ pub fn matvec_on_the_fly(
             let ewald_ref = ewald.as_ref().map(std::sync::Arc::as_ref);
             let mut yi = [Complex64::from(0.0); 3];
 
-            // Diagonal block: α_i^{-1} · x[3i..3i+2]
+            // Diagonal block: alpha_i^{-1} * x[3i..3i+2]
             let inv_alpha = invert_3x3(&dipoles[i].polarisability);
             for a in 0..3 {
                 for b in 0..3 {
@@ -236,9 +236,9 @@ pub fn matvec_on_the_fly(
             }
 
             for j in 0..n {
-                // ── Direct Green's function contribution ────────────────────
+                // -- Direct Green's function contribution --------------------
                 // For free-space (no Ewald) the i==j self-block is skipped;
-                // the α⁻¹ diagonal is already handled above.
+                // the alpha^-1 diagonal is already handled above.
                 let skip_direct = i == j && ewald_ref.is_none();
                 if !skip_direct {
                     let g = if let Some(eg) = ewald_ref {
@@ -253,7 +253,8 @@ pub fn matvec_on_the_fly(
                             &dipoles[i].position,
                             &dipoles[j].position,
                             k,
-                            cell_size,
+                            // The source cell: FCD averages G over V_j.
+                            dipoles[j].cell_size,
                         )
                     } else {
                         super::greens::dyadic_greens_tensor(
@@ -269,7 +270,7 @@ pub fn matvec_on_the_fly(
                     }
                 }
 
-                // ── Substrate contribution ───────────────────────────────────
+                // -- Substrate contribution -----------------------------------
                 // Runs for ALL j (including i == j self-image).
                 if let Some(sub_rt) = substrate {
                     let rj = dipoles[j].position;
@@ -317,11 +318,39 @@ pub fn matvec_on_the_fly(
     y
 }
 
-/// Compute the 3×3 inverse polarisability block for each dipole.
+/// Compute the 3x3 inverse polarisability block for each dipole.
 ///
 /// Returns a `Vec` of length N, each a row-major `[Complex64; 9]`.
 /// This is a pure inversion of each dipole's pre-built polarisability tensor;
 /// no k, FCD, or cell_size dependency.
+/// Block-Jacobi preconditioner `M^-1` for the CDA system.
+///
+/// The interaction matrix has `A_ii = alpha^-1` on its diagonal blocks, so the inverse of
+/// the block diagonal is simply each dipole's polarisability tensor -- no factorisation
+/// required. Unpreconditioned GMRES(30) on this system needed ~1000 matvecs at
+/// N ~= 1000, which made the iterative path 9-14x *slower* than a direct LU solve.
+pub(crate) fn jacobi_preconditioner(dipoles: &[Dipole]) -> Vec<[Complex64; 9]> {
+    dipoles.iter().map(|d| d.polarisability).collect()
+}
+
+/// Apply the block-Jacobi preconditioner to a 3N vector, block by block.
+pub(crate) fn apply_preconditioner(
+    blocks: &[[Complex64; 9]],
+    v: &Array1<Complex64>,
+) -> Array1<Complex64> {
+    let mut out = Array1::zeros(v.len());
+    for (i, block) in blocks.iter().enumerate() {
+        for a in 0..3 {
+            let mut acc = Complex64::from(0.0);
+            for b in 0..3 {
+                acc += block[3 * a + b] * v[3 * i + b];
+            }
+            out[3 * i + a] = acc;
+        }
+    }
+    out
+}
+
 pub fn compute_diagonal_blocks(dipoles: &[Dipole]) -> Vec<[Complex64; 9]> {
     dipoles.iter().map(|d| invert_3x3(&d.polarisability)).collect()
 }
@@ -390,4 +419,87 @@ mod tests {
         assert!((inv[4] - expected).norm() < 1e-12);
         assert!((inv[8] - expected).norm() < 1e-12);
     }
+
+    /// `A_ii = alpha^-1`, so the inverse of the block diagonal is the polarisability itself.
+    /// Applying the preconditioner to `A_ii * v` must return `v`.
+    #[test]
+    fn jacobi_preconditioner_is_the_polarisability_itself() {
+        let alpha = Complex64::new(1200.0, 45.0);
+        let d = Dipole::isotropic([0.0, 0.0, 0.0], alpha, 2.0);
+        let blocks = jacobi_preconditioner(std::slice::from_ref(&d));
+
+        let inv_alpha = invert_3x3(&d.polarisability);
+        let v = Array1::from(vec![
+            Complex64::new(1.0, 0.0),
+            Complex64::new(0.0, 2.0),
+            Complex64::new(-3.0, 1.0),
+        ]);
+        let mut av = Array1::zeros(3);
+        for a in 0..3 {
+            for b in 0..3 {
+                av[a] += inv_alpha[3 * a + b] * v[b];
+            }
+        }
+
+        let round_trip = apply_preconditioner(&blocks, &av);
+        for c in 0..3 {
+            assert!(
+                (round_trip[c] - v[c]).norm() < 1e-9,
+                "M^-1*A_ii*v should be v at component {c}: got {:?}, want {:?}",
+                round_trip[c], v[c]
+            );
+        }
+    }
+
+    /// The preconditioner must act per dipole, not broadcast one block to all.
+    #[test]
+    fn preconditioner_uses_each_dipole_own_block() {
+        let d0 = Dipole::isotropic([0.0; 3], Complex64::new(2.0, 0.0), 2.0);
+        let d1 = Dipole::isotropic([1.0, 0.0, 0.0], Complex64::new(5.0, 0.0), 2.0);
+        let blocks = jacobi_preconditioner(&[d0, d1]);
+
+        let v = Array1::from(vec![Complex64::from(1.0); 6]);
+        let out = apply_preconditioner(&blocks, &v);
+
+        assert!((out[0] - Complex64::new(2.0, 0.0)).norm() < 1e-12, "dipole 0: {:?}", out[0]);
+        assert!((out[3] - Complex64::new(5.0, 0.0)).norm() < 1e-12, "dipole 1: {:?}", out[3]);
+    }
+
+
+    /// FCD averages over the **source** cell: G_IGT(r_i,r_j) = (1/V_j)integral_{V_j} G(r_i,r')dr'.
+    /// So block (i,j) must use dipole *j*'s cell size. Using the observer's, or a
+    /// solver-wide scalar, is wrong whenever a scene mixes spacings.
+    #[test]
+    fn fcd_uses_the_source_cell_size_for_each_pair() {
+        use super::super::greens::dyadic_greens_tensor_filtered;
+
+        let d0 = Dipole::isotropic([0.0, 0.0, 0.0], Complex64::new(500.0, 20.0), 2.0);
+        let d1 = Dipole::isotropic([3.0, 0.0, 0.0], Complex64::new(500.0, 20.0), 5.0);
+        let k = 2.0 * std::f64::consts::PI / 600.0;
+
+        let m = assemble_interaction_matrix(
+            &[d0.clone(), d1.clone()], k, true, None, [0.0; 3], None,
+        );
+
+        // Block (0,1): observer is dipole 0, source is dipole 1 -> cell size 5.0.
+        let want = dyadic_greens_tensor_filtered(&d0.position, &d1.position, k, d1.cell_size);
+        let wrong = dyadic_greens_tensor_filtered(&d0.position, &d1.position, k, d0.cell_size);
+        assert!(
+            (want[0][0] - wrong[0][0]).norm() > 1e-12,
+            "fixture must distinguish the two cell sizes, else this test is vacuous"
+        );
+        assert!(
+            (m[[0, 3]] + want[0][0]).norm() < 1e-12,
+            "block (0,1) must use the SOURCE cell size: got {:?}, want {:?}",
+            m[[0, 3]], -want[0][0]
+        );
+
+        // And the transpose block uses dipole 0's cell size.
+        let want10 = dyadic_greens_tensor_filtered(&d1.position, &d0.position, k, d0.cell_size);
+        assert!(
+            (m[[3, 0]] + want10[0][0]).norm() < 1e-12,
+            "block (1,0) must use dipole 0 as the source"
+        );
+    }
+
 }

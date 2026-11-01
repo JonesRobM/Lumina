@@ -1,4 +1,4 @@
-//! Ellipsoid depolarisation factors via Gauss–Legendre quadrature.
+//! Ellipsoid depolarisation factors via Gauss-Legendre quadrature.
 //!
 //! The depolarisation factors $L_x, L_y, L_z$ for an ellipsoid with semi-axes
 //! $[a, b, c]$ are defined by:
@@ -21,10 +21,10 @@
 //! where $q_j(u) = s_i^2 + (a_j^2 - s_i^2)\,u^2$.
 //!
 //! For a sphere this reduces to $h(u) = 2u^2/a^3$, a polynomial, so 16-point
-//! Gauss–Legendre quadrature gives the exact answer. For general ellipsoids
+//! Gauss-Legendre quadrature gives the exact answer. For general ellipsoids
 //! the integrand is smooth and convergence is rapid.
 
-/// Eight positive Gauss–Legendre nodes on $[-1, 1]$ for the symmetric 16-point rule.
+/// Eight positive Gauss-Legendre nodes on $[-1, 1]$ for the symmetric 16-point rule.
 /// By symmetry the negative nodes are $-x_k$, both with weight $w_k$.
 /// Source: Abramowitz & Stegun, Table 25.4.
 const GL16_NODES_POS: [f64; 8] = [
@@ -59,10 +59,10 @@ const GL16_WEIGHTS: [f64; 8] = [
 /// For an oblate spheroid ($a = b > c$): $L_x = L_y < 1/3 < L_z$.
 ///
 /// # Arguments
-/// * `semi_axes` — `[a, b, c]` in nm (or any consistent unit).
+/// * `semi_axes` -- `[a, b, c]` in nm (or any consistent unit).
 ///
 /// # Panics
-/// Panics in debug mode if any semi-axis is ≤ 0.
+/// Panics in debug mode if any semi-axis is <= 0.
 pub fn ellipsoid_depol_factors(semi_axes: [f64; 3]) -> [f64; 3] {
     let [a, b, c] = semi_axes;
     debug_assert!(a > 0.0 && b > 0.0 && c > 0.0, "semi-axes must be positive");
@@ -121,7 +121,7 @@ mod tests {
 
     #[test]
     fn test_depol_sphere() {
-        // For a sphere, GL integrates u² exactly → result is exact.
+        // For a sphere, GL integrates u^2 exactly -> result is exact.
         let [lx, ly, lz] = ellipsoid_depol_factors([10.0, 10.0, 10.0]);
         assert_close(lx, 1.0 / 3.0, 1e-12, "sphere Lx");
         assert_close(ly, 1.0 / 3.0, 1e-12, "sphere Ly");
@@ -167,8 +167,8 @@ mod tests {
     fn test_depol_prolate_analytical() {
         // Prolate spheroid a=20, b=c=10.
         // Closed form (Bohren & Huffman, Appendix B):
-        //   L_a = (1 - e²) / e² * (artanh(e) / e − 1)
-        //   where e = sqrt(1 − (b/a)²)
+        //   L_a = (1 - e^2) / e^2 * (artanh(e) / e - 1)
+        //   where e = sqrt(1 - (b/a)^2)
         let a = 20.0_f64;
         let b = 10.0_f64;
         let e2 = 1.0 - (b / a).powi(2);

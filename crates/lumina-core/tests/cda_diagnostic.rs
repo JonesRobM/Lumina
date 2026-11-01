@@ -8,6 +8,8 @@ use lumina_geometry::discretise::discretise_primitive;
 use lumina_geometry::primitives::{Primitive, Sphere};
 use num_complex::Complex64;
 
+mod common;
+
 /// Helper: run CDA for a sphere with given epsilon and compare to Mie.
 fn cda_vs_mie(
     radius: f64,
@@ -16,25 +18,13 @@ fn cda_vs_mie(
     epsilon: Complex64,
     n_medium: f64,
 ) -> (f64, f64, f64) {
-    let k = 2.0 * std::f64::consts::PI * n_medium / wavelength;
-    let epsilon_m = n_medium * n_medium;
 
     let sphere = Primitive::Sphere(Sphere {
         centre: [0.0, 0.0, 0.0],
         radius,
     });
     let lattice = discretise_primitive(&sphere, spacing);
-    let positions: Vec<[f64; 3]> = lattice.iter().map(|p| p.position).collect();
-
-    let dipoles: Vec<Dipole> = positions
-        .iter()
-        .map(|&pos| {
-            let volume = spacing.powi(3);
-            let alpha_cm = clausius_mossotti(volume, epsilon, epsilon_m);
-            let alpha = radiative_correction(alpha_cm, k);
-            Dipole::isotropic(pos, alpha)
-        })
-        .collect();
+    let dipoles = common::dipoles_with_constant_eps(&lattice, spacing, wavelength, n_medium, epsilon);
 
     let solver = CdaSolver::default();
     let params = SimulationParams {
@@ -50,7 +40,7 @@ fn cda_vs_mie(
     let rel_err = (cda.extinction - mie_ext).abs() / mie_ext;
 
     eprintln!(
-        "  ε=({:.2},{:.2}), N={}, CDA={:.4e}, Mie={:.4e}, err={:.1}%",
+        "  eps=({:.2},{:.2}), N={}, CDA={:.4e}, Mie={:.4e}, err={:.1}%",
         epsilon.re,
         epsilon.im,
         dipoles.len(),
@@ -107,14 +97,14 @@ fn test_cda_metallic_progression() {
         (Complex64::new(-17.0, 1.0), "Au-like 700nm"),
     ];
 
-    eprintln!("=== Metallic progression: R={}, d={}, λ={} ===", radius, spacing, wavelength);
+    eprintln!("=== Metallic progression: R={}, d={}, lambda={} ===", radius, spacing, wavelength);
     for (eps, label) in &test_cases {
         eprint!("{:20}: ", label);
         cda_vs_mie(radius, spacing, wavelength, *eps, n_medium);
     }
 }
 
-/// Test CDA for a single dipole (no interactions) — should match Rayleigh exactly.
+/// Test CDA for a single dipole (no interactions) -- should match Rayleigh exactly.
 #[test]
 fn test_cda_single_dipole() {
     let wavelength = 600.0;
@@ -129,7 +119,7 @@ fn test_cda_single_dipole() {
     let alpha_cm = clausius_mossotti(volume, epsilon, epsilon_m);
     let alpha = radiative_correction(alpha_cm, k);
 
-    let dipole = Dipole::isotropic([0.0, 0.0, 0.0], alpha);
+    let dipole = Dipole::isotropic([0.0, 0.0, 0.0], alpha, 2.0 * radius);
     let solver = CdaSolver::default();
     let params = SimulationParams {
         environment_n: n_medium,
@@ -146,7 +136,7 @@ fn test_cda_single_dipole() {
     // Mie result
     let (mie_ext, _, _) = mie_cross_sections(radius, wavelength, epsilon, n_medium);
 
-    eprintln!("=== Single dipole test (ε={:.1}+{:.1}i) ===", epsilon.re, epsilon.im);
+    eprintln!("=== Single dipole test (eps={:.1}+{:.1}i) ===", epsilon.re, epsilon.im);
     eprintln!("  CDA (1 dipole): {:.4e}", cda.extinction);
     eprintln!("  Rayleigh:       {:.4e}", c_ext_rayleigh);
     eprintln!("  Mie:            {:.4e}", mie_ext);

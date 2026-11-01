@@ -38,12 +38,34 @@ pub struct SimulationConfig {
     pub substrate: Option<SubstrateSpec>,
     /// Memory budget for caching the interaction matrix (GiB). Default: 2.0.
     ///
-    /// The CPU GMRES solver assembles and caches the 3N×3N matrix when it
+    /// The CPU GMRES solver assembles and caches the 3Nx3N matrix when it
     /// fits within this budget (fast BLAS matvec).  If the matrix exceeds the
     /// budget, an on-the-fly approach is used instead (O(N) memory, same
     /// arithmetic cost per iteration).  Increase this on nodes with ample RAM.
     #[serde(default = "default_matrix_memory_gib")]
     pub matrix_memory_gib: f64,
+    /// Use the Filtered Coupled Dipole (volume-averaged) Green's function for
+    /// near-field pairs. Default: true.
+    ///
+    /// Setting this to `false` makes the O(N log N) FFT matvec available for regular
+    /// cubic grids, which is otherwise unreachable from a job file.
+    #[serde(default = "default_use_fcd")]
+    pub use_fcd: bool,
+    /// Dipole counts above this use iterative GMRES; at or below it, a direct LU
+    /// solve (also subject to `matrix_memory_gib`). Default: 3000.
+    ///
+    /// The direct solver measured 9-14x faster than GMRES between N = 1000 and 1800,
+    /// so lower this only if memory is tight.
+    #[serde(default = "default_iterative_threshold")]
+    pub iterative_threshold: usize,
+}
+
+fn default_use_fcd() -> bool {
+    true
+}
+
+fn default_iterative_threshold() -> usize {
+    3000
 }
 
 fn default_backend() -> String {
@@ -119,13 +141,13 @@ fn default_true() -> bool {
 /// [nonlinear]
 /// enable_shg = true
 /// symmetry = "isotropic_surface"
-/// chi_zzz = [1.0, 0.0]   # [real, imag] in nm³
+/// chi_zzz = [1.0, 0.0]   # [real, imag] in nm^3
 /// chi_zxx = [0.3, 0.0]
 /// far_field = false
 ///
 /// enable_thg = true
 /// chi3_symmetry = "isotropic_bulk"
-/// chi3_xxxx = [1.0, 0.0]   # [real, imag] in nm⁶
+/// chi3_xxxx = [1.0, 0.0]   # [real, imag] in nm^6
 /// chi3_xxyy = [0.25, 0.0]
 /// ```
 #[derive(Debug, Deserialize, Default)]
@@ -133,14 +155,14 @@ pub struct NonlinearConfig {
     /// Enable second-harmonic generation (SHG) calculation. Default: false.
     #[serde(default)]
     pub enable_shg: bool,
-    /// χ^(2) symmetry class applied to every dipole.
-    /// Valid values: `"isotropic_surface"` (C_∞v, surface normal along **z**),
+    /// chi^(2) symmetry class applied to every dipole.
+    /// Valid values: `"isotropic_surface"` (C_infv, surface normal along **z**),
     /// `"zero"` (centrosymmetric, default).
     #[serde(default = "default_shg_symmetry")]
     pub symmetry: String,
-    /// χ_zzz component `[real, imag]` in nm³. Required for `isotropic_surface`.
+    /// chi_zzz component `[real, imag]` in nm^3. Required for `isotropic_surface`.
     pub chi_zzz: Option<[f64; 2]>,
-    /// χ_zxx component `[real, imag]` in nm³. Required for `isotropic_surface`.
+    /// chi_zxx component `[real, imag]` in nm^3. Required for `isotropic_surface`.
     pub chi_zxx: Option<[f64; 2]>,
     /// Compute far-field radiation pattern at $2\omega$. Default: false.
     #[serde(default)]
@@ -148,14 +170,14 @@ pub struct NonlinearConfig {
     /// Enable third-harmonic generation (THG) calculation. Default: false.
     #[serde(default)]
     pub enable_thg: bool,
-    /// χ^(3) symmetry class applied to every dipole.
+    /// chi^(3) symmetry class applied to every dipole.
     /// Valid values: `"isotropic_bulk"` (Kleinman-symmetric isotropic bulk),
     /// `"zero"` (default).
     #[serde(default = "default_chi3_symmetry")]
     pub chi3_symmetry: String,
-    /// χ_xxxx component `[real, imag]` in nm⁶. Required for `isotropic_bulk`.
+    /// chi_xxxx component `[real, imag]` in nm^6. Required for `isotropic_bulk`.
     pub chi3_xxxx: Option<[f64; 2]>,
-    /// χ_xxyy component `[real, imag]` in nm⁶. Required for `isotropic_bulk`.
+    /// chi_xxyy component `[real, imag]` in nm^6. Required for `isotropic_bulk`.
     pub chi3_xxyy: Option<[f64; 2]>,
 }
 

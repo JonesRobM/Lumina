@@ -134,11 +134,11 @@ impl ResultsPanel {
             ui.horizontal(|ui| {
                 ui.checkbox(&mut self.show_table, "Show data table");
 
-                if ui.button("Export CSV…").clicked() {
+                if ui.button("Export CSV...").clicked() {
                     export_spectra_csv_dialog(spectra);
                 }
 
-                if ui.button("Export JSON…").clicked() {
+                if ui.button("Export JSON...").clicked() {
                     export_spectra_json_dialog(spectra);
                 }
             });
@@ -183,7 +183,7 @@ impl ResultsPanel {
     fn near_field_view(&mut self, ui: &mut Ui) {
         if let Some(nf) = &self.near_field {
             ui.label(format!(
-                "Near-field map: {}×{} grid, {} points",
+                "Near-field map: {}x{} grid, {} points",
                 nf.nx, nf.ny, nf.field_intensity.len()
             ));
             ui.add_space(4.0);
@@ -271,7 +271,7 @@ impl ResultsPanel {
             // Normalise intensity
             let i_max = ff.intensity.iter().cloned().fold(0.0_f64, f64::max).max(1e-30);
 
-            // Extract E-plane (φ=0, ip=0) and H-plane (φ=π/2, ip≈n_phi/4)
+            // Extract E-plane (phi=0, ip=0) and H-plane (phi=pi/2, ip~=n_phi/4)
             let e_plane_phi_idx = 0usize;
             let h_plane_phi_idx = (n_phi / 4).min(n_phi - 1);
 
@@ -280,7 +280,7 @@ impl ResultsPanel {
                     let idx = it * n_phi + e_plane_phi_idx;
                     let r = (ff.intensity[idx] / i_max).sqrt();
                     let theta = ff.theta[idx];
-                    // Polar to Cartesian: x = r·sin(θ), y = r·cos(θ)
+                    // Polar to Cartesian: x = r*sin(theta), y = r*cos(theta)
                     [r * theta.sin(), r * theta.cos()]
                 })
                 .collect();
@@ -294,7 +294,7 @@ impl ResultsPanel {
                 })
                 .collect();
 
-            // Mirror the E-plane (negative x side, φ=π, ip≈n_phi/2)
+            // Mirror the E-plane (negative x side, phi=pi, ip~=n_phi/2)
             let e_plane_back_phi_idx = (n_phi / 2).min(n_phi - 1);
             let e_plane_back: egui_plot::PlotPoints = (0..n_theta)
                 .map(|it| {

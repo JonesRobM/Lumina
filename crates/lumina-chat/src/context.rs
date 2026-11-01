@@ -71,13 +71,13 @@ fn build_spectra_summary(
             0.0
         };
         lines.push(format!(
-            "**Latest results:** peak C_ext = {:.3e} nm² at {:.1} nm, \
+            "**Latest results:** peak C_ext = {:.3e} nm^2 at {:.1} nm, \
              C_abs/C_ext = {:.2}",
             p.extinction, p.wavelength_nm, abs_ratio,
         ));
 
         if let Some(cd) = p.circular_dichroism {
-            lines.push(format!("CD at peak = {cd:.3e} nm²"));
+            lines.push(format!("CD at peak = {cd:.3e} nm^2"));
         }
     }
 
@@ -88,7 +88,7 @@ fn build_spectra_summary(
                 .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
             if let Some((wl, i)) = peak_shg {
                 lines.push(format!(
-                    "**SHG:** peak intensity = {i:.3e} nm⁶ at λ_fund = {wl:.1} nm"
+                    "**SHG:** peak intensity = {i:.3e} nm^6 at lambda_fund = {wl:.1} nm"
                 ));
             }
         }

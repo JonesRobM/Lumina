@@ -30,7 +30,7 @@ pub struct ChatPanel {
     pub input: String,
     /// True while a streaming response is in progress.
     pub streaming: bool,
-    /// Set after Clear — events from any in-flight request are discarded until Done/Error.
+    /// Set after Clear -- events from any in-flight request are discarded until Done/Error.
     pub cleared: bool,
     /// Set to true on the first update() call so we only call set_egui_ctx once.
     pub egui_ctx_set: bool,
@@ -105,7 +105,7 @@ impl ChatPanel {
         std::mem::take(&mut self.attach_requested)
     }
 
-    // ── Private helpers ───────────────────────────────────────────────────────
+    // -- Private helpers -------------------------------------------------------
 
     fn drain_events(&mut self) {
         while let Some(event) = self.client.poll() {
@@ -132,7 +132,7 @@ impl ChatPanel {
                     self.streaming = false;
                     self.history.push(Message {
                         role: Role::Assistant,
-                        content: format!("⚠ Error: {msg}"),
+                        content: format!("WARNING Error: {msg}"),
                     });
                 }
             }
@@ -203,9 +203,9 @@ impl ChatPanel {
         ui.add_space(8.0);
         ui.separator();
         ui.label(RichText::new("Free providers:").weak());
-        ui.label("• Ollama — local, no key needed (ollama.com)");
-        ui.label("• Groq — free tier key at console.groq.com");
-        ui.label("• OpenRouter — free models at openrouter.ai");
+        ui.label("* Ollama -- local, no key needed (ollama.com)");
+        ui.label("* Groq -- free tier key at console.groq.com");
+        ui.label("* OpenRouter -- free models at openrouter.ai");
     }
 
     fn chat_ui(&mut self, ui: &mut egui::Ui) {
@@ -254,7 +254,7 @@ impl ChatPanel {
                 let response = ui.add(
                     TextEdit::singleline(&mut self.input)
                         .desired_width(ui.available_width() - 60.0)
-                        .hint_text("Ask anything…"),
+                        .hint_text("Ask anything..."),
                 );
                 if response.lost_focus()
                     && ui.input(|i| i.key_pressed(egui::Key::Enter))
@@ -262,7 +262,7 @@ impl ChatPanel {
                 {
                     send_triggered.set(true);
                 }
-                if ui.button("→").clicked() && !self.input.trim().is_empty() {
+                if ui.button("->").clicked() && !self.input.trim().is_empty() {
                     send_triggered.set(true);
                 }
             });

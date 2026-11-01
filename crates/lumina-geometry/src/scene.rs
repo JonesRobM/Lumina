@@ -36,12 +36,12 @@ use crate::parsers::xyz::parse_xyz;
 use crate::parsers::obj::parse_obj;
 use crate::primitives::{Cuboid, Cylinder, Ellipsoid, Helix, Primitive, Sphere};
 
-// ─── Error type ─────────────────────────────────────────────────────────────
+// --- Error type -------------------------------------------------------------
 
 /// Errors that can occur when building scene geometry.
 #[derive(Debug, Error)]
 pub enum SceneError {
-    #[error("Object '{name}' produced no dipoles — check shape parameters and dipole spacing")]
+    #[error("Object '{name}' produced no dipoles -- check shape parameters and dipole spacing")]
     EmptyObject { name: String },
 
     #[error("File error for object '{name}': {message}")]
@@ -54,7 +54,7 @@ pub enum SceneError {
     EmptyScene,
 }
 
-// ─── Shape specification ─────────────────────────────────────────────────────
+// --- Shape specification -----------------------------------------------------
 
 fn default_z_axis() -> [f64; 3] {
     [0.0, 0.0, 1.0]
@@ -123,7 +123,7 @@ pub enum ShapeSpec {
     },
     /// Import geometry from a `.xyz` or `.obj` file.
     File { path: String },
-    /// Concentric multi-shell particle (e.g. Au@Ag, Au@SiO₂).
+    /// Concentric multi-shell particle (e.g. Au@Ag, Au@SiO2).
     ///
     /// The core shape and material define the innermost region. The `shells`
     /// list ordered from innermost to outermost; each adds `thickness` nm to
@@ -318,11 +318,11 @@ impl ShapeSpec {
     }
 }
 
-// ─── Transform ───────────────────────────────────────────────────────────────
+// --- Transform ---------------------------------------------------------------
 
-/// Per-object affine transform: scale → ZYX Euler rotation → translation.
+/// Per-object affine transform: scale -> ZYX Euler rotation -> translation.
 ///
-/// Rotation convention: `R = Rz(rotation_deg[2]) · Ry(rotation_deg[1]) · Rx(rotation_deg[0])`.
+/// Rotation convention: `R = Rz(rotation_deg[2]) * Ry(rotation_deg[1]) * Rx(rotation_deg[0])`.
 /// A zero rotation `[0, 0, 0]` is the identity. Angles are in degrees.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ObjectTransform {
@@ -354,7 +354,7 @@ impl Default for ObjectTransform {
 impl ObjectTransform {
     /// Apply this transform to a slice of object-local positions.
     ///
-    /// Pipeline: scale → rotate (ZYX Euler) → translate.
+    /// Pipeline: scale -> rotate (ZYX Euler) -> translate.
     pub fn apply(&self, positions: &[[f64; 3]]) -> Vec<[f64; 3]> {
         let rx = self.rotation_deg[0].to_radians();
         let ry = self.rotation_deg[1].to_radians();
@@ -375,7 +375,7 @@ impl ObjectTransform {
     }
 }
 
-// ─── ObjectSpec ──────────────────────────────────────────────────────────────
+// --- ObjectSpec --------------------------------------------------------------
 
 /// One component in a multi-object scene.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -391,7 +391,7 @@ pub struct ObjectSpec {
     /// Position, rotation, and scale in world space.
     #[serde(flatten)]
     pub transform: ObjectTransform,
-    /// Element label → material override for XYZ multi-species imports.
+    /// Element label -> material override for XYZ multi-species imports.
     ///
     /// Keys are atom-type strings from the XYZ file (e.g. `"Au"`, `"Ag"`).
     /// Values override `material` for dipoles with that label.
@@ -423,7 +423,7 @@ impl ObjectSpec {
     }
 }
 
-// ─── SceneSpec ───────────────────────────────────────────────────────────────
+// --- SceneSpec ---------------------------------------------------------------
 
 /// A complete multi-object scene ready for CDA simulation.
 ///
@@ -444,13 +444,13 @@ impl Default for SceneSpec {
     }
 }
 
-// ─── SceneDipoles ────────────────────────────────────────────────────────────
+// --- SceneDipoles ------------------------------------------------------------
 
 /// Wavelength-independent polarisability geometry data for a dipole in an
 /// ellipsoidal object.
 ///
 /// Carries the depolarisation factors and orientation computed at scene-build
-/// time, used by the per-wavelength solver loop to build the full 3×3
+/// time, used by the per-wavelength solver loop to build the full 3x3
 /// polarisability tensor instead of calling the isotropic Clausius-Mossotti.
 ///
 /// Only populated for [`ShapeSpec::Ellipsoid`] objects. All other shapes
@@ -460,7 +460,7 @@ pub struct DipolePolarisabilityHint {
     /// Depolarisation factors $[L_x, L_y, L_z]$ in the object-local
     /// principal-axis frame. Computed from the ellipsoid semi-axes.
     pub depol_factors: [f64; 3],
-    /// 3×3 rotation matrix (row-major) mapping the object-local frame to
+    /// 3x3 rotation matrix (row-major) mapping the object-local frame to
     /// the world (lab) frame: $\boldsymbol{\alpha} = R\,\text{diag}(\alpha_x,\alpha_y,\alpha_z)\,R^T$.
     pub rotation: [f64; 9],
 }
@@ -469,7 +469,7 @@ pub struct DipolePolarisabilityHint {
 ///
 /// Contains the world-space dipole positions, per-dipole material labels,
 /// dipole spacings, and optional anisotropy hints for ellipsoidal objects.
-/// Material resolution (ε(ω) → Clausius-Mossotti) is performed per-wavelength
+/// Material resolution (eps(omega) -> Clausius-Mossotti) is performed per-wavelength
 /// by the caller.
 pub struct SceneDipoles {
     /// World-space dipole positions in nm.
@@ -487,12 +487,28 @@ pub struct SceneDipoles {
     pub fill_fractions: Vec<f64>,
 }
 
+impl SceneDipoles {
+    /// The dipole spacing shared by every dipole, if there is one.
+    ///
+    /// Returns `None` for an empty scene, or one mixing spacings. A single scalar
+    /// `cell_size` cannot describe the mixed case, and FCD needs a cell size matching
+    /// the cell it averages the Green's function over -- so callers must decide what to
+    /// do rather than silently taking element 0.
+    pub fn uniform_spacing(&self) -> Option<f64> {
+        let first = *self.spacings.first()?;
+        self.spacings
+            .iter()
+            .all(|s| (s - first).abs() < 1e-12)
+            .then_some(first)
+    }
+}
+
 impl SceneSpec {
     /// Build the flat dipole geometry for all objects in the scene.
     ///
     /// For each object:
     /// 1. Discretise the shape into object-local positions centred at origin.
-    /// 2. Apply the object transform (scale → rotate → translate).
+    /// 2. Apply the object transform (scale -> rotate -> translate).
     /// 3. Assign material strings (using `species_map` for XYZ atoms, else `material`).
     ///
     /// Returns a [`SceneDipoles`] struct that the wavelength loop uses to
@@ -565,9 +581,9 @@ impl SceneSpec {
     }
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// --- Helpers -----------------------------------------------------------------
 
-/// Build a 3×3 rotation matrix (row-major) from ZYX Euler angles in degrees.
+/// Build a 3x3 rotation matrix (row-major) from ZYX Euler angles in degrees.
 ///
 /// Convention: $R = R_z(\text{rz}) \cdot R_y(\text{ry}) \cdot R_x(\text{rx})$,
 /// consistent with [`ObjectTransform::apply`].
@@ -717,7 +733,7 @@ fn centre_positions(positions: Vec<[f64; 3]>) -> Vec<[f64; 3]> {
     positions.into_iter().map(|p| [p[0] - cx, p[1] - cy, p[2] - cz]).collect()
 }
 
-// ─── Tests ───────────────────────────────────────────────────────────────────
+// --- Tests -------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -747,7 +763,7 @@ mod tests {
         }
     }
 
-    /// 90° rotation about X should map Y → Z and Z → −Y.
+    /// 90deg rotation about X should map Y -> Z and Z -> -Y.
     #[test]
     fn test_euler_rotation_x90() {
         let t = ObjectTransform {
@@ -756,7 +772,7 @@ mod tests {
         };
         let pts = vec![[0.0, 1.0, 0.0]]; // +Y
         let out = t.apply(&pts);
-        // After Rx(90°): Y maps to +Z
+        // After Rx(90deg): Y maps to +Z
         assert!((out[0][0]).abs() < 1e-12, "x should be 0");
         assert!((out[0][1]).abs() < 1e-12, "y should be 0");
         assert!((out[0][2] - 1.0).abs() < 1e-10, "z should be 1, got {}", out[0][2]);
@@ -864,7 +880,7 @@ mod tests {
         let count_dimer = dimer.build_geometry().unwrap().positions.len();
 
         assert_eq!(count_dimer, count_a + count_b,
-            "Dimer count {count_dimer} ≠ sum {}", count_a + count_b);
+            "Dimer count {count_dimer} != sum {}", count_a + count_b);
     }
 
     /// Au@Ag sphere: core dipoles must be Au_JC, shell dipoles must be Ag_JC.
@@ -1058,16 +1074,43 @@ mod tests {
             species_map: species_map.clone(),
         };
 
-        // With label "Ag" → should pick Ag_JC
+        // With label "Ag" -> should pick Ag_JC
         let mat_ag = obj.species_map.get("Ag").cloned().unwrap_or(obj.material.clone());
         assert_eq!(mat_ag, "Ag_JC");
 
-        // With label "Unknown" → should fall back to Au_JC
+        // With label "Unknown" -> should fall back to Au_JC
         let mat_unk = obj.species_map.get("Unknown").cloned().unwrap_or(obj.material.clone());
         assert_eq!(mat_unk, "Au_JC");
 
-        // Without label → uses default material
+        // Without label -> uses default material
         let mat_none: String = obj.material.clone();
         assert_eq!(mat_none, "Au_JC");
     }
+
+    fn geom_with_spacings(spacings: Vec<f64>) -> SceneDipoles {
+        let n = spacings.len();
+        SceneDipoles {
+            positions: vec![[0.0; 3]; n],
+            materials: vec!["Au_JC".to_string(); n],
+            spacings,
+            hints: vec![None; n],
+            fill_fractions: vec![1.0; n],
+        }
+    }
+
+    #[test]
+    fn uniform_spacing_returns_the_common_value() {
+        assert_eq!(geom_with_spacings(vec![2.5, 2.5, 2.5]).uniform_spacing(), Some(2.5));
+    }
+
+    #[test]
+    fn uniform_spacing_is_none_when_spacings_differ() {
+        assert_eq!(geom_with_spacings(vec![2.0, 3.0]).uniform_spacing(), None);
+    }
+
+    #[test]
+    fn uniform_spacing_is_none_for_an_empty_scene() {
+        assert_eq!(geom_with_spacings(vec![]).uniform_spacing(), None);
+    }
+
 }

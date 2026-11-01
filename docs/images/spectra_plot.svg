@@ -4,7 +4,7 @@
 
   <!-- Title -->
   <text x="400" y="30" font-family="Arial, sans-serif" font-size="18" font-weight="bold" text-anchor="middle" fill="#333">
-    Gold Nanosphere (R=10nm) — Optical Cross-Sections
+    Gold Nanosphere (R=10nm) -- Optical Cross-Sections
   </text>
 
   <!-- Plot area -->
@@ -59,7 +59,7 @@
   </text>
   <text x="30" y="200" font-family="Arial, sans-serif" font-size="14" text-anchor="middle" fill="#333"
         transform="rotate(-90 30 200)">
-    Cross-Section (nm²)
+    Cross-Section (nm^2)
   </text>
 
   <!-- Legend -->

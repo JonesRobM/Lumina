@@ -21,9 +21,9 @@ pub struct ObjMesh {
 /// Parse an OBJ file, extracting vertices and triangulated faces.
 ///
 /// Handles the following OBJ elements:
-/// - `v x y z` — vertex position
-/// - `f v1 v2 v3 ...` — face (triangulated via fan from first vertex)
-/// - `f v1/vt1 ...` or `f v1/vt1/vn1 ...` or `f v1//vn1 ...` — takes vertex index only
+/// - `v x y z` -- vertex position
+/// - `f v1 v2 v3 ...` -- face (triangulated via fan from first vertex)
+/// - `f v1/vt1 ...` or `f v1/vt1/vn1 ...` or `f v1//vn1 ...` -- takes vertex index only
 ///
 /// All other lines (`vt`, `vn`, `g`, `o`, `mtllib`, `usemtl`, `s`, `#`, blank) are ignored.
 pub fn parse_obj(content: &str) -> Result<ObjMesh, ParseError> {
@@ -69,7 +69,7 @@ pub fn parse_obj(content: &str) -> Result<ObjMesh, ParseError> {
                 let indices: Result<Vec<usize>, ParseError> = parts
                     .enumerate()
                     .map(|(i, token)| {
-                        // Handle v, v/vt, v/vt/vn, v//vn formats — take first element
+                        // Handle v, v/vt, v/vt/vn, v//vn formats -- take first element
                         let idx_str = token.split('/').next().unwrap_or(token);
                         let idx: usize = idx_str.parse().map_err(|_| ParseError::FormatError {
                             line: line_idx + 1,
@@ -160,7 +160,7 @@ impl ObjMesh {
     }
 }
 
-/// Helper: build a cube OBJ string for testing. Cube spans ±half_size on each axis.
+/// Helper: build a cube OBJ string for testing. Cube spans +/-half_size on each axis.
 #[cfg(test)]
 fn cube_obj(half_size: f64) -> String {
     let h = half_size;
@@ -192,7 +192,7 @@ mod tests {
         let obj = cube_obj(5.0);
         let mesh = parse_obj(&obj).unwrap();
         assert_eq!(mesh.vertices.len(), 8);
-        // 6 quad faces → 12 triangles
+        // 6 quad faces -> 12 triangles
         assert_eq!(mesh.faces.len(), 12);
         // All indices in [0, 7]
         for face in &mesh.faces {
@@ -219,7 +219,7 @@ mod tests {
             v 0 0 10\nv 10 0 10\nv 10 10 10\nv 0 10 10\n\
             f 1 2 3 4\nf 5 6 7 8\n";
         let mesh = parse_obj(obj).unwrap();
-        // 2 quads → 4 triangles
+        // 2 quads -> 4 triangles
         assert_eq!(mesh.faces.len(), 4);
     }
 

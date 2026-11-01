@@ -103,9 +103,9 @@ pub trait ComputeBackend: Send + Sync {
     /// - `substrate_runtime.is_none()` (no substrate)
     ///
     /// # Arguments
-    /// * `positions`        — Dipole positions in nm, one `[f64; 3]` per dipole.
-    /// * `k`                — Wavenumber in the medium (nm⁻¹, always real).
-    /// * `diagonal_blocks`  — Pre-computed α⁻¹ per dipole (output of `compute_diagonal_blocks`).
+    /// * `positions`        -- Dipole positions in nm, one `[f64; 3]` per dipole.
+    /// * `k`                -- Wavenumber in the medium (nm^-1, always real).
+    /// * `diagonal_blocks`  -- Pre-computed alpha^-1 per dipole (output of `compute_diagonal_blocks`).
     fn assemble_and_create_session(
         &self,
         positions: &[[f64; 3]],

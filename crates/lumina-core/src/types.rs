@@ -15,11 +15,22 @@ pub struct Dipole {
     /// Complex polarisability tensor (3x3) at the current frequency.
     /// Stored as a flat [9] array in row-major order.
     pub polarisability: [Complex64; 9],
+    /// Side length of this dipole's cubic discretisation cell (nm).
+    ///
+    /// FCD averages the Green's tensor over the **source** cell --
+    /// `G_IGT(r_i, r_j) = (1/V_j)integral_{V_j} G(r_i, r')dr'` -- so the cell size is a property
+    /// of the dipole, not of the solver. A scene mixing dipole spacings needs one
+    /// value per dipole; a single solver-wide scalar silently applied the wrong cell
+    /// to every object but one.
+    pub cell_size: f64,
 }
 
 impl Dipole {
     /// Create a dipole with isotropic (scalar) polarisability.
-    pub fn isotropic(position: [f64; 3], alpha: Complex64) -> Self {
+    ///
+    /// `cell_size` is the side length of the cubic cell this dipole represents,
+    /// normally the discretisation spacing that produced it.
+    pub fn isotropic(position: [f64; 3], alpha: Complex64, cell_size: f64) -> Self {
         let zero = Complex64::new(0.0, 0.0);
         Self {
             position,
@@ -28,6 +39,7 @@ impl Dipole {
                 zero, alpha, zero,
                 zero, zero, alpha,
             ],
+            cell_size,
         }
     }
 }
@@ -86,8 +98,8 @@ pub struct SimulationParams {
     pub solver_tolerance: f64,
     /// Maximum iterations for iterative solvers.
     pub max_iterations: usize,
-    /// Bloch wavevector **k**∥ in nm⁻¹ (in-plane, for periodic structures).
-    /// Use `[0.0, 0.0, 0.0]` for the Γ point (normal incidence).
+    /// Bloch wavevector **k**|| in nm^-1 (in-plane, for periodic structures).
+    /// Use `[0.0, 0.0, 0.0]` for the Gamma point (normal incidence).
     #[serde(default)]
     pub k_bloch: [f64; 3],
     /// Runtime substrate correction at the current wavelength.
@@ -119,18 +131,18 @@ impl Default for SimulationParams {
 pub struct CrossSections {
     /// Wavelength (nm).
     pub wavelength_nm: f64,
-    /// Extinction cross-section (nm²).
+    /// Extinction cross-section (nm^2).
     pub extinction: f64,
-    /// Absorption cross-section (nm²).
+    /// Absorption cross-section (nm^2).
     pub absorption: f64,
-    /// Scattering cross-section (nm²).
+    /// Scattering cross-section (nm^2).
     pub scattering: f64,
-    /// Circular dichroism ΔC_ext = C_ext(LCP) − C_ext(RCP) (nm²).
+    /// Circular dichroism DeltaC_ext = C_ext(LCP) - C_ext(RCP) (nm^2).
     /// `None` unless CD mode is enabled.
     pub circular_dichroism: Option<f64>,
 }
 
-/// Optical cross-sections at a single (wavelength, **k**∥) point.
+/// Optical cross-sections at a single (wavelength, **k**||) point.
 ///
 /// Extends [`CrossSections`] with the in-plane Bloch wavevector for
 /// periodic-array dispersion calculations.
@@ -138,19 +150,19 @@ pub struct CrossSections {
 pub struct BlochCrossSections {
     /// Wavelength (nm).
     pub wavelength_nm: f64,
-    /// In-plane Bloch wavevector **k**∥ (nm⁻¹).
+    /// In-plane Bloch wavevector **k**|| (nm^-1).
     pub k_parallel: [f64; 3],
-    /// Extinction cross-section (nm²).
+    /// Extinction cross-section (nm^2).
     pub extinction: f64,
-    /// Absorption cross-section (nm²).
+    /// Absorption cross-section (nm^2).
     pub absorption: f64,
-    /// Scattering cross-section (nm²).
+    /// Scattering cross-section (nm^2).
     pub scattering: f64,
-    /// Circular dichroism ΔC_ext (nm²). `None` unless CD mode is active.
+    /// Circular dichroism DeltaC_ext (nm^2). `None` unless CD mode is active.
     pub circular_dichroism: Option<f64>,
 }
 
-/// Full dispersion map: cross-sections sampled on a 2D (ω, **k**∥) grid.
+/// Full dispersion map: cross-sections sampled on a 2D (omega, **k**||) grid.
 ///
 /// # Layout
 /// `data[i * k_points.len() + j]` is the response at
@@ -159,30 +171,30 @@ pub struct BlochCrossSections {
 pub struct DispersionMap {
     /// Wavelength grid (nm).
     pub wavelengths_nm: Vec<f64>,
-    /// In-plane **k**∥ points (nm⁻¹).
+    /// In-plane **k**|| points (nm^-1).
     pub k_points: Vec<[f64; 3]>,
-    /// Flattened array of cross-sections; length = wavelengths × k_points.
+    /// Flattened array of cross-sections; length = wavelengths x k_points.
     pub data: Vec<BlochCrossSections>,
 }
 
 /// Far-field radiation pattern sampled on the unit sphere.
 ///
-/// The differential scattering intensity at each direction r̂ is proportional to
+/// The differential scattering intensity at each direction r_hat is proportional to
 /// $|(\mathbf{I} - \hat{\mathbf{r}}\hat{\mathbf{r}}) \cdot \mathbf{F}(\hat{\mathbf{r}})|^2$
 /// where $\mathbf{F}(\hat{\mathbf{r}}) = \sum_i \mathbf{p}_i \exp(-ik\hat{\mathbf{r}} \cdot \mathbf{r}_i)$.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FarFieldMap {
     /// Wavelength at which the pattern was computed (nm).
     pub wavelength_nm: f64,
-    /// Polar angles θ ∈ [0, π] (radians), one per sample.
+    /// Polar angles theta in [0, pi] (radians), one per sample.
     pub theta: Vec<f64>,
-    /// Azimuthal angles φ ∈ [0, 2π) (radians), one per sample.
+    /// Azimuthal angles phi in [0, 2pi) (radians), one per sample.
     pub phi: Vec<f64>,
-    /// Differential scattering intensity (nm⁴, unnormalised) at each (θ, φ).
+    /// Differential scattering intensity (nm^4, unnormalised) at each (theta, phi).
     pub intensity: Vec<f64>,
-    /// Number of θ samples.
+    /// Number of theta samples.
     pub n_theta: usize,
-    /// Number of φ samples.
+    /// Number of phi samples.
     pub n_phi: usize,
 }
 
@@ -194,7 +206,7 @@ pub struct DipoleResponse {
     /// Refractive index of the surrounding medium at this wavelength.
     ///
     /// Carried here so that post-processing steps (`compute_near_field`,
-    /// `compute_far_field`) use the correct wavenumber k = 2πn/λ without
+    /// `compute_far_field`) use the correct wavenumber k = 2*pi*n/lambda without
     /// requiring `SimulationParams` to be threaded through again.
     pub environment_n: f64,
     /// Complex dipole moments, shape (N, 3).
@@ -258,7 +270,7 @@ pub fn radiative_correction(alpha_cm: Complex64, k: f64) -> Complex64 {
     alpha_cm / (Complex64::from(1.0) - correction * alpha_cm)
 }
 
-/// Compute the full 3×3 polarisability tensor for an ellipsoidal dipole cell.
+/// Compute the full 3x3 polarisability tensor for an ellipsoidal dipole cell.
 ///
 /// Uses the generalised Clausius-Mossotti formula with per-axis depolarisation
 /// factors, then applies the Draine radiative reaction correction per component,
@@ -273,16 +285,16 @@ pub fn radiative_correction(alpha_cm: Complex64, k: f64) -> Complex64 {
 /// Reduces to the standard isotropic formula when $L_i = 1/3$ and $R = I$.
 ///
 /// # Arguments
-/// * `volume_nm3`  — Dipole cell volume in nm³ (typically $d^3$ for spacing $d$).
-/// * `depol`       — Depolarisation factors $[L_x, L_y, L_z]$ in the object-local frame.
-/// * `epsilon`     — Complex dielectric function of the material at this wavelength.
-/// * `epsilon_m`   — Surrounding medium dielectric constant $\varepsilon_m = n_m^2$.
-/// * `k`           — Wavenumber in the medium in nm⁻¹.
-/// * `rot`         — 3×3 rotation matrix (row-major `[f64; 9]`) from the
+/// * `volume_nm3`  -- Dipole cell volume in nm^3 (typically $d^3$ for spacing $d$).
+/// * `depol`       -- Depolarisation factors $[L_x, L_y, L_z]$ in the object-local frame.
+/// * `epsilon`     -- Complex dielectric function of the material at this wavelength.
+/// * `epsilon_m`   -- Surrounding medium dielectric constant $\varepsilon_m = n_m^2$.
+/// * `k`           -- Wavenumber in the medium in nm^-1.
+/// * `rot`         -- 3x3 rotation matrix (row-major `[f64; 9]`) from the
 ///                   object-local principal-axis frame to the lab frame.
 ///
 /// # Returns
-/// Full 3×3 complex polarisability tensor as `[Complex64; 9]` in row-major order.
+/// Full 3x3 complex polarisability tensor as `[Complex64; 9]` in row-major order.
 pub fn ellipsoid_polarisability_tensor(
     volume_nm3: f64,
     depol: [f64; 3],
@@ -301,8 +313,8 @@ pub fn ellipsoid_polarisability_tensor(
         radiative_correction(alpha_cm, k)
     });
 
-    // Rotate to lab frame: α = R · diag(αx, αy, αz) · Rᵀ
-    // Element (i,j) = Σ_k rot[i*3+k] * alphas[k] * rot[j*3+k]
+    // Rotate to lab frame: alpha = R * diag(alphax, alphay, alphaz) * R^T
+    // Element (i,j) = sum_k rot[i*3+k] * alphas[k] * rot[j*3+k]
     let mut tensor = [Complex64::from(0.0); 9];
     for i in 0..3 {
         for j in 0..3 {
@@ -316,7 +328,7 @@ pub fn ellipsoid_polarisability_tensor(
     tensor
 }
 
-/// Second-order nonlinear susceptibility tensor χ^(2).
+/// Second-order nonlinear susceptibility tensor chi^(2).
 ///
 /// A rank-3 tensor with components $\chi^{(2)}_{abc}$, where index $a$ is the
 /// output polarisation direction and $b$, $c$ are the input polarisation
@@ -326,7 +338,7 @@ pub fn ellipsoid_polarisability_tensor(
 /// $$p_a(2\omega) = \sum_{b,c} \chi^{(2)}_{abc}\,
 ///   E_{\text{loc},b}(\omega)\, E_{\text{loc},c}(\omega)$$
 ///
-/// In our unit convention (ε₀ absorbed, lengths in nm), χ^(2) has units of nm³.
+/// In our unit convention (eps0 absorbed, lengths in nm), chi^(2) has units of nm^3.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Chi2Tensor {
     /// Tensor components in row-major order.
@@ -335,7 +347,7 @@ pub struct Chi2Tensor {
 }
 
 impl Chi2Tensor {
-    /// Zero tensor — no second-order response (centrosymmetric material).
+    /// Zero tensor -- no second-order response (centrosymmetric material).
     pub fn zero() -> Self {
         Self { components: [Complex64::new(0.0, 0.0); 27] }
     }
@@ -348,7 +360,7 @@ impl Chi2Tensor {
     /// Contract with a local field vector: $p_a = \sum_{b,c} \chi_{abc} E_b E_c$.
     ///
     /// # Arguments
-    /// * `e` — Local electric field $[E_x, E_y, E_z]$ at frequency $\omega$.
+    /// * `e` -- Local electric field $[E_x, E_y, E_z]$ at frequency $\omega$.
     ///
     /// # Returns
     /// Nonlinear dipole moment $[p_x, p_y, p_z]$ at frequency $2\omega$.
@@ -364,28 +376,28 @@ impl Chi2Tensor {
         p
     }
 
-    /// Isotropic surface tensor with surface normal along **z** (symmetry group C_∞v).
+    /// Isotropic surface tensor with surface normal along **z** (symmetry group C_infv).
     ///
     /// The independent non-zero elements are:
-    /// - $\chi_{zzz}$ (normal–normal–normal)
-    /// - $\chi_{zxx} = \chi_{zyy}$ (normal–tangential–tangential)
+    /// - $\chi_{zzz}$ (normal-normal-normal)
+    /// - $\chi_{zxx} = \chi_{zyy}$ (normal-tangential-tangential)
     /// - $\chi_{xxz} = \chi_{xzx} = \chi_{yyz} = \chi_{yzy}$ (Kleinman symmetry)
     ///
     /// # Arguments
-    /// * `chi_zzz` — Normal–normal–normal component.
-    /// * `chi_zxx` — Normal–tangential–tangential component.
+    /// * `chi_zzz` -- Normal-normal-normal component.
+    /// * `chi_zxx` -- Normal-tangential-tangential component.
     ///   Kleinman symmetry gives $\chi_{xxz} = \chi_{zxx}$.
     pub fn isotropic_surface(chi_zzz: Complex64, chi_zxx: Complex64) -> Self {
         let mut t = Self::zero();
-        // χ_zzz: (2,2,2)
+        // chi_zzz: (2,2,2)
         t.components[2 * 9 + 2 * 3 + 2] = chi_zzz;
-        // χ_zxx = χ_zyy: (2,0,0) and (2,1,1)
+        // chi_zxx = chi_zyy: (2,0,0) and (2,1,1)
         t.components[2 * 9 + 0 * 3 + 0] = chi_zxx;
         t.components[2 * 9 + 1 * 3 + 1] = chi_zxx;
-        // χ_xxz = χ_xzx: (0,0,2) and (0,2,0)  [Kleinman: χ_xxz = χ_zxx]
+        // chi_xxz = chi_xzx: (0,0,2) and (0,2,0)  [Kleinman: chi_xxz = chi_zxx]
         t.components[0 * 9 + 0 * 3 + 2] = chi_zxx;
         t.components[0 * 9 + 2 * 3 + 0] = chi_zxx;
-        // χ_yyz = χ_yzy: (1,1,2) and (1,2,1)
+        // chi_yyz = chi_yzy: (1,1,2) and (1,2,1)
         t.components[1 * 9 + 1 * 3 + 2] = chi_zxx;
         t.components[1 * 9 + 2 * 3 + 1] = chi_zxx;
         t
@@ -411,7 +423,7 @@ pub struct ShgResult {
     ///
     /// Solution of $\mathbf{A}(2\omega)\,\mathbf{p}(2\omega) = \mathbf{p}^{\text{NL}}$.
     pub driven_moments: Array2<Complex64>,
-    /// Total SHG intensity $\propto \sum_i |\mathbf{p}_i(2\omega)|^2$ (nm⁶, unnormalised).
+    /// Total SHG intensity $\propto \sum_i |\mathbf{p}_i(2\omega)|^2$ (nm^6, unnormalised).
     ///
     /// Scales as $|E_{\text{inc}}|^4$. Use this for spectral sweeps and
     /// relative comparisons between structures or wavelengths.
@@ -421,7 +433,7 @@ pub struct ShgResult {
     pub far_field: Option<FarFieldMap>,
 }
 
-/// Third-order nonlinear susceptibility tensor χ^(3).
+/// Third-order nonlinear susceptibility tensor chi^(3).
 ///
 /// A rank-4 tensor with components $\chi^{(3)}_{abcd}$, where index $a$ is the
 /// output polarisation direction and $b$, $c$, $d$ are the input polarisation
@@ -431,7 +443,7 @@ pub struct ShgResult {
 /// $$p_a(3\omega) = \sum_{b,c,d} \chi^{(3)}_{abcd}\,
 ///   E_{\text{loc},b}(\omega)\, E_{\text{loc},c}(\omega)\, E_{\text{loc},d}(\omega)$$
 ///
-/// In our unit convention (ε₀ absorbed, lengths in nm), χ^(3) has units of nm⁶.
+/// In our unit convention (eps0 absorbed, lengths in nm), chi^(3) has units of nm^6.
 #[derive(Debug, Clone)]
 pub struct Chi3Tensor {
     /// Tensor components in row-major order.
@@ -440,7 +452,7 @@ pub struct Chi3Tensor {
 }
 
 impl Chi3Tensor {
-    /// Zero tensor — no third-order response (e.g. vanishing χ^(3)).
+    /// Zero tensor -- no third-order response (e.g. vanishing chi^(3)).
     pub fn zero() -> Self {
         Self { components: [Complex64::new(0.0, 0.0); 81] }
     }
@@ -454,7 +466,7 @@ impl Chi3Tensor {
     /// $p_a = \sum_{b,c,d} \chi_{abcd} E_b E_c E_d$.
     ///
     /// # Arguments
-    /// * `e` — Local electric field $[E_x, E_y, E_z]$ at frequency $\omega$.
+    /// * `e` -- Local electric field $[E_x, E_y, E_z]$ at frequency $\omega$.
     ///
     /// # Returns
     /// Nonlinear dipole moment $[p_x, p_y, p_z]$ at frequency $3\omega$.
@@ -487,8 +499,8 @@ impl Chi3Tensor {
     ///   + (\chi_{xxxx} - 3\chi_{xxyy})\,\delta_{ab}\delta_{ac}\delta_{ad}$$
     ///
     /// # Arguments
-    /// * `chi_xxxx` — Diagonal component.
-    /// * `chi_xxyy` — Off-diagonal component (Kleinman: $\chi_{xyxy} = \chi_{xxyy}$).
+    /// * `chi_xxxx` -- Diagonal component.
+    /// * `chi_xxyy` -- Off-diagonal component (Kleinman: $\chi_{xyxy} = \chi_{xxyy}$).
     pub fn isotropic_bulk(chi_xxxx: Complex64, chi_xxyy: Complex64) -> Self {
         let mut t = Self::zero();
         let extra_diag = chi_xxxx - Complex64::from(3.0) * chi_xxyy;
@@ -497,15 +509,15 @@ impl Chi3Tensor {
                 for c in 0..3usize {
                     for d in 0..3usize {
                         let mut val = Complex64::new(0.0, 0.0);
-                        // δ_ab δ_cd term
+                        // delta_ab delta_cd term
                         if a == b && c == d {
                             val += chi_xxyy;
                         }
-                        // δ_ac δ_bd term
+                        // delta_ac delta_bd term
                         if a == c && b == d {
                             val += chi_xxyy;
                         }
-                        // δ_ad δ_bc term
+                        // delta_ad delta_bc term
                         if a == d && b == c {
                             val += chi_xxyy;
                         }
@@ -541,7 +553,7 @@ pub struct ThgResult {
     ///
     /// Solution of $\mathbf{A}(3\omega)\,\mathbf{p}(3\omega) = \mathbf{p}^{\text{NL}}$.
     pub driven_moments: Array2<Complex64>,
-    /// Total THG intensity $\propto \sum_i |\mathbf{p}_i(3\omega)|^2$ (nm⁹, unnormalised).
+    /// Total THG intensity $\propto \sum_i |\mathbf{p}_i(3\omega)|^2$ (nm^9, unnormalised).
     ///
     /// Scales as $|E_{\text{inc}}|^6$. Use this for spectral sweeps and
     /// relative comparisons between structures or wavelengths.
@@ -594,16 +606,16 @@ pub fn ldr_correction(
     }).sum();
     let s = Complex64::from(s);
 
-    // Radiative reaction: ik^3/(6π) in our convention (already includes 1/(4π))
+    // Radiative reaction: ik^3/(6pi) in our convention (already includes 1/(4pi))
     let rad_reaction = Complex64::new(0.0, k.powi(3) / (6.0 * std::f64::consts::PI));
 
     // LDR lattice correction (Draine & Goodman 1993).
-    // The D&G coefficients are for the α_DG convention where α_DG = α_our/(4π),
-    // so the correction must be divided by 4π to convert to our convention.
+    // The D&G coefficients are for the alpha_DG convention where alpha_DG = alpha_our/(4pi),
+    // so the correction must be divided by 4pi to convert to our convention.
     let lattice_term = (k * k / d) * (b1 + b2 * epsilon + b3 * epsilon * s)
         / (4.0 * std::f64::consts::PI);
 
-    // α_LDR⁻¹ = α_CM⁻¹ − ik³/(6π) − (k²/d)(b₁ + b₂ε + b₃εS)/(4π)
+    // alpha_LDR^-1 = alpha_CM^-1 - ik^3/(6pi) - (k^2/d)(b1 + b2eps + b3epsS)/(4pi)
     let inv_alpha_cm = Complex64::from(1.0) / alpha_cm;
     let inv_alpha_ldr = inv_alpha_cm - rad_reaction - lattice_term;
 

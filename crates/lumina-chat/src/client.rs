@@ -33,7 +33,7 @@ pub struct ChatClient {
 
 impl ChatClient {
     pub fn new(config: ChatConfig) -> Self {
-        // Bounded channel: capacity 1 — one request in flight at a time.
+        // Bounded channel: capacity 1 -- one request in flight at a time.
         let (task_tx, task_rx) = mpsc::sync_channel::<ChatTask>(1);
         let (event_tx, event_rx) = mpsc::channel::<ChatEvent>();
 
@@ -47,7 +47,7 @@ impl ChatClient {
                 while let Ok(task) = task_rx.recv() {
                     rt.block_on(stream_request(task, &event_tx));
                 }
-                // task_tx dropped on ChatClient drop → recv() returns Err → thread exits cleanly
+                // task_tx dropped on ChatClient drop -> recv() returns Err -> thread exits cleanly
             })
             .expect("failed to spawn chat worker thread");
 
@@ -184,7 +184,7 @@ async fn stream_request(task: ChatTask, event_tx: &mpsc::Sender<ChatEvent>) {
         }
     }
 
-    // Stream ended without explicit [DONE] — treat as completion.
+    // Stream ended without explicit [DONE] -- treat as completion.
     #[cfg(feature = "gui")]
     if let Some(ctx) = &task.egui_ctx {
         ctx.request_repaint();

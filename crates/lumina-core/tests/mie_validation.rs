@@ -11,18 +11,20 @@
 //! particles where $|\epsilon_1| \gg \epsilon_2$. This is a well-known
 //! limitation of the discrete dipole approximation at coarse discretisation
 //! (few dipoles per wavelength of the surface plasmon). For gold, the CDA
-//! is most accurate near the interband region (400–520 nm) where $\epsilon_2$
+//! is most accurate near the interband region (400-520 nm) where $\epsilon_2$
 //! is large. At longer wavelengths (>550 nm), the error increases
 //! significantly and finer discretisation is required.
 
 use lumina_core::mie::mie_cross_sections;
 use lumina_core::solver::cda::CdaSolver;
 use lumina_core::solver::OpticalSolver;
-use lumina_core::types::{clausius_mossotti, radiative_correction, Dipole, SimulationParams};
+use lumina_core::types::SimulationParams;
 use lumina_geometry::discretise::discretise_primitive;
 use lumina_geometry::primitives::{Primitive, Sphere};
 use lumina_materials::johnson_christy::JohnsonChristyMaterial;
 use lumina_materials::provider::MaterialProvider;
+
+mod common;
 use num_complex::Complex64;
 
 /// Validate CDA against Mie theory for a small gold sphere in the
@@ -30,9 +32,8 @@ use num_complex::Complex64;
 #[test]
 fn test_cda_vs_mie_gold_sphere() {
     let radius = 10.0; // nm
-    let spacing = 3.0; // nm — coarse for test speed
+    let spacing = 3.0; // nm -- coarse for test speed
     let n_medium = 1.0;
-    let epsilon_m = n_medium * n_medium;
 
     // Discretise
     let sphere = Primitive::Sphere(Sphere {
@@ -52,25 +53,17 @@ fn test_cda_vs_mie_gold_sphere() {
         ..Default::default()
     };
 
-    // Test at wavelengths in the interband region (400–520 nm) where CDA
-    // is well-behaved for gold (ε₂ is large, |ε₁|/ε₂ is moderate).
+    // Test at wavelengths in the interband region (400-520 nm) where CDA
+    // is well-behaved for gold (eps2 is large, |eps1|/eps2 is moderate).
     let wavelengths = [420.0, 450.0, 480.0, 510.0];
 
     for &wl in &wavelengths {
         let epsilon = gold
             .dielectric_function(wl)
             .expect("Wavelength within J&C range");
-        let k = 2.0 * std::f64::consts::PI * n_medium / wl;
 
-        let dipoles: Vec<Dipole> = positions
-            .iter()
-            .map(|&pos| {
-                let volume = spacing.powi(3);
-                let alpha_cm = clausius_mossotti(volume, epsilon, epsilon_m);
-                let alpha = radiative_correction(alpha_cm, k);
-                Dipole::isotropic(pos, alpha)
-            })
-            .collect();
+        let dipoles =
+            common::dipoles_with_constant_eps(&lattice, spacing, wl, n_medium, epsilon);
 
         let cda = solver
             .compute_cross_sections(&dipoles, wl, &params)
@@ -80,7 +73,7 @@ fn test_cda_vs_mie_gold_sphere() {
         let rel_err_ext = (cda.extinction - mie_ext).abs() / mie_ext;
 
         eprintln!(
-            "λ={:.0} nm: ε=({:.2},{:.2}), CDA={:.2e}, Mie={:.2e}, err={:.1}%, N={}",
+            "lambda={:.0} nm: eps=({:.2},{:.2}), CDA={:.2e}, Mie={:.2e}, err={:.1}%, N={}",
             wl, epsilon.re, epsilon.im,
             cda.extinction, mie_ext,
             rel_err_ext * 100.0, dipoles.len()
@@ -88,7 +81,7 @@ fn test_cda_vs_mie_gold_sphere() {
 
         assert!(
             rel_err_ext < 0.30,
-            "CDA ({:.2e}) differs from Mie ({:.2e}) by {:.1}% at λ={:.0} nm (max 30%)",
+            "CDA ({:.2e}) differs from Mie ({:.2e}) by {:.1}% at lambda={:.0} nm (max 30%)",
             cda.extinction, mie_ext, rel_err_ext * 100.0, wl
         );
 
@@ -104,14 +97,12 @@ fn test_cda_vs_mie_dielectric_sphere() {
     let radius = 10.0;
     let spacing = 3.0;
     let n_medium = 1.0;
-    let epsilon_m = n_medium * n_medium;
 
     let sphere = Primitive::Sphere(Sphere {
         centre: [0.0, 0.0, 0.0],
         radius,
     });
     let lattice = discretise_primitive(&sphere, spacing);
-    let positions: Vec<[f64; 3]> = lattice.iter().map(|p| p.position).collect();
 
     let solver = CdaSolver::default();
     let params = SimulationParams {
@@ -119,7 +110,7 @@ fn test_cda_vs_mie_dielectric_sphere() {
         ..Default::default()
     };
 
-    // Test several dielectric constants (avoid very low ε where the
+    // Test several dielectric constants (avoid very low eps where the
     // cross-sections are tiny and relative errors are inflated).
     let test_cases: &[(num_complex::Complex64, &str)] = &[
         (num_complex::Complex64::new(4.0, 0.0), "TiO2-like n=2"),
@@ -130,17 +121,9 @@ fn test_cda_vs_mie_dielectric_sphere() {
 
     for &(epsilon, label) in test_cases {
         for &wl in &[500.0, 600.0, 700.0] {
-            let k = 2.0 * std::f64::consts::PI * n_medium / wl;
 
-            let dipoles: Vec<Dipole> = positions
-                .iter()
-                .map(|&pos| {
-                    let volume = spacing.powi(3);
-                    let alpha_cm = clausius_mossotti(volume, epsilon, epsilon_m);
-                    let alpha = radiative_correction(alpha_cm, k);
-                    Dipole::isotropic(pos, alpha)
-                })
-                .collect();
+            let dipoles =
+                common::dipoles_with_constant_eps(&lattice, spacing, wl, n_medium, epsilon);
 
             let cda = solver
                 .compute_cross_sections(&dipoles, wl, &params)
@@ -149,15 +132,15 @@ fn test_cda_vs_mie_dielectric_sphere() {
             let rel_err = (cda.extinction - mie_ext).abs() / mie_ext;
 
             eprintln!(
-                "{:24} λ={:.0}: CDA={:.2e}, Mie={:.2e}, err={:.1}%, N={}",
+                "{:24} lambda={:.0}: CDA={:.2e}, Mie={:.2e}, err={:.1}%, N={}",
                 label, wl, cda.extinction, mie_ext, rel_err * 100.0, dipoles.len()
             );
 
             // 30% tolerance for d=3nm in a R=10nm sphere is reasonable.
-            // Finer discretisation (d≤2nm) gives <5% for dielectrics.
+            // Finer discretisation (d<=2nm) gives <5% for dielectrics.
             assert!(
                 rel_err < 0.30,
-                "{}: CDA ({:.2e}) differs from Mie ({:.2e}) by {:.1}% at λ={:.0} nm",
+                "{}: CDA ({:.2e}) differs from Mie ({:.2e}) by {:.1}% at lambda={:.0} nm",
                 label, cda.extinction, mie_ext, rel_err * 100.0, wl
             );
         }
@@ -170,12 +153,9 @@ fn test_cda_vs_mie_dielectric_sphere() {
 fn test_finer_discretisation_improves_accuracy() {
     let radius = 8.0;
     let n_medium = 1.0;
-    let epsilon_m = n_medium * n_medium;
     let wl = 550.0;
     let epsilon = num_complex::Complex64::new(4.0, 0.5);
-    let k = 2.0 * std::f64::consts::PI * n_medium / wl;
 
-    let solver = CdaSolver::default();
     let params = SimulationParams {
         environment_n: n_medium,
         ..Default::default()
@@ -197,16 +177,10 @@ fn test_finer_discretisation_improves_accuracy() {
             continue;
         }
 
-        let dipoles: Vec<Dipole> = positions
-            .iter()
-            .map(|&pos| {
-                let volume = spacing.powi(3);
-                let alpha_cm = clausius_mossotti(volume, epsilon, epsilon_m);
-                let alpha = radiative_correction(alpha_cm, k);
-                Dipole::isotropic(pos, alpha)
-            })
-            .collect();
+        let dipoles =
+            common::dipoles_with_constant_eps(&lattice, spacing, wl, n_medium, epsilon);
 
+        let solver = CdaSolver::default();
         let cda = solver
             .compute_cross_sections(&dipoles, wl, &params)
             .unwrap();
@@ -228,15 +202,14 @@ fn test_finer_discretisation_improves_accuracy() {
 }
 
 /// Validate FCD + GMRES for a gold sphere across the full visible spectrum
-/// (420–800 nm), including the Drude region where the standard CDA fails.
+/// (420-800 nm), including the Drude region where the standard CDA fails.
 ///
-/// v0.1.1 target: <30% error across 420–800 nm with FCD at d=2nm.
+/// v0.1.1 target: <30% error across 420-800 nm with FCD at d=2nm.
 #[test]
 fn test_fcd_gold_sphere_full_spectrum() {
     let radius = 10.0; // nm
-    let spacing = 2.0; // nm — finer for metallic accuracy
+    let spacing = 2.0; // nm -- finer for metallic accuracy
     let n_medium = 1.0;
-    let epsilon_m = n_medium * n_medium;
 
     let sphere = Primitive::Sphere(Sphere {
         centre: [0.0, 0.0, 0.0],
@@ -251,7 +224,7 @@ fn test_fcd_gold_sphere_full_spectrum() {
     let gold = JohnsonChristyMaterial::gold();
 
     // FCD solver with the correct cell_size
-    let solver = CdaSolver::with_fcd(1000, true, spacing);
+    let solver = CdaSolver::with_fcd(1000, true);
     let params = SimulationParams {
         wavelength_range: [420.0, 800.0],
         num_wavelengths: 20,
@@ -267,17 +240,9 @@ fn test_fcd_gold_sphere_full_spectrum() {
         let epsilon = gold
             .dielectric_function(wl)
             .expect("Wavelength within J&C range");
-        let k = 2.0 * std::f64::consts::PI * n_medium / wl;
 
-        let dipoles: Vec<Dipole> = positions
-            .iter()
-            .map(|&pos| {
-                let volume = spacing.powi(3);
-                let alpha_cm = clausius_mossotti(volume, epsilon, epsilon_m);
-                let alpha = radiative_correction(alpha_cm, k);
-                Dipole::isotropic(pos, alpha)
-            })
-            .collect();
+        let dipoles =
+            common::dipoles_with_constant_eps(&lattice, spacing, wl, n_medium, epsilon);
 
         let cda = solver
             .compute_cross_sections(&dipoles, wl, &params)
@@ -288,14 +253,14 @@ fn test_fcd_gold_sphere_full_spectrum() {
         max_err = max_err.max(rel_err_ext);
 
         eprintln!(
-            "FCD λ={:.0} nm: ε=({:.2},{:.2}), |ε₁|/ε₂={:.1}, CDA={:.2e}, Mie={:.2e}, err={:.1}%",
+            "FCD lambda={:.0} nm: eps=({:.2},{:.2}), |eps1|/eps2={:.1}, CDA={:.2e}, Mie={:.2e}, err={:.1}%",
             wl, epsilon.re, epsilon.im,
             epsilon.re.abs() / epsilon.im.max(0.01),
             cda.extinction, mie_ext,
             rel_err_ext * 100.0,
         );
 
-        assert!(cda.extinction > 0.0, "Extinction must be positive at λ={:.0}", wl);
+        assert!(cda.extinction > 0.0, "Extinction must be positive at lambda={:.0}", wl);
     }
 
     eprintln!("FCD max error across 420-800 nm: {:.1}%", max_err * 100.0);
@@ -307,7 +272,6 @@ fn test_gmres_agrees_with_direct() {
     let radius = 10.0;
     let spacing = 3.0;
     let n_medium = 1.0;
-    let epsilon_m = n_medium * n_medium;
     let wl = 500.0;
 
     let sphere = Primitive::Sphere(Sphere {
@@ -315,20 +279,11 @@ fn test_gmres_agrees_with_direct() {
         radius,
     });
     let lattice = discretise_primitive(&sphere, spacing);
-    let positions: Vec<[f64; 3]> = lattice.iter().map(|p| p.position).collect();
 
     let epsilon = Complex64::new(4.0, 0.5); // dielectric
-    let k = 2.0 * std::f64::consts::PI * n_medium / wl;
 
-    let dipoles: Vec<Dipole> = positions
-        .iter()
-        .map(|&pos| {
-            let volume = spacing.powi(3);
-            let alpha_cm = clausius_mossotti(volume, epsilon, epsilon_m);
-            let alpha = radiative_correction(alpha_cm, k);
-            Dipole::isotropic(pos, alpha)
-        })
-        .collect();
+    let dipoles =
+        common::dipoles_with_constant_eps(&lattice, spacing, wl, n_medium, epsilon);
 
     let params = SimulationParams {
         environment_n: n_medium,
@@ -338,13 +293,13 @@ fn test_gmres_agrees_with_direct() {
     };
 
     // Direct solve
-    let solver_direct = CdaSolver::with_fcd(10000, false, spacing); // threshold high → always direct
+    let solver_direct = CdaSolver::with_fcd(10000, false); // threshold high -> always direct
     let direct_result = solver_direct
         .compute_cross_sections(&dipoles, wl, &params)
         .unwrap();
 
     // GMRES solve
-    let solver_gmres = CdaSolver::with_fcd(0, false, spacing); // threshold 0 → always GMRES
+    let solver_gmres = CdaSolver::with_fcd(0, false); // threshold 0 -> always GMRES
     let gmres_result = solver_gmres
         .compute_cross_sections(&dipoles, wl, &params)
         .unwrap();
@@ -379,8 +334,8 @@ fn test_cylinder_discretisation() {
     });
     let lattice = discretise_primitive(&cyl, 2.0);
 
-    // Expected volume ≈ π*5²*20 ≈ 1571 nm³, at d=2nm each cell = 8 nm³
-    // So N ≈ 1571/8 ≈ 196 dipoles
+    // Expected volume ~= pi*5^2*20 ~= 1571 nm^3, at d=2nm each cell = 8 nm^3
+    // So N ~= 1571/8 ~= 196 dipoles
     eprintln!("Cylinder: N = {} dipoles", lattice.len());
     assert!(lattice.len() > 100, "Too few dipoles: {}", lattice.len());
     assert!(lattice.len() < 400, "Too many dipoles: {}", lattice.len());

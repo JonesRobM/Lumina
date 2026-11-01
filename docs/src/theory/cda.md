@@ -83,7 +83,7 @@ where \\(b_1 = -1.8915316\\), \\(b_2 = 0.1648469\\), \\(b_3 = -1.7700004\\), and
 
 ## Anisotropic Dipoles (v0.3.0)
 
-For ellipsoidal objects, each dipole carries a full 3×3 polarisability tensor rather than a scalar. The tensor is constructed in three steps:
+For ellipsoidal objects, each dipole carries a full 3x3 polarisability tensor rather than a scalar. The tensor is constructed in three steps:
 
 ### 1. Depolarisation Factors
 
@@ -103,9 +103,9 @@ h_i(u) = \frac{2u^2}{\sqrt{q_a(u)\,q_b(u)\,q_c(u)}},\quad
 q_j(u) = a_i^2 + (a_j^2 - a_i^2)\,u^2
 \\]
 
-For a sphere this reduces to a polynomial \\(2u^2/a^3\\), so 16-point Gauss–Legendre quadrature is exact. For general ellipsoids the integrand is smooth and convergence is rapid (~1 ppm accuracy for aspect ratios up to 20:1).
+For a sphere this reduces to a polynomial \\(2u^2/a^3\\), so 16-point Gauss-Legendre quadrature is exact. For general ellipsoids the integrand is smooth and convergence is rapid (~1 ppm accuracy for aspect ratios up to 20:1).
 
-### 2. Anisotropic Clausius–Mossotti
+### 2. Anisotropic Clausius-Mossotti
 
 Each principal-axis polarisability is:
 
@@ -127,7 +127,7 @@ The diagonal tensor \\(\text{diag}(\alpha_x, \alpha_y, \alpha_z)\\) is rotated t
 \boldsymbol{\alpha} = \mathbf{R}\,\text{diag}(\alpha_x, \alpha_y, \alpha_z)\,\mathbf{R}^\top
 \\]
 
-This 3×3 complex tensor replaces the scalar polarisability \\(\alpha\\) in the diagonal blocks of the system matrix \\(\mathbf{A}_{ii} = \boldsymbol{\alpha}_i^{-1}\\), and in the cross-section formulas.
+This 3x3 complex tensor replaces the scalar polarisability \\(\alpha\\) in the diagonal blocks of the system matrix \\(\mathbf{A}_{ii} = \boldsymbol{\alpha}_i^{-1}\\), and in the cross-section formulas.
 
 > **Physical consequence:** Prolate (\\(a > b = c\\)) and oblate (\\(a = b > c\\)) nanoparticles have multiple plasmon resonances at wavelengths corresponding to \\(L_i\\) for each axis. The orientation of the object in the lab frame determines which resonance couples to a given incident polarisation.
 

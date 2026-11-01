@@ -2,13 +2,13 @@
 //!
 //! Geometry handling for the Lumina framework. This crate provides:
 //!
-//! - **Parametric primitives** ([`primitives`]) — Spheres, cylinders, cuboids,
+//! - **Parametric primitives** ([`primitives`]) -- Spheres, cylinders, cuboids,
 //!   helices, and ellipsoids defined by simple parameters.
-//! - **Discretisation** ([`discretise`]) — Converts shapes into cubic dipole
+//! - **Discretisation** ([`discretise`]) -- Converts shapes into cubic dipole
 //!   lattices at a given spacing.
-//! - **File parsers** ([`parsers`]) — Import geometries from `.xyz`, `.cif`,
+//! - **File parsers** ([`parsers`]) -- Import geometries from `.xyz`, `.cif`,
 //!   and `.obj` files.
-//! - **Transformations** ([`transform`]) — Scale, rotate, translate, and
+//! - **Transformations** ([`transform`]) -- Scale, rotate, translate, and
 //!   mirror operations.
 
 pub mod discretise;

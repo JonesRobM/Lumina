@@ -15,6 +15,7 @@ use thiserror::Error;
 
 /// Errors that can occur during an optical solve.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum SolverError {
     #[error("Solver failed to converge after {max_iter} iterations (residual: {residual:.2e})")]
     ConvergenceFailure { max_iter: usize, residual: f64 },
@@ -27,6 +28,14 @@ pub enum SolverError {
 
     #[error("Compute backend error: {0}")]
     ComputeError(String),
+
+    /// A combination of options that the solver cannot evaluate consistently.
+    ///
+    /// Raised instead of silently computing something the caller did not ask
+    /// for -- e.g. a Sommerfeld substrate together with a periodic lattice,
+    /// where the reflected tensor has no lattice sum.
+    #[error("Unsupported configuration: {0}")]
+    UnsupportedConfiguration(String),
 }
 
 /// The core trait that all optical simulation methods must implement.
@@ -63,7 +72,7 @@ pub trait OpticalSolver {
 
     /// Compute the far-field radiation pattern at a single wavelength.
     ///
-    /// Returns a [`FarFieldMap`] sampled at `n_theta × n_phi` directions on the
+    /// Returns a [`FarFieldMap`] sampled at `n_theta x n_phi` directions on the
     /// unit sphere. The intensity at each direction is the differential scattering
     /// cross-section (unnormalised).
     fn compute_far_field(

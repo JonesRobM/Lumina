@@ -3,7 +3,7 @@
 //! Run with:
 //!   cargo test -p lumina-core --features gpu --release -- gpu_benchmark --nocapture
 //!
-//! This is NOT a unit test — it prints timing comparisons. All assertions are
+//! This is NOT a unit test -- it prints timing comparisons. All assertions are
 //! for correctness (results must agree within f32 tolerance), not performance.
 
 use lumina_compute::{ComputeBackend, CpuBackend};
@@ -64,18 +64,18 @@ fn gpu_benchmark() {
                 Some(Arc::new(g))
             }
             Err(e) => {
-                println!("\n=== GPU not available: {} — CPU-only results ===", e);
+                println!("\n=== GPU not available: {} -- CPU-only results ===", e);
                 None
             }
         }
     };
     #[cfg(not(feature = "gpu"))]
     let gpu: Option<Arc<dyn ComputeBackend>> = {
-        println!("\n=== GPU feature not enabled — CPU-only results ===");
+        println!("\n=== GPU feature not enabled -- CPU-only results ===");
         None
     };
 
-    // ── Matvec benchmark ──
+    // -- Matvec benchmark --
     println!("\n--- Matvec (A*x) ---");
     println!(
         "{:<8} {:>12} {:>12} {:>10}",
@@ -141,7 +141,7 @@ fn gpu_benchmark() {
         }
     }
 
-    // ── GMRES solve benchmark ──
+    // -- GMRES solve benchmark --
     println!("\n--- GMRES Solve ---");
     println!(
         "{:<8} {:>12} {:>12} {:>10}",
@@ -153,7 +153,7 @@ fn gpu_benchmark() {
         let matrix = random_matrix(dim);
         let rhs = random_vector(dim);
 
-        // CPU GMRES (f64 precision → tight tolerance)
+        // CPU GMRES (f64 precision -> tight tolerance)
         let cpu_backend = Arc::clone(&cpu);
         let (cpu_result, cpu_ms) = timed(|| {
             let matvec_fn = |x: &ndarray::Array1<Complex64>| {
@@ -164,7 +164,7 @@ fn gpu_benchmark() {
             solve_gmres(&matvec_fn, &rhs, 1e-10, 1000).unwrap()
         });
 
-        // GPU GMRES (f32 matvec → relaxed tolerance, ~1e-6 is the floor)
+        // GPU GMRES (f32 matvec -> relaxed tolerance, ~1e-6 is the floor)
         if let Some(ref g) = gpu {
             let gpu_backend = Arc::clone(g);
             let (gpu_result, gpu_ms) = timed(|| {

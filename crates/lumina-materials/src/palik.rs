@@ -11,11 +11,11 @@
 //!
 //! | Identifier | Struct method | Wavelength range |
 //! |-----------|---------------|-----------------|
-//! | `TiO2_Palik`  | [`PalikMaterial::tio2()`]     | 300–1000 nm |
-//! | `SiO2_Palik`  | [`PalikMaterial::sio2()`]     | 300–1000 nm |
-//! | `Al2O3_Palik` | [`PalikMaterial::al2o3()`]    | 300–1000 nm |
-//! | `Si_Palik`    | [`PalikMaterial::silicon()`]  | 400–1100 nm |
-//! | `GaAs_Palik`  | [`PalikMaterial::gaas()`]     | 300–1000 nm |
+//! | `TiO2_Palik`  | [`PalikMaterial::tio2()`]     | 300-1000 nm |
+//! | `SiO2_Palik`  | [`PalikMaterial::sio2()`]     | 300-1000 nm |
+//! | `Al2O3_Palik` | [`PalikMaterial::al2o3()`]    | 300-1000 nm |
+//! | `Si_Palik`    | [`PalikMaterial::silicon()`]  | 400-1100 nm |
+//! | `GaAs_Palik`  | [`PalikMaterial::gaas()`]     | 300-1000 nm |
 
 use num_complex::Complex64;
 
@@ -34,10 +34,10 @@ impl PalikMaterial {
     /// Construct from tabulated data.
     ///
     /// # Arguments
-    /// * `name` — Material identifier string.
-    /// * `wavelengths_nm` — Wavelengths in nm (must be strictly increasing).
-    /// * `eps_real` — $\epsilon_1(\lambda)$ values.
-    /// * `eps_imag` — $\epsilon_2(\lambda)$ values.
+    /// * `name` -- Material identifier string.
+    /// * `wavelengths_nm` -- Wavelengths in nm (must be strictly increasing).
+    /// * `eps_real` -- $\epsilon_1(\lambda)$ values.
+    /// * `eps_imag` -- $\epsilon_2(\lambda)$ values.
     pub fn new(
         name: impl Into<String>,
         wavelengths_nm: Vec<f64>,
@@ -54,16 +54,16 @@ impl PalikMaterial {
         }
     }
 
-    /// Rutile TiO₂ (ordinary ray) from Palik (1985), Chapter by D. F. Edwards.
+    /// Rutile TiO2 (ordinary ray) from Palik (1985), Chapter by D. F. Edwards.
     ///
-    /// Data covers the visible and near-UV/NIR (300–1000 nm). TiO₂ is a
-    /// high-index dielectric (n ≈ 2.5–2.7 in the visible) with an absorption
+    /// Data covers the visible and near-UV/NIR (300-1000 nm). TiO2 is a
+    /// high-index dielectric (n ~= 2.5-2.7 in the visible) with an absorption
     /// edge near 380 nm. Values below 380 nm carry non-negligible $k > 0$.
     ///
-    /// Source: Palik Vol. 1, Table "TiO₂ (Rutile)" pp. 795–804.
-    #[allow(clippy::approx_constant)] // 3.140 is measured refractive index data, not π
+    /// Source: Palik Vol. 1, Table "TiO2 (Rutile)" pp. 795-804.
+    #[allow(clippy::approx_constant)] // 3.140 is measured refractive index data, not pi
     pub fn tio2() -> Self {
-        // (λ/nm, n, k) — rutile TiO₂ ordinary ray
+        // (lambda/nm, n, k) -- rutile TiO2 ordinary ray
         let data: &[(f64, f64, f64)] = &[
             (300.0, 3.340, 0.880),
             (310.0, 3.140, 0.660),
@@ -115,17 +115,17 @@ impl PalikMaterial {
             .collect();
         let eps_imag: Vec<f64> = data.iter().map(|&(_, n, k)| 2.0 * n * k).collect();
 
-        Self::new("TiO₂ (Palik)", wavelengths_nm, eps_real, eps_imag)
+        Self::new("TiO2 (Palik)", wavelengths_nm, eps_real, eps_imag)
     }
 
-    /// Fused silica SiO₂ from Palik (1985), Chapter by H. R. Philipp.
+    /// Fused silica SiO2 from Palik (1985), Chapter by H. R. Philipp.
     ///
-    /// SiO₂ is nearly lossless in the visible (k ≈ 0) with refractive index
-    /// n ≈ 1.45–1.47 across 400–800 nm. Absorption increases below ~300 nm.
+    /// SiO2 is nearly lossless in the visible (k ~= 0) with refractive index
+    /// n ~= 1.45-1.47 across 400-800 nm. Absorption increases below ~300 nm.
     ///
-    /// Source: Palik Vol. 1, Table "SiO₂ (Glass)" pp. 749–763.
+    /// Source: Palik Vol. 1, Table "SiO2 (Glass)" pp. 749-763.
     pub fn sio2() -> Self {
-        // (λ/nm, n, k) — fused silica (amorphous SiO₂)
+        // (lambda/nm, n, k) -- fused silica (amorphous SiO2)
         let data: &[(f64, f64, f64)] = &[
             (300.0, 1.487, 0.000),
             (310.0, 1.484, 0.000),
@@ -177,19 +177,19 @@ impl PalikMaterial {
             .collect();
         let eps_imag: Vec<f64> = data.iter().map(|&(_, n, k)| 2.0 * n * k).collect();
 
-        Self::new("SiO₂ (Palik)", wavelengths_nm, eps_real, eps_imag)
+        Self::new("SiO2 (Palik)", wavelengths_nm, eps_real, eps_imag)
     }
 
-    /// Sapphire / α-Al₂O₃ (ordinary ray) from Palik (1985).
+    /// Sapphire / alpha-Al2O3 (ordinary ray) from Palik (1985).
     ///
     /// Alumina is a wide-bandgap oxide (bandgap > 8 eV) and is transparent
     /// throughout the UV-to-NIR range covered here. The ordinary refractive
-    /// index is n ≈ 1.76–1.81 (300–1000 nm), with negligible absorption
-    /// (k ≈ 0) across the entire visible.
+    /// index is n ~= 1.76-1.81 (300-1000 nm), with negligible absorption
+    /// (k ~= 0) across the entire visible.
     ///
-    /// Source: Palik Vol. 1, Chapter by I. Philipp, pp. 653–682.
+    /// Source: Palik Vol. 1, Chapter by I. Philipp, pp. 653-682.
     pub fn al2o3() -> Self {
-        // (λ/nm, n, k) — Al₂O₃ ordinary ray
+        // (lambda/nm, n, k) -- Al2O3 ordinary ray
         let data: &[(f64, f64, f64)] = &[
             (300.0,  1.812, 0.000),
             (320.0,  1.806, 0.000),
@@ -229,21 +229,21 @@ impl PalikMaterial {
         let wavelengths_nm: Vec<f64> = data.iter().map(|&(lam, _, _)| lam).collect();
         let eps_real: Vec<f64> = data.iter().map(|&(_, n, k)| n * n - k * k).collect();
         let eps_imag: Vec<f64> = data.iter().map(|&(_, n, k)| 2.0 * n * k).collect();
-        Self::new("Al₂O₃ (Palik)", wavelengths_nm, eps_real, eps_imag)
+        Self::new("Al2O3 (Palik)", wavelengths_nm, eps_real, eps_imag)
     }
 
     /// Crystalline silicon (Si) from Palik (1985).
     ///
     /// Silicon has an indirect bandgap at ~1100 nm (1.12 eV) and a strong
-    /// absorption feature near the E1/E2 direct gaps around 360–400 nm.
+    /// absorption feature near the E1/E2 direct gaps around 360-400 nm.
     /// The data here start at 400 nm to avoid the highly non-monotone UV
-    /// region (300–400 nm) where the cubic spline can oscillate; users
+    /// region (300-400 nm) where the cubic spline can oscillate; users
     /// requiring UV coverage should provide a denser dataset.
     ///
-    /// Source: Palik Vol. 1, Chapter by D. F. Edwards, pp. 547–569;
+    /// Source: Palik Vol. 1, Chapter by D. F. Edwards, pp. 547-569;
     /// supplemented by M. A. Green, Sol. Energ. Mat. Sol. Cells 92, 1305 (2008).
     pub fn silicon() -> Self {
-        // (λ/nm, n, k) — crystalline Si at 300 K
+        // (lambda/nm, n, k) -- crystalline Si at 300 K
         let data: &[(f64, f64, f64)] = &[
             (400.0,  5.570, 0.387),
             (420.0,  4.740, 0.083),
@@ -287,12 +287,12 @@ impl PalikMaterial {
     ///
     /// GaAs has a direct bandgap at ~870 nm (1.42 eV at 300 K). Below this
     /// edge the material is strongly absorbing (k > 0); above it the material
-    /// is nearly transparent with n ≈ 3.5.  The large refractive index and
+    /// is nearly transparent with n ~= 3.5.  The large refractive index and
     /// saturable absorption make GaAs relevant for Mie-resonant nanoantennas.
     ///
-    /// Source: Palik Vol. 1, Chapter by E. D. Palik and A. Addamiano, pp. 429–443.
+    /// Source: Palik Vol. 1, Chapter by E. D. Palik and A. Addamiano, pp. 429-443.
     pub fn gaas() -> Self {
-        // (λ/nm, n, k) — GaAs at 300 K
+        // (lambda/nm, n, k) -- GaAs at 300 K
         let data: &[(f64, f64, f64)] = &[
             (300.0, 3.510, 2.060),
             (320.0, 3.660, 1.950),

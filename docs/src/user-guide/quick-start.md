@@ -13,11 +13,10 @@ environment_n = 1.0
 
 [[geometry.object]]
 name = "Gold_Sphere"
-type = "sphere"
-centre = [0.0, 0.0, 0.0]
-radius = 20.0
 material = "Au_JC"
 dipole_spacing = 2.0
+position = [0.0, 0.0, 0.0]
+shape = { type = "sphere", radius = 20.0 }
 
 [output]
 directory = "./output"
@@ -51,6 +50,6 @@ Select a shape, material, wavelength range, and click **Run Simulation**. Result
 
 The output directory will contain:
 
-- `spectra.csv` — wavelength, extinction, absorption, and scattering cross-sections
-- `spectra.json` — same data in JSON format (when `save_json = true`)
-- `near_field/` — field intensity maps (when `save_near_field = true`)
+- `spectra.csv` -- wavelength, extinction, absorption, and scattering cross-sections
+- `spectra.json` -- same data in JSON format (when `save_json = true`)
+- `near_field/` -- field intensity maps (when `save_near_field = true`)

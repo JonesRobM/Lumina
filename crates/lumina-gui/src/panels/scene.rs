@@ -1,7 +1,7 @@
 //! Scene panel: unified multi-object assembly editor.
 //!
 //! Replaces the separate Geometry + Materials panels with a single panel that
-//! manages a [`SceneSpec`] — a list of [`ObjectSpec`]s each with their own
+//! manages a [`SceneSpec`] -- a list of [`ObjectSpec`]s each with their own
 //! shape, material, dipole spacing, and world-space transform.
 
 use egui::Ui;
@@ -60,7 +60,7 @@ impl ScenePanel {
         ui.heading("Scene");
         ui.separator();
 
-        // ── Object list row ──────────────────────────────────────────────────
+        // -- Object list row --------------------------------------------------
         ui.horizontal(|ui| {
             ui.label("Objects:");
             for i in 0..self.scene.objects.len() {
@@ -78,7 +78,7 @@ impl ScenePanel {
             }
         });
 
-        // ── List management buttons ──────────────────────────────────────────
+        // -- List management buttons ------------------------------------------
         ui.horizontal(|ui| {
             if ui.button("+ Add object").clicked() {
                 let idx = self.scene.objects.len() + 1;
@@ -105,14 +105,14 @@ impl ScenePanel {
             let can_up = self.selected > 0;
             let can_down = self.selected + 1 < self.scene.objects.len();
             ui.add_enabled_ui(can_up, |ui| {
-                if ui.small_button("↑").clicked() {
+                if ui.small_button("up").clicked() {
                     self.scene.objects.swap(self.selected, self.selected - 1);
                     self.cached.swap(self.selected, self.selected - 1);
                     self.selected -= 1;
                 }
             });
             ui.add_enabled_ui(can_down, |ui| {
-                if ui.small_button("↓").clicked() {
+                if ui.small_button("down").clicked() {
                     self.scene.objects.swap(self.selected, self.selected + 1);
                     self.cached.swap(self.selected, self.selected + 1);
                     self.selected += 1;
@@ -122,7 +122,7 @@ impl ScenePanel {
 
         ui.separator();
 
-        // ── Selected object editor ───────────────────────────────────────────
+        // -- Selected object editor -------------------------------------------
         if let Some(obj) = self.scene.objects.get_mut(self.selected) {
             // Name
             ui.horizontal(|ui| {
@@ -196,7 +196,7 @@ impl ScenePanel {
                 tf_dirty |= ui.add(egui::DragValue::new(&mut t.position[2]).speed(0.5).prefix("z: ")).changed();
             });
             ui.horizontal(|ui| {
-                ui.label("Rotation (°):");
+                ui.label("Rotation (deg):");
                 tf_dirty |= ui.add(egui::DragValue::new(&mut t.rotation_deg[0]).speed(1.0).prefix("Rx: ")).changed();
                 tf_dirty |= ui.add(egui::DragValue::new(&mut t.rotation_deg[1]).speed(1.0).prefix("Ry: ")).changed();
                 tf_dirty |= ui.add(egui::DragValue::new(&mut t.rotation_deg[2]).speed(1.0).prefix("Rz: ")).changed();
@@ -222,7 +222,7 @@ impl ScenePanel {
             ui.label(format!("Dipoles (this object): {count}"));
         }
 
-        // ── Refresh cache ───────────────────────────────────────────────────
+        // -- Refresh cache ---------------------------------------------------
         if self.cache_dirty {
             self.recompute_cache();
         }
@@ -244,7 +244,7 @@ impl ScenePanel {
             ui.selectable_value(&mut self.projection, ProjectionPlane::YZ, "YZ");
         });
 
-        // Scatter preview — one series per object, color-coded
+        // Scatter preview -- one series per object, color-coded
         let (ax_a, ax_b, lbl_a, lbl_b) = match self.projection {
             ProjectionPlane::XY => (0, 1, "x (nm)", "y (nm)"),
             ProjectionPlane::XZ => (0, 2, "x (nm)", "z (nm)"),
@@ -287,7 +287,7 @@ impl ScenePanel {
     }
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// -- Helpers ------------------------------------------------------------------
 
 /// Return an integer tag identifying the shape variant (for comparisons).
 fn shape_tag(shape: &ShapeSpec) -> u8 {
@@ -373,7 +373,7 @@ fn shape_params_ui(ui: &mut Ui, shape: &mut ShapeSpec) -> bool {
                 if ui.text_edit_singleline(path).changed() {
                     changed = true;
                 }
-                if ui.button("Browse…").clicked() {
+                if ui.button("Browse...").clicked() {
                     if let Some(picked) = rfd::FileDialog::new()
                         .set_title("Open structure file")
                         .add_filter("Structure files", &["xyz", "obj"])
@@ -386,7 +386,7 @@ fn shape_params_ui(ui: &mut Ui, shape: &mut ShapeSpec) -> bool {
             });
             ui.label(
                 egui::RichText::new(
-                    ".xyz: atom positions in Å (converted to nm). \
+                    ".xyz: atom positions in Angstrom (converted to nm). \
                      .obj: mesh volume filled with dipoles. \
                      Set dipole spacing to the inter-atomic distance for .xyz files.",
                 )
@@ -463,7 +463,7 @@ fn shape_params_ui(ui: &mut Ui, shape: &mut ShapeSpec) -> bool {
 
             // Shell layers
             ui.add_space(4.0);
-            ui.label(egui::RichText::new("Shells (inner → outer):").strong());
+            ui.label(egui::RichText::new("Shells (inner -> outer):").strong());
 
             let mut remove_idx: Option<usize> = None;
             for (idx, shell) in shells.iter_mut().enumerate() {
@@ -485,7 +485,7 @@ fn shape_params_ui(ui: &mut Ui, shape: &mut ShapeSpec) -> bool {
                                 }
                             }
                         });
-                    if ui.small_button("×").on_hover_text("Remove this shell").clicked() {
+                    if ui.small_button("x").on_hover_text("Remove this shell").clicked() {
                         remove_idx = Some(idx);
                     }
                 });

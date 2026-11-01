@@ -10,34 +10,45 @@ use crate::parsers::obj::ObjMesh;
 use crate::primitives::Primitive;
 
 /// A point in a dipole lattice, produced by discretisation.
+///
+/// `#[non_exhaustive]`: construct these only through [`discretise_primitive`] or
+/// [`discretise_mesh`]. This stops another crate building one by struct literal or
+/// matching it exhaustively, so a field added here is not a breaking change.
+///
+/// Note it does *not* stop a caller ignoring a field on read, which is what actually
+/// went wrong when surface averaging landed: four integration tests did
+/// `.map(|p| p.position)` and silently dropped `fill_fraction`. Nothing outside this
+/// crate has ever constructed a `LatticePoint`, so the attribute is a guard against
+/// future misuse rather than a fix for that one.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct LatticePoint {
     /// Position in 3D space (nm).
     pub position: [f64; 3],
-    /// Fraction of this dipole cell's volume inside the shape, ∈ (0, 1].
+    /// Fraction of this dipole cell's volume inside the shape, in (0, 1].
     /// 1.0 for interior dipoles; < 1.0 for dipoles straddling the surface.
     pub fill_fraction: f64,
 }
 
 /// Compute the fraction of a cubic dipole cell's volume inside a shape.
 ///
-/// Samples a 5×5×5 = 125-point grid within `[centre ± spacing/2]³`.
-/// Subpoints are placed at `centre[axis] + (k/4.0 − 0.5) * spacing` for k = 0..=4.
+/// Samples a 5x5x5 = 125-point grid within `[centre +/- spacing/2]^3`.
+/// Subpoints are placed at `centre[axis] + (k/4.0 - 0.5) * spacing` for k = 0..=4.
 /// Returns `count_inside / 125`.
 ///
 /// Fast-path: if all 8 cell corners satisfy `contains_fn`, returns 1.0 immediately.
 ///
 /// # Precondition
-/// `spacing > 0.0` — guaranteed by the caller's existing assertion.
+/// `spacing > 0.0` -- guaranteed by the caller's existing assertion.
 fn fill_fraction_grid(
     centre: [f64; 3],
     spacing: f64,
     contains_fn: impl Fn([f64; 3]) -> bool,
 ) -> f64 {
     let h = spacing * 0.5;
-    // Fast-path: all 8 corners inside → cell is fully interior.
+    // Fast-path: all 8 corners inside -> cell is fully interior.
     // Valid for convex shapes (Sphere, Cuboid, Ellipsoid, Cylinder).
-    // For Helix (non-convex), this over-counts when spacing ≳ wire_radius,
+    // For Helix (non-convex), this over-counts when spacing >~ wire_radius,
     // which violates the CDA validity criterion anyway.
     let all_inside = [-h, h].iter().all(|&dx| {
         [-h, h].iter().all(|&dy| {
@@ -49,7 +60,7 @@ fn fill_fraction_grid(
     if all_inside {
         return 1.0;
     }
-    // Full 5×5×5 subsample.
+    // Full 5x5x5 subsample.
     let mut count = 0u32;
     for kx in 0..5u32 {
         let x = centre[0] + (kx as f64 / 4.0 - 0.5) * spacing;
@@ -110,7 +121,7 @@ pub fn discretise_primitive(primitive: &Primitive, spacing: f64) -> Vec<LatticeP
 
 /// Discretise a closed triangle mesh into a cubic lattice of dipole positions.
 ///
-/// Uses ray-casting (Möller–Trumbore along +z) to test whether each grid point
+/// Uses ray-casting (Moeller-Trumbore along +z) to test whether each grid point
 /// lies inside the mesh. The lattice is centred on the bounding-box midpoint,
 /// following the same convention as [`discretise_primitive`].
 ///
@@ -182,7 +193,7 @@ fn mesh_contains(vertices: &[[f64; 3]], faces: &[[usize; 3]], point: &[f64; 3]) 
     count % 2 == 1
 }
 
-/// Möller–Trumbore ray-triangle intersection for a ray along +z.
+/// Moeller-Trumbore ray-triangle intersection for a ray along +z.
 ///
 /// Returns `Some(t)` if the ray from `origin` in direction [0, 0, 1] intersects
 /// the triangle `(v0, v1, v2)` at parameter `t > 0`. Returns `None` otherwise.
@@ -191,12 +202,12 @@ fn ray_triangle_z(origin: &[f64; 3], v0: &[f64; 3], v1: &[f64; 3], v2: &[f64; 3]
     let e1 = [v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2]];
     let e2 = [v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2]];
 
-    // P = D × E2 where D = [0, 0, 1]
+    // P = D x E2 where D = [0, 0, 1]
     // P = [0*e2z - 1*e2y, 1*e2x - 0*e2z, 0*e2y - 0*e2x] = [-e2y, e2x, 0]
     let px = -e2[1];
     let py = e2[0];
 
-    // det = E1 · P = e1x * (-e2y) + e1y * e2x
+    // det = E1 * P = e1x * (-e2y) + e1y * e2x
     let det = e1[0] * px + e1[1] * py;
     if det.abs() < 1e-12 {
         return None; // Ray parallel to triangle
@@ -208,24 +219,24 @@ fn ray_triangle_z(origin: &[f64; 3], v0: &[f64; 3], v1: &[f64; 3], v2: &[f64; 3]
     let ty = origin[1] - v0[1];
     let tz = origin[2] - v0[2];
 
-    // u = (T · P) * inv_det
+    // u = (T * P) * inv_det
     let u = (tx * px + ty * py) * inv_det;
     if !(0.0..=1.0).contains(&u) {
         return None;
     }
 
-    // Q = T × E1
+    // Q = T x E1
     let qx = ty * e1[2] - tz * e1[1];
     let qy = tz * e1[0] - tx * e1[2];
     let qz = tx * e1[1] - ty * e1[0];
 
-    // v = (D · Q) * inv_det, D = [0, 0, 1] so D · Q = qz
+    // v = (D * Q) * inv_det, D = [0, 0, 1] so D * Q = qz
     let v = qz * inv_det;
     if v < 0.0 || u + v > 1.0 {
         return None;
     }
 
-    // t = (E2 · Q) * inv_det
+    // t = (E2 * Q) * inv_det
     let t = (e2[0] * qx + e2[1] * qy + e2[2] * qz) * inv_det;
     if t > 0.0 {
         Some(t)
@@ -271,7 +282,7 @@ mod tests {
         }
     }
 
-    /// Build a cube OBJ string for testing. Cube spans ±h on each axis (6 quad faces).
+    /// Build a cube OBJ string for testing. Cube spans +/-h on each axis (6 quad faces).
     fn cube_obj(h: f64) -> String {
         format!(
             "v {h} {h} -{h}\nv {h} -{h} -{h}\nv -{h} -{h} -{h}\nv -{h} {h} -{h}\n\
@@ -308,7 +319,7 @@ mod tests {
         let v0 = [0.0, 0.0, -5.0];
         let v1 = [10.0, 0.0, -5.0];
         let v2 = [0.0, 10.0, -5.0];
-        // Triangle at z=-5 is behind origin at z=0 → t < 0, should return None
+        // Triangle at z=-5 is behind origin at z=0 -> t < 0, should return None
         let origin = [1.0, 1.0, 0.0];
         assert!(ray_triangle_z(&origin, &v0, &v1, &v2).is_none());
     }
@@ -330,11 +341,11 @@ mod tests {
 
     #[test]
     fn test_discretise_cube_mesh() {
-        // Cube ±5nm at 2nm spacing: same as parametric cuboid test
-        // Centred grid: -4,-2,0,2,4 per axis (5 points) → 5³ = 125 interior points
-        // But boundary points at ±5 land exactly ON the surface; ray-casting may
-        // include or exclude them. With the full ±5 grid: points from -4 to +4
-        // in steps of 2 → 5 per axis → 125 minimum.
+        // Cube +/-5nm at 2nm spacing: same as parametric cuboid test
+        // Centred grid: -4,-2,0,2,4 per axis (5 points) -> 5^3 = 125 interior points
+        // But boundary points at +/-5 land exactly ON the surface; ray-casting may
+        // include or exclude them. With the full +/-5 grid: points from -4 to +4
+        // in steps of 2 -> 5 per axis -> 125 minimum.
         let mesh = parse_obj(&cube_obj(5.0)).unwrap();
         let points = discretise_mesh(&mesh, 2.0);
         // Should get at least 125 points (interior) and at most ~729 (if boundary included)
@@ -343,7 +354,7 @@ mod tests {
             "Cube mesh dipole count = {}, expected ~125-343",
             points.len()
         );
-        // All points should be within the cube ±5
+        // All points should be within the cube +/-5
         for p in &points {
             assert!(p.position[0].abs() <= 5.0 + 1e-10);
             assert!(p.position[1].abs() <= 5.0 + 1e-10);
@@ -384,8 +395,8 @@ mod tests {
             centre: [0.0, 0.0, 0.0],
             radius: 10.0,
         });
-        // Grid for centre=[9,0,0], spacing=4: x∈{7,8,9,10,11}, y∈{-2,-1,0,1,2}, z∈{-2,-1,0,1,2}
-        // Points inside sphere (x²+y²+z² ≤ 100): computed from the 5×5×5=125 grid.
+        // Grid for centre=[9,0,0], spacing=4: xin{7,8,9,10,11}, yin{-2,-1,0,1,2}, zin{-2,-1,0,1,2}
+        // Points inside sphere (x^2+y^2+z^2 <= 100): computed from the 5x5x5=125 grid.
         let f = fill_fraction_grid([9.0, 0.0, 0.0], 4.0, |p| sphere.contains(&p));
         // The fast-path does NOT fire (x=11 corner is outside), so full grid runs.
         assert_eq!(f, 76.0 / 125.0,

@@ -4,7 +4,7 @@
 
   <!-- Title -->
   <text x="450" y="30" font-family="Arial, sans-serif" font-size="18" font-weight="bold" text-anchor="middle" fill="#333">
-    CDA vs Mie Theory — Au Sphere (R=10nm, d=2nm)
+    CDA vs Mie Theory -- Au Sphere (R=10nm, d=2nm)
   </text>
 
   <!-- Main plot area -->
@@ -77,7 +77,7 @@
   </text>
   <text x="30" y="220" font-family="Arial, sans-serif" font-size="14" text-anchor="middle" fill="#333"
         transform="rotate(-90 30 220)">
-    Extinction Cross-Section (nm²)
+    Extinction Cross-Section (nm^2)
   </text>
 
   <!-- Legend -->

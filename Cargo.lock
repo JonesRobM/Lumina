@@ -2535,7 +2535,7 @@ checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 
 [[package]]
 name = "lumina-chat"
-version = "0.3.0"
+version = "0.7.0"
 dependencies = [
  "dirs",
  "egui",
@@ -2552,7 +2552,7 @@ dependencies = [
 
 [[package]]
 name = "lumina-cli"
-version = "0.3.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -2571,7 +2571,7 @@ dependencies = [
 
 [[package]]
 name = "lumina-compute"
-version = "0.3.0"
+version = "0.7.0"
 dependencies = [
  "bytemuck",
  "log",
@@ -2585,7 +2585,7 @@ dependencies = [
 
 [[package]]
 name = "lumina-core"
-version = "0.3.0"
+version = "0.7.0"
 dependencies = [
  "approx",
  "faer",
@@ -2605,7 +2605,7 @@ dependencies = [
 
 [[package]]
 name = "lumina-geometry"
-version = "0.3.0"
+version = "0.7.0"
 dependencies = [
  "log",
  "nalgebra",
@@ -2616,7 +2616,7 @@ dependencies = [
 
 [[package]]
 name = "lumina-gui"
-version = "0.3.0"
+version = "0.7.0"
 dependencies = [
  "eframe",
  "egui",
@@ -2636,7 +2636,7 @@ dependencies = [
 
 [[package]]
 name = "lumina-materials"
-version = "0.3.0"
+version = "0.7.0"
 dependencies = [
  "log",
  "num-complex",

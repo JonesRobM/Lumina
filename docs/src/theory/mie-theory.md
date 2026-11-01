@@ -34,7 +34,7 @@ The CDA is validated against Mie theory using a gold nanosphere (\\(R = 10\\) nm
 
 | Regime | Wavelength | Spacing | Expected Error |
 |--------|-----------|---------|---------------|
-| Interband (Au) | 400–520 nm | \\(d = 3\\) nm | \\(< 30\%\\) |
+| Interband (Au) | 400-520 nm | \\(d = 3\\) nm | \\(< 30\%\\) |
 | Drude (Au) | \\(> 550\\) nm | \\(d = 3\\) nm | \\(> 50\%\\) (known limitation) |
 | Dielectric | any | \\(d = 3\\) nm | \\(< 15\%\\) |
 | Dielectric | any | \\(d \leq 2\\) nm | \\(< 5\%\\) |

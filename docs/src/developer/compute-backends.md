@@ -20,7 +20,7 @@ Uses Rayon for shared-memory parallelism. Enabled by default via the `cpu` featu
 
 ### GPU (wgpu)
 
-Uses wgpu v24 compute shaders for the GMRES matrix-vector product — the dominant cost for large systems (\\(N > 1000\\)).
+Uses wgpu v24 compute shaders for the GMRES matrix-vector product -- the dominant cost for large systems (\\(N > 1000\\)).
 
 Enabled via the `gpu` feature flag:
 
@@ -40,23 +40,23 @@ cargo build --release --features gpu
 - **f32 precision on GPU:** wgpu/WGSL does not support f64. The matrix and vectors are converted to `Complex<f32>` (stored as `vec2<f32>`) for the GPU matvec. The conversion overhead is O(N), negligible compared to the O(N\\(^2\\)) matvec.
 - **Matrix caching:** The `GpuSession` holds 5 pre-allocated WGSL buffers (matrix, input, output, staging, params) and a pre-built bind group. The matrix is uploaded once; each GMRES iteration reuses all buffers (0 per-iteration allocations).
 - **Automatic fallback:** If GPU initialisation fails (no compatible GPU, missing drivers), the solver falls back to `CpuBackend` with a log warning.
-- **Memory budget gate (v0.4.1):** The GPU path is only entered if the matrix fits within `matrix_memory_budget` (default 2 GiB). For large N where the matrix would exceed this limit, the solver goes directly to the CPU on-the-fly path — preventing a silent O(N²) CPU allocation before a GPU upload attempt.
+- **Memory budget gate (v0.4.1):** The GPU path is only entered if the matrix fits within `matrix_memory_budget` (default 2 GiB). For large N where the matrix would exceed this limit, the solver goes directly to the CPU on-the-fly path -- preventing a silent O(N^2) CPU allocation before a GPU upload attempt.
 
 **Precision implications:**
 
-The f32 matvec limits the achievable GMRES residual to approximately \\(10^{-7}\\). For most CDA applications this is more than adequate — the discretisation error (typically 5–25%) dominates. The solver tolerance should be set to \\(\geq 10^{-6}\\) when using GPU acceleration.
+The f32 matvec limits the achievable GMRES residual to approximately \\(10^{-7}\\). For most CDA applications this is more than adequate -- the discretisation error (typically 5-25%) dominates. The solver tolerance should be set to \\(\geq 10^{-6}\\) when using GPU acceleration.
 
 ## Memory-Aware Solver Dispatch
 
-For large systems the interaction matrix dominates memory. `CdaSolver::solve_dipoles` selects its sub-strategy based on the matrix size `(3N)² × 16 bytes` versus a configurable `matrix_memory_budget` (default 2 GiB):
+For large systems the interaction matrix dominates memory. `CdaSolver::solve_dipoles` selects its sub-strategy based on the matrix size `(3N)^2 x 16 bytes` versus a configurable `matrix_memory_budget` (default 2 GiB):
 
 ![Solver path selection flowchart](../../images/solver_dispatch.svg)
 
 | Condition | Path | Peak memory | Speed |
 |-----------|------|-------------|-------|
-| N ≤ 1 000 | Direct LU (faer) | O(N²) | Fastest |
-| matrix_bytes ≤ budget AND GPU | GPU GMRES | O(N²) CPU + VRAM | Fast at N > 5 000 |
-| matrix_bytes ≤ budget, no GPU | CPU cached GMRES | O(N²) | Good |
+| N <= 1 000 | Direct LU (faer) | O(N^2) | Fastest |
+| matrix_bytes <= budget AND GPU | GPU GMRES | O(N^2) CPU + VRAM | Fast at N > 5 000 |
+| matrix_bytes <= budget, no GPU | CPU cached GMRES | O(N^2) | Good |
 | matrix_bytes > budget | **On-the-fly GMRES** | **O(N)** | Slower per iter |
 
 ### On-the-fly Matvec
@@ -65,8 +65,8 @@ When the matrix exceeds the budget, `assembly::matvec_on_the_fly` is used instea
 
 ```rust
 // No matrix is ever assembled. For each GMRES iteration:
-// result[3i..3i+3] = α_i⁻¹ · x[3i..3i+3]  (diagonal)
-//                  + Σⱼ₌ᵢ -G(rᵢ, rⱼ) · x[3j..3j+3]  (off-diagonal)
+// result[3i..3i+3] = alpha_i^-1 * x[3i..3i+3]  (diagonal)
+//                  + sum_j=_i -G(r_i, r_j) * x[3j..3j+3]  (off-diagonal)
 // Rows are computed in parallel (Rayon par_iter over i).
 ```
 
@@ -86,8 +86,8 @@ N_\text{cross} = \frac{1}{3} \sqrt{\frac{M_\text{budget}}{16}} \approx 3\,860 \t
 \\]
 
 At N = 10 000:
-- **Cached matrix**: 14.4 GB — requires a workstation with ample RAM
-- **On-the-fly**: ~47 MB — runs on any laptop
+- **Cached matrix**: 14.4 GB -- requires a workstation with ample RAM
+- **On-the-fly**: ~47 MB -- runs on any laptop
 
 ### Configuring the Budget
 
@@ -130,9 +130,9 @@ Enabled via the `distributed` feature flag.
 backend = "auto"   # "cpu", "gpu", or "auto" (default)
 ```
 
-- `"auto"` — tries GPU first, falls back to CPU if unavailable
-- `"cpu"` — always use CPU (useful for reproducibility or debugging)
-- `"gpu"` — require GPU (errors if unavailable)
+- `"auto"` -- tries GPU first, falls back to CPU if unavailable
+- `"cpu"` -- always use CPU (useful for reproducibility or debugging)
+- `"gpu"` -- require GPU (errors if unavailable)
 
 ### In the GUI
 
@@ -153,7 +153,8 @@ let solver = CdaSolver::default();
 {
     use lumina_compute::GpuBackend;
     let gpu = Arc::new(GpuBackend::new_blocking().expect("GPU init failed"));
-    let solver = CdaSolver::with_backend(gpu);
+    // with_backend(iterative_threshold, use_fcd, backend)
+    let solver = CdaSolver::with_backend(3000, true, gpu);
 }
 ```
 

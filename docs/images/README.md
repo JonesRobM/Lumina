@@ -44,7 +44,7 @@ plt.plot(mie_data['wavelength'], mie_data['extinction'],
 plt.plot(cda_data['wavelength'], cda_data['extinction'],
          'bo-', linewidth=2, label='CDA (FCD)')
 plt.xlabel('Wavelength (nm)')
-plt.ylabel('Extinction Cross-Section (nm²)')
+plt.ylabel('Extinction Cross-Section (nm^2)')
 plt.legend()
 plt.savefig('mie_comparison.png', dpi=144)
 ```
@@ -91,8 +91,8 @@ cargo run --release --bin lumina-gui
 - Show the legend
 
 **Near-field Heatmap** (`nearfield_heatmap.png`):
-- Navigate to Results → Near-field tab
-- Capture the |E|² heatmap at peak wavelength
+- Navigate to Results -> Near-field tab
+- Capture the |E|^2 heatmap at peak wavelength
 - Include the color scale
 
 ### 4. Export from simulation runs
@@ -115,15 +115,15 @@ Then use a plotting tool (Python/matplotlib, gnuplot, etc.) to visualize the CSV
 ## SVG vs PNG
 
 The current SVG files are:
-- ✅ Small file size (~10KB each)
-- ✅ Scalable for any display
-- ✅ Version control friendly (text-based)
-- ✅ Professional appearance
+- [done] Small file size (~10KB each)
+- [done] Scalable for any display
+- [done] Version control friendly (text-based)
+- [done] Professional appearance
 
 Real PNG screenshots provide:
-- ✅ Authentic look and feel
-- ✅ Actual rendered results
-- ⚠️ Larger file sizes (100-500KB)
-- ⚠️ Fixed resolution
+- [done] Authentic look and feel
+- [done] Actual rendered results
+- WARNING Larger file sizes (100-500KB)
+- WARNING Fixed resolution
 
 **Recommendation**: Keep both! SVGs for clean diagrams, PNGs for actual GUI screenshots when available.

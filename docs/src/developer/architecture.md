@@ -5,12 +5,12 @@ Lumina is organised as a Rust workspace with seven crates.
 ## Crate Dependency Graph
 
 ```
-lumina-gui ──┬── lumina-chat ──┬── lumina-core
-lumina-cli ──┤                 └── lumina-geometry
-             ├── lumina-core ──┬── lumina-compute
-             │                 ├── lumina-geometry
-             │                 └── lumina-materials
-             └─────────────────┘
+lumina-gui --+-- lumina-chat --+-- lumina-core
+lumina-cli --|                 \-- lumina-geometry
+             +-- lumina-core --+-- lumina-compute
+             |                 +-- lumina-geometry
+             |                 \-- lumina-materials
+             \-----------------/
 ```
 
 ## Crate Responsibilities
@@ -54,21 +54,21 @@ Returns frequency-dependent \\(\epsilon(\omega)\\) for any material source. Buil
 
 For a single wavelength, the CDA solver pipeline is:
 
-1. **Discretise** — fill the shape with a centred cubic lattice of dipole positions (`lumina-geometry`)
-2. **Look up \\(\epsilon(\lambda)\\)** — query the material provider (`lumina-materials`)
-3. **Assemble** — build the 3N\\(\times\\)3N interaction matrix using the dyadic Green's function, parallelised with Rayon (`lumina-core`)
-4. **Solve** — compute self-consistent dipole moments:
+1. **Discretise** -- fill the shape with a centred cubic lattice of dipole positions (`lumina-geometry`)
+2. **Look up \\(\epsilon(\lambda)\\)** -- query the material provider (`lumina-materials`)
+3. **Assemble** -- build the 3N\\(\times\\)3N interaction matrix using the dyadic Green's function, parallelised with Rayon (`lumina-core`)
+4. **Solve** -- compute self-consistent dipole moments:
    - N \\(\leq\\) 1000: direct LU via `faer`
    - N \\(>\\) 1000: matrix-free GMRES(m=30) with matvec delegated to the `ComputeBackend`
-5. **Post-process** — compute cross-sections, near-field maps, far-field patterns (`lumina-core`)
+5. **Post-process** -- compute cross-sections, near-field maps, far-field patterns (`lumina-core`)
 
 ## Feature Flags
 
 The `gpu` feature propagates through the crate chain:
 
 ```
-lumina-compute/gpu  →  lumina-core/gpu  →  lumina-gui/gpu
-                                        →  lumina-cli/gpu
+lumina-compute/gpu  ->  lumina-core/gpu  ->  lumina-gui/gpu
+                                        ->  lumina-cli/gpu
 ```
 
 When `gpu` is enabled, `GpuBackend` becomes available and the GUI/CLI can offer GPU acceleration. Without the flag, only `CpuBackend` is compiled.

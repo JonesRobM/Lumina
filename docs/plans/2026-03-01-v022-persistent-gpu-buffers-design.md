@@ -8,7 +8,7 @@
 
 ## Problem
 
-The current `GpuBackend::matvec()` implementation allocates 7 GPU buffers and creates 1 bind group per call. For a typical GMRES run (30 iterations × 10 restarts = 300 matvecs per wavelength), this produces ~1800 allocations and ~300 matrix uploads per wavelength — the dominant GPU overhead for our N range.
+The current `GpuBackend::matvec()` implementation allocates 7 GPU buffers and creates 1 bind group per call. For a typical GMRES run (30 iterations x 10 restarts = 300 matvecs per wavelength), this produces ~1800 allocations and ~300 matrix uploads per wavelength -- the dominant GPU overhead for our N range.
 
 Additionally, the GUI parallel wavelength sweep shares a `GpuBackend` across Rayon threads with no command queue synchronisation, creating a potential race condition on command submission.
 
@@ -49,10 +49,10 @@ Serialises all device/queue access across Rayon threads.
 **`GpuSession`** (one per solve, returned to caller):
 ```rust
 pub struct GpuSession {
-    matrix_buf:  wgpu::Buffer,   // 9N² × 8 bytes (f32 complex pairs)
-    input_buf:   wgpu::Buffer,   // 3N × 8 bytes
-    output_buf:  wgpu::Buffer,   // 3N × 8 bytes
-    staging_buf: wgpu::Buffer,   // 3N × 8 bytes (MAP_READ)
+    matrix_buf:  wgpu::Buffer,   // 9N^2 x 8 bytes (f32 complex pairs)
+    input_buf:   wgpu::Buffer,   // 3N x 8 bytes
+    output_buf:  wgpu::Buffer,   // 3N x 8 bytes
+    staging_buf: wgpu::Buffer,   // 3N x 8 bytes (MAP_READ)
     params_buf:  wgpu::Buffer,   // 16 bytes (uniform)
     bind_group:  wgpu::BindGroup,
     dim: usize,
@@ -74,8 +74,8 @@ pub struct GpuBackend {
 ```rust
 fn create_gpu_session(&self, n: usize) -> Option<GpuSession>;
 ```
-- `CpuBackend` → returns `None`
-- `GpuBackend` → returns `Some(GpuSession)` with pre-allocated buffers
+- `CpuBackend` -> returns `None`
+- `GpuBackend` -> returns `Some(GpuSession)` with pre-allocated buffers
 
 New companion method on `GpuSession`:
 ```rust
@@ -95,9 +95,9 @@ The existing `ComputeBackend::matvec(&matrix, x)` is retained for the direct-sol
 3. Build bind group binding all 5 buffers
 4. Release lock; return `GpuSession` (buffers owned by session)
 
-**Matrix upload** (`session.upload_matrix(&matrix)`) — called once before GMRES:
+**Matrix upload** (`session.upload_matrix(&matrix)`) -- called once before GMRES:
 1. Lock `Mutex<GpuState>` (queue access)
-2. Convert matrix `Complex64` → `[f32; 2]` pairs once
+2. Convert matrix `Complex64` -> `[f32; 2]` pairs once
 3. `queue.write_buffer(&matrix_buf, 0, data)`
 4. Release lock
 
@@ -105,7 +105,7 @@ The existing `ComputeBackend::matvec(&matrix, x)` is retained for the direct-sol
 1. Lock `Mutex<GpuState>`
 2. Write `x` into `input_buf` (`queue.write_buffer`)
 3. Submit compute dispatch (bind group already set, matrix already on GPU)
-4. Copy `output_buf` → `staging_buf`
+4. Copy `output_buf` -> `staging_buf`
 5. Map staging, poll, read result
 6. Release lock; return `Array1<Complex64>`
 
@@ -114,7 +114,7 @@ The existing `ComputeBackend::matvec(&matrix, x)` is retained for the direct-sol
 Before loop:  session = backend.create_gpu_session(3*N)  // Option<GpuSession>
               session.upload_matrix(&matrix)
 Per iteration: y = session.matvec(x)                     // replaces backend.matvec(&matrix, x)
-After loop:   session dropped → GPU buffers freed
+After loop:   session dropped -> GPU buffers freed
 ```
 
 ### 4. Per-Call Savings
@@ -131,9 +131,9 @@ For 300 matvecs/wavelength: eliminates ~1800 allocations and ~300 matrix uploads
 
 ### 5. Thread Safety
 
-- `GpuSession` is **not** shared between threads — each wavelength's `solve_dipoles()` creates and owns its own session.
+- `GpuSession` is **not** shared between threads -- each wavelength's `solve_dipoles()` creates and owns its own session.
 - `Arc<Mutex<GpuState>>` is cloned into each session at creation; Mutex serialises device/queue access.
-- Rayon threads for different wavelengths queue up on the Mutex — correct serialised GPU access.
+- Rayon threads for different wavelengths queue up on the Mutex -- correct serialised GPU access.
 - No unsafe code added.
 
 ---
@@ -142,7 +142,7 @@ For 300 matvecs/wavelength: eliminates ~1800 allocations and ~300 matrix uploads
 
 | Test | Description | Pass Criterion |
 |------|-------------|----------------|
-| `test_persistent_session_matches_direct` | 6×6 system: session matvec vs CPU matvec | Agree to 1e-5 (f32 floor) |
+| `test_persistent_session_matches_direct` | 6x6 system: session matvec vs CPU matvec | Agree to 1e-5 (f32 floor) |
 | `test_mie_sphere_gpu_session` | Gold sphere Mie validation with GPU backend | C_ext within 20% of Mie theory |
 | `test_parallel_wavelengths_gpu` | 4 Rayon threads, shared `Arc<GpuBackend>`, small system | No panics; results match CPU |
 

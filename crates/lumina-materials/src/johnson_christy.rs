@@ -49,8 +49,8 @@ impl JohnsonChristyMaterial {
     /// Values of $n$ and $k$ are converted to $\epsilon_1 = n^2 - k^2$ and
     /// $\epsilon_2 = 2nk$.
     pub fn gold() -> Self {
-        // J&C 1972 Au data: (λ/μm, n, k) from Table II.
-        // Covering 188–937 nm (full published range).
+        // J&C 1972 Au data: (lambda/mum, n, k) from Table II.
+        // Covering 188-937 nm (full published range).
         let data: &[(f64, f64, f64)] = &[
             (0.1879, 1.28, 1.188),
             (0.1916, 1.32, 1.203),
@@ -102,9 +102,9 @@ impl JohnsonChristyMaterial {
         let mut eps_imag = Vec::with_capacity(data.len());
 
         for &(wl_um, n, k) in data {
-            wavelengths.push(wl_um * 1000.0); // μm → nm
-            eps_real.push(n * n - k * k);      // ε₁ = n² − k²
-            eps_imag.push(2.0 * n * k);        // ε₂ = 2nk
+            wavelengths.push(wl_um * 1000.0); // mum -> nm
+            eps_real.push(n * n - k * k);      // eps1 = n^2 - k^2
+            eps_imag.push(2.0 * n * k);        // eps2 = 2nk
         }
 
         Self::new("Au (Johnson & Christy)", wavelengths, eps_real, eps_imag)
@@ -113,13 +113,13 @@ impl JohnsonChristyMaterial {
     /// Load the silver (Ag) dataset.
     ///
     /// Data from P. B. Johnson and R. W. Christy, *Phys. Rev. B* **6**, 4370 (1972), Table II.
-    /// UV values (λ < 300 nm) are approximate; visible/NIR values (300–892 nm) match the
+    /// UV values (lambda < 300 nm) are approximate; visible/NIR values (300-892 nm) match the
     /// published optical constants to within measurement uncertainty.
     /// For exact values, consult the original paper or refractiveindex.info.
     pub fn silver() -> Self {
-        // (λ/μm, n, k) — same photon-energy grid as Au
+        // (lambda/mum, n, k) -- same photon-energy grid as Au
         let data: &[(f64, f64, f64)] = &[
-            // UV regime — approximate noble-metal behavior
+            // UV regime -- approximate noble-metal behavior
             (0.1879, 1.07, 1.212),
             (0.1916, 1.10, 1.232),
             (0.1953, 1.12, 1.255),
@@ -138,7 +138,7 @@ impl JohnsonChristyMaterial {
             (0.2616, 1.93, 1.419),
             (0.2689, 2.21, 1.468),
             (0.2761, 2.54, 1.569),
-            // Transition/interband region (~280–355 nm)
+            // Transition/interband region (~280-355 nm)
             (0.2844, 2.80, 1.650),
             (0.2924, 2.38, 1.340),
             (0.3009, 1.88, 0.980),
@@ -147,8 +147,8 @@ impl JohnsonChristyMaterial {
             (0.3315, 0.35, 0.960),
             (0.3425, 0.24, 1.620),
             (0.3542, 0.20, 2.070),
-            // Drude regime — Ag is highly reflective in visible and NIR
-            // ε₁ < −10, ε₂ ≈ 0.4–1.0 throughout
+            // Drude regime -- Ag is highly reflective in visible and NIR
+            // eps1 < -10, eps2 ~= 0.4-1.0 throughout
             (0.3679, 0.18, 2.440),
             (0.3815, 0.16, 2.820),
             (0.3974, 0.145, 2.950),
@@ -187,9 +187,9 @@ impl JohnsonChristyMaterial {
     /// Cu has a d-band interband transition near 590 nm that causes its characteristic red colour.
     /// UV values are approximate; visible/NIR values match published optical constants.
     pub fn copper() -> Self {
-        // (λ/μm, n, k)
+        // (lambda/mum, n, k)
         let data: &[(f64, f64, f64)] = &[
-            // UV regime — approximate
+            // UV regime -- approximate
             (0.1879, 1.07, 1.210),
             (0.1916, 1.08, 1.228),
             (0.1953, 1.10, 1.248),
@@ -208,7 +208,7 @@ impl JohnsonChristyMaterial {
             (0.2616, 1.85, 1.490),
             (0.2689, 2.05, 1.520),
             (0.2761, 2.30, 1.584),
-            // Pre-interband visible region — Cu still absorbs significantly
+            // Pre-interband visible region -- Cu still absorbs significantly
             (0.2844, 2.58, 1.690),
             (0.2924, 2.80, 1.820),
             (0.3009, 2.95, 1.960),
@@ -228,8 +228,8 @@ impl JohnsonChristyMaterial {
             (0.5209, 0.97, 2.870),  // 521 nm
             (0.5486, 0.77, 2.780),  // 549 nm
             // d-band interband transition near 590 nm
-            (0.5821, 0.40, 2.980),  // 582 nm — sharp transition
-            (0.6168, 0.22, 3.700),  // 617 nm — Drude regime
+            (0.5821, 0.40, 2.980),  // 582 nm -- sharp transition
+            (0.6168, 0.22, 3.700),  // 617 nm -- Drude regime
             (0.6595, 0.14, 4.103),  // 660 nm
             (0.7045, 0.13, 4.579),  // 705 nm
             (0.7560, 0.13, 5.058),  // 756 nm

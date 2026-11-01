@@ -43,9 +43,9 @@ Control the backend via the TOML configuration:
 backend = "auto"   # "cpu", "gpu", or "auto" (default)
 ```
 
-- `"auto"` — tries GPU, falls back to CPU if unavailable
-- `"cpu"` — always use CPU
-- `"gpu"` — require GPU (errors if unavailable)
+- `"auto"` -- tries GPU, falls back to CPU if unavailable
+- `"cpu"` -- always use CPU
+- `"gpu"` -- require GPU (errors if unavailable)
 
 If the binary was built without `--features gpu`, the `backend` field is ignored and CPU is always used.
 

@@ -33,5 +33,9 @@ CLAUDE.md
 CLAUDE.md.bak
 .claude/
 
+# Agent workflow planning documents (personal process, not project artefacts).
+# Engineering design documents that should ship live in docs/plans/.
+docs/superpowers/
+
 # Allow docs/images for README assets
 !docs/images/

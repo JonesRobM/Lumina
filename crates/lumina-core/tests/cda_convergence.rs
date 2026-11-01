@@ -3,10 +3,12 @@
 use lumina_core::mie::mie_cross_sections;
 use lumina_core::solver::cda::CdaSolver;
 use lumina_core::solver::OpticalSolver;
-use lumina_core::types::{clausius_mossotti, radiative_correction, ldr_correction, Dipole, SimulationParams};
+use lumina_core::types::{clausius_mossotti, ldr_correction, Dipole, SimulationParams};
 use lumina_geometry::discretise::discretise_primitive;
 use lumina_geometry::primitives::{Primitive, Sphere};
 use num_complex::Complex64;
+
+mod common;
 
 fn run_convergence(
     label: &str,
@@ -23,14 +25,15 @@ fn run_convergence(
 
     let (mie_ext, _, _) = mie_cross_sections(radius, wavelength, epsilon, n_medium);
 
-    let solver = CdaSolver::default();
+    // Each dipole carries its own FCD cell size, so a spacing sweep is measured
+    // against the matching cell automatically (debt item C5).
     let params = SimulationParams {
         environment_n: n_medium,
         ..Default::default()
     };
 
     let method = if use_ldr { "LDR" } else { "RRCM" };
-    eprintln!("\n=== {} [{}]: ε=({:.1},{:.1}), R={}nm, λ={}nm ===",
+    eprintln!("\n=== {} [{}]: eps=({:.1},{:.1}), R={}nm, lambda={}nm ===",
         label, method, epsilon.re, epsilon.im, radius, wavelength);
     eprintln!("Mie ext = {:.4e}", mie_ext);
     eprintln!("{:>6} {:>5} {:>11} {:>11} {:>7} {:>11} {:>11}",
@@ -43,24 +46,32 @@ fn run_convergence(
         });
         let lattice = discretise_primitive(&sphere, spacing);
         let positions: Vec<[f64; 3]> = lattice.iter().map(|p| p.position).collect();
+        let fill_fractions: Vec<f64> = lattice.iter().map(|p| p.fill_fraction).collect();
 
         if positions.is_empty() {
             continue;
         }
 
-        let dipoles: Vec<Dipole> = positions
-            .iter()
-            .map(|&pos| {
-                let volume = spacing.powi(3);
-                let alpha_cm = clausius_mossotti(volume, epsilon, epsilon_m);
-                let alpha = if use_ldr {
-                    ldr_correction(alpha_cm, k, spacing, epsilon, &propagation, &polarisation)
-                } else {
-                    radiative_correction(alpha_cm, k)
-                };
-                Dipole::isotropic(pos, alpha)
-            })
-            .collect();
+        let solver = CdaSolver::default();
+
+        let dipoles: Vec<Dipole> = if use_ldr {
+            // The LDR correction is not offered by `lumina_core::build_dipoles`, which
+            // is RRCM-only, so this branch necessarily builds its own dipoles. It is the
+            // one deliberate exception to routing tests through the production path --
+            // keep it in step if the polarisability pipeline changes.
+            positions
+                .iter()
+                .zip(&fill_fractions)
+                .map(|(&pos, &f)| {
+                    let alpha_cm = clausius_mossotti(spacing.powi(3), epsilon, epsilon_m);
+                    let alpha =
+                        ldr_correction(alpha_cm, k, spacing, epsilon, &propagation, &polarisation);
+                    Dipole::isotropic(pos, alpha * f, spacing)
+                })
+                .collect()
+        } else {
+            common::dipoles_with_constant_eps(&lattice, spacing, wavelength, n_medium, epsilon)
+        };
 
         let cda = solver
             .compute_cross_sections(&dipoles, wavelength, &params)

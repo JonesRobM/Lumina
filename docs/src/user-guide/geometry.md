@@ -7,22 +7,22 @@ Simulations are defined as a collection of named objects. Each object has an ind
 ```toml
 [[geometry.object]]
 name = "Core"
-type = "sphere"
-radius = 15.0
 material = "Au_JC"
 dipole_spacing = 2.0
+shape = { type = "sphere", radius = 15.0 }
 
-[geometry.object.transform]
+# The transform fields sit directly on the object -- there is no
+# [geometry.object.transform] sub-table. All three are optional
+# (position and rotation_deg default to zero, scale to 1.0).
 position = [0.0, 0.0, 0.0]
 rotation_deg = [0.0, 0.0, 0.0]
 scale = 1.0
 
 [[geometry.object]]
 name = "Shell"
-type = "sphere"
-radius = 20.0
 material = "SiO2_Palik"
 dipole_spacing = 2.0
+shape = { type = "sphere", radius = 20.0 }
 ```
 
 All objects are merged into a single flat dipole list before solving. Overlapping volumes are handled by the order of definition (later objects overwrite earlier ones at shared sites).
@@ -33,41 +33,38 @@ Define shapes in the TOML configuration. All dimensions are in nanometres.
 
 ### Sphere
 ```toml
-type = "sphere"
-radius = 20.0
+shape = { type = "sphere", radius = 20.0 }
 ```
 
 ### Cylinder
 ```toml
-type = "cylinder"
-length = 60.0
-radius = 10.0
+# `axis` is optional and defaults to [0, 0, 1].
+shape = { type = "cylinder", radius = 10.0, length = 60.0, axis = [0.0, 0.0, 1.0] }
 ```
 
 ### Cuboid
 ```toml
-type = "cuboid"
-half_extents = [20.0, 10.0, 5.0]
+shape = { type = "cuboid", half_extents = [20.0, 10.0, 5.0] }
 ```
 
 ### Ellipsoid
 
 ```toml
-type = "ellipsoid"
-semi_axes = [20.0, 15.0, 10.0]
+shape = { type = "ellipsoid", semi_axes = [20.0, 15.0, 10.0] }
 ```
 
-> **Anisotropic polarisability (v0.3.0):** Ellipsoidal objects automatically use a per-dipole 3×3 polarisability tensor computed from the depolarisation factors \\([L_x, L_y, L_z]\\) of the specified semi-axes. The anisotropic Clausius–Mossotti formula is applied independently along each principal axis before rotating to the lab frame via the object's Euler transform. This correctly captures the orientation-dependent plasmon resonance of prolate or oblate nanoparticles.
+> **Anisotropic polarisability (v0.3.0):** Ellipsoidal objects automatically use a per-dipole 3x3 polarisability tensor computed from the depolarisation factors \\([L_x, L_y, L_z]\\) of the specified semi-axes. The anisotropic Clausius-Mossotti formula is applied independently along each principal axis before rotating to the lab frame via the object's Euler transform. This correctly captures the orientation-dependent plasmon resonance of prolate or oblate nanoparticles.
 
 ### Helix
 ```toml
-type = "helix"
-helix_radius = 15.0
-wire_radius = 4.0
-pitch = 20.0
-turns = 3
-handedness = "right"
+# The coil radius field is `radius`, not `helix_radius`.
+shape = { type = "helix", radius = 15.0, wire_radius = 4.0, pitch = 20.0, turns = 3.0 }
 ```
+
+> **Only right-handed helices can be built at present.** There is no `handedness`
+> field, and a negative `pitch` is rejected by the bounding-box construction
+> ("produced no dipoles"), so the left-handed partner needed for a circular-dichroism
+> comparison cannot currently be specified.
 
 ### CoreShell (v0.2.2+)
 
@@ -117,8 +114,8 @@ Coordinates are in Angstroms. Lumina automatically converts to nanometres (1 A =
 
 When importing an `.xyz` file, Lumina automatically detects the nearest-neighbour distance from the atomic positions. This distance is used for:
 
-- **FCD cell size** — the volume over which the Green's tensor is integrated for near-field interactions
-- **Clausius-Mossotti volume** — \\(V = d_\text{nn}^3\\), the effective dipole volume for computing the polarisability
+- **FCD cell size** -- the volume over which the Green's tensor is integrated for near-field interactions
+- **Clausius-Mossotti volume** -- \\(V = d_\text{nn}^3\\), the effective dipole volume for computing the polarisability
 
 This avoids the need to manually set a dipole spacing for atomistic structures, and ensures the FCD threshold (\\(2 d_\text{nn}\\)) correctly identifies near-field pairs.
 
@@ -133,10 +130,10 @@ The file `examples/au_icosahedron_k6.xyz` contains a 923-atom Au Mackay icosahed
 - Full \\(I_h\\) symmetry: 12 vertices, 30 edges, 20 faces of the outer icosahedral shell
 
 **GUI workflow:**
-1. Geometry panel → **Import File** → **Set folder...** → select the `examples/` directory
+1. Geometry panel -> **Import File** -> **Set folder...** -> select the `examples/` directory
 2. Select `au_icosahedron_k6.xyz` from the dropdown
 3. The dipole scatter preview shows the icosahedral symmetry
-4. Materials → **Gold (J&C)**, Simulation → set wavelength range → **Run Simulation**
+4. Materials -> **Gold (J&C)**, Simulation -> set wavelength range -> **Run Simulation**
 
 ### OBJ Mesh Import
 
@@ -167,7 +164,7 @@ The traditional file dialog buttons remain available for one-off picks.
 
 Each parametric shape is filled with a centred cubic lattice of dipole positions at the specified `dipole_spacing`. The spacing must satisfy the CDA validity criterion: \\(|m| k d < 1\\).
 
-For `.xyz` imports, no discretisation is needed — the atom positions are used directly as dipole sites.
+For `.xyz` imports, no discretisation is needed -- the atom positions are used directly as dipole sites.
 
 ### Centred Lattice
 
@@ -179,7 +176,7 @@ The lattice is centred on the midpoint of the shape's bounding box, using intege
 
 Only points satisfying `shape.contains(r)` are retained.
 
-Centring the lattice on the shape centre ensures that the dipole distribution is symmetric for symmetric shapes, regardless of the spacing. This is critical for metallic particles: an asymmetric lattice (e.g. anchored to a bounding box corner) can introduce 100–500% errors due to artificial polarisation charge at the uneven surface.
+Centring the lattice on the shape centre ensures that the dipole distribution is symmetric for symmetric shapes, regardless of the spacing. This is critical for metallic particles: an asymmetric lattice (e.g. anchored to a bounding box corner) can introduce 100-500% errors due to artificial polarisation charge at the uneven surface.
 
 ### Spacing Guidelines
 

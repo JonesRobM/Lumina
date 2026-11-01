@@ -5,10 +5,10 @@ use crate::types::ChatEvent;
 /// Parse a single SSE `data:` line payload.
 ///
 /// Return type: `Option<ChatEvent>`
-/// - `"[DONE]"` → `Some(ChatEvent::Done)`
-/// - Valid JSON with non-empty `choices[0].delta.content` → `Some(ChatEvent::Token(text))`
-/// - Valid JSON with null/missing/empty content → `None` (no-op; don't emit empty tokens)
-/// - Invalid JSON → `Some(ChatEvent::Error(description))`
+/// - `"[DONE]"` -> `Some(ChatEvent::Done)`
+/// - Valid JSON with non-empty `choices[0].delta.content` -> `Some(ChatEvent::Token(text))`
+/// - Valid JSON with null/missing/empty content -> `None` (no-op; don't emit empty tokens)
+/// - Invalid JSON -> `Some(ChatEvent::Error(description))`
 pub fn parse_data_line(payload: &str) -> Option<ChatEvent> {
     if payload == "[DONE]" {
         return Some(ChatEvent::Done);
@@ -17,7 +17,7 @@ pub fn parse_data_line(payload: &str) -> Option<ChatEvent> {
     match serde_json::from_str::<serde_json::Value>(payload) {
         Err(_) => Some(ChatEvent::Error(format!("Malformed SSE payload: {payload}"))),
         Ok(v) => {
-            // Extract choices[0].delta.content — null or missing → None
+            // Extract choices[0].delta.content -- null or missing -> None
             let content = v
                 .get("choices")
                 .and_then(|c| c.get(0))
@@ -51,7 +51,7 @@ mod tests {
 
     #[test]
     fn empty_content_returns_none() {
-        // Role-only delta at start of stream — no content key
+        // Role-only delta at start of stream -- no content key
         let line = r#"{"choices":[{"delta":{"role":"assistant"}}]}"#;
         assert!(parse_data_line(line).is_none());
     }

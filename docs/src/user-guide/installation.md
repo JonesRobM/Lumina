@@ -19,7 +19,7 @@ Most discrete GPUs from 2018 onwards and integrated GPUs from 2020 onwards are s
 ### CPU only (default)
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/Lumina.git
+git clone https://github.com/jonesrobm/lumina.git
 cd Lumina
 cargo build --release
 ```
@@ -61,9 +61,9 @@ The CLI reads the `backend` field from the TOML `[simulation]` section:
 backend = "auto"   # "cpu", "gpu", or "auto" (default)
 ```
 
-- `"auto"` — uses GPU if available, falls back to CPU
-- `"cpu"` — always CPU
-- `"gpu"` — requires GPU (errors if unavailable)
+- `"auto"` -- uses GPU if available, falls back to CPU
+- `"cpu"` -- always CPU
+- `"gpu"` -- requires GPU (errors if unavailable)
 
 ## Running Tests
 
@@ -86,4 +86,4 @@ If GPU initialisation fails, Lumina falls back to CPU automatically (when `backe
 
 1. **Drivers:** Run `vulkaninfo` (Linux/Windows) or check System Preferences > GPU (macOS) to verify driver support.
 2. **wgpu compatibility:** Lumina uses wgpu v24, which requires Vulkan 1.1+ (Linux/Windows) or Metal (macOS).
-3. **Headless servers:** GPU compute works without a display — wgpu can use headless Vulkan.
+3. **Headless servers:** GPU compute works without a display -- wgpu can use headless Vulkan.

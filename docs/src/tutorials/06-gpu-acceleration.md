@@ -10,17 +10,17 @@
 
 ## Background
 
-For large dipole systems the GMRES iterative solver dominates the computation time. Each GMRES restart cycle performs ~30 matrix-vector products (matvecs), and each matvec is an O(N²) operation on the 3N×3N interaction matrix. GPU acceleration offloads these matvecs to the GPU via wgpu compute shaders.
+For large dipole systems the GMRES iterative solver dominates the computation time. Each GMRES restart cycle performs ~30 matrix-vector products (matvecs), and each matvec is an O(N^2) operation on the 3Nx3N interaction matrix. GPU acceleration offloads these matvecs to the GPU via wgpu compute shaders.
 
 **How it works:**
 
 1. The interaction matrix is assembled on the CPU using Rayon-parallel Green's tensor computation.
 2. The matrix is uploaded to the GPU once (converted from f64 to f32).
-3. Each GMRES matvec dispatches a WGSL compute shader — one thread per row.
+3. Each GMRES matvec dispatches a WGSL compute shader -- one thread per row.
 4. The Arnoldi orthogonalisation and Givens rotations remain on the CPU in f64 precision.
 5. After convergence, the GPU buffer is released.
 
-The f32 precision on the GPU limits the achievable GMRES residual to ~10⁻⁷, but this is far below the CDA discretisation error (typically 5–25%).
+The f32 precision on the GPU limits the achievable GMRES residual to ~10^-7, but this is far below the CDA discretisation error (typically 5-25%).
 
 ---
 
@@ -52,7 +52,7 @@ If this test fails, check your GPU drivers. See [Installation](../user-guide/ins
 Create `examples/large_sphere_gpu.toml`:
 
 ```toml
-# Tutorial 6 — large Au sphere with GPU acceleration
+# Tutorial 6 -- large Au sphere with GPU acceleration
 [simulation]
 wavelengths    = { range = [400.0, 700.0], points = 30 }
 environment_n  = 1.0
@@ -64,7 +64,7 @@ type           = "sphere"
 centre         = [0.0, 0.0, 0.0]
 radius         = 30.0          # nm
 material       = "Au_JC"
-dipole_spacing = 1.5           # nm  → ~N ≈ 12 000 dipoles
+dipole_spacing = 1.5           # nm  -> ~N ~= 12 000 dipoles
 
 [output]
 directory      = "./output/tutorial_06"
@@ -72,7 +72,7 @@ save_spectra   = true
 save_json      = true
 ```
 
-> **Dipole count:** A 30 nm sphere at d=1.5 nm spacing generates roughly 12 000 dipoles, giving a 36 000 × 36 000 interaction matrix. This is well above the GMRES threshold (N > 1 000).
+> **Dipole count:** A 30 nm sphere at d=1.5 nm spacing generates roughly 12 000 dipoles, giving a 36 000 x 36 000 interaction matrix. This is well above the GMRES threshold (N > 1 000).
 
 ---
 
@@ -86,7 +86,7 @@ Watch the log output for the backend selection:
 
 ```
 [INFO] Backend: GPU (NVIDIA GeForce RTX 4050 Laptop GPU)
-[INFO] Geometry: Au_Sphere_Large — 12083 dipoles
+[INFO] Geometry: Au_Sphere_Large -- 12083 dipoles
 [INFO] Solver: GMRES(m=30), tolerance=1e-6
 ```
 
@@ -125,9 +125,9 @@ RUST_LOG=info cargo run --release -p lumina-cli --features gpu -- run examples/l
 | 1 000 | 3 000 | ~1 ms | ~6 ms | GPU overhead dominates |
 | 3 000 | 9 000 | ~17 ms | ~56 ms | Still overhead-bound |
 | 10 000 | 30 000 | ~200 ms | ~150 ms | Crossover region |
-| 30 000 | 90 000 | ~2 s | ~0.5 s | GPU 4× faster |
+| 30 000 | 90 000 | ~2 s | ~0.5 s | GPU 4x faster |
 
-The GPU crossover point depends on your hardware. The overhead comes from per-call buffer creation — future versions will use persistent buffers to shift the crossover to smaller N.
+The GPU crossover point depends on your hardware. The overhead comes from per-call buffer creation -- future versions will use persistent buffers to shift the crossover to smaller N.
 
 ---
 
@@ -183,9 +183,9 @@ The GPU backend is used for the GMRES matvec; all other computations (assembly, 
 
 The GPU computes matvecs in f32 (single precision) because wgpu/WGSL does not support f64. This means:
 
-- **GMRES residual floor:** ~10⁻⁷ (cannot converge tighter than this)
-- **Solution accuracy:** agrees with f64 CPU to ~10⁻⁶ relative error
-- **Physical accuracy:** f32 precision is negligible compared to the CDA discretisation error (5–25%)
+- **GMRES residual floor:** ~10^-7 (cannot converge tighter than this)
+- **Solution accuracy:** agrees with f64 CPU to ~10^-6 relative error
+- **Physical accuracy:** f32 precision is negligible compared to the CDA discretisation error (5-25%)
 
 For applications requiring tighter solver convergence (e.g. academic benchmarking against Mie theory), use `backend = "cpu"`.
 
@@ -197,8 +197,8 @@ For applications requiring tighter solver convergence (e.g. academic benchmarkin
 |-------|----------|
 | "GPU unavailable" warning | Check GPU drivers; run `vulkaninfo` to verify Vulkan support |
 | GPU slower than CPU | Expected for N < 5 000; use CPU for small systems |
-| GMRES fails to converge with GPU | Increase `solver_tolerance` to ≥ 1e-6 (f32 floor) |
-| Build error with `--features gpu` | Ensure wgpu v24 dependencies resolve; check Rust ≥ 1.75 |
+| GMRES fails to converge with GPU | Increase `solver_tolerance` to >= 1e-6 (f32 floor) |
+| Build error with `--features gpu` | Ensure wgpu v24 dependencies resolve; check Rust >= 1.75 |
 
 ---
 

@@ -1,38 +1,38 @@
 //! Full Sommerfeld integral reflected Green's tensor for a planar substrate.
 //!
 //! This module computes the reflected (substrate image) Green's dyadic using
-//! the rigorous Sommerfeld integral over in-plane wavevectors k∥, replacing the
+//! the rigorous Sommerfeld integral over in-plane wavevectors k||, replacing the
 //! normal-incidence scalar Fresnel approximation used in the image-dipole method.
 //!
 //! # Physical background
 //!
-//! For a dipole source at **r**_j above a planar substrate at z = z₀, the
+//! For a dipole source at **r**_j above a planar substrate at z = z0, the
 //! substrate scatters radiation back to the observation point **r**_i. The
 //! exact scattered Green's dyadic is:
 //!
-//! **G**_refl(**r**_i, **r**_j) = (i/8π) ∫₀^∞ [r_s M_s + r_p M_p] exp(ik_z Δz) k∥/k_z dk∥
+//! **G**_refl(**r**_i, **r**_j) = (i/8pi) integral0^inf [r_s M_s + r_p M_p] exp(ik_z Deltaz) k||/k_z dk||
 //!
-//! where Δz = (z_i − z₀) + (z_j − z₀) > 0, r_s and r_p are the
+//! where Deltaz = (z_i - z0) + (z_j - z0) > 0, r_s and r_p are the
 //! TE/TM Fresnel reflection coefficients, and the tensor weights M_s/M_p encode
 //! the azimuthal structure. After azimuthal integration the result is expressed
-//! through Bessel functions J₀, J₁, J₂ of the lateral separation ρ.
+//! through Bessel functions J0, J1, J2 of the lateral separation rho.
 //!
-//! The integration contour follows the real k∥ axis, split into three segments
+//! The integration contour follows the real k|| axis, split into three segments
 //! at the environment and substrate light lines. Each segment is integrated with
-//! 15-point Gauss–Kronrod quadrature (G7K15).
+//! 15-point Gauss-Kronrod quadrature (G7K15).
 //!
 //! # Relation to the image-dipole approximation
 //!
-//! The retarded image-dipole formula uses r_p(k∥=0) = r_s(k∥=0) = r_Fresnel as
+//! The retarded image-dipole formula uses r_p(k||=0) = r_s(k||=0) = r_Fresnel as
 //! a single scalar multiplied by the free-space Green's function at the mirror
 //! position. The Sommerfeld integral reduces to this approximation only when
 //! the particle is many wavelengths above the substrate and the off-axis
-//! contributions are negligible. For particles close to the substrate (z < λ/4),
+//! contributions are negligible. For particles close to the substrate (z < lambda/4),
 //! the Sommerfeld integral is significantly more accurate.
 
 use num_complex::Complex64;
 
-// ─── G7K15 quadrature constants ─────────────────────────────────────────────
+// --- G7K15 quadrature constants ---------------------------------------------
 //
 // Nodes and weights for the 15-point Gauss-Kronrod rule on [-1, 1].
 // Source: Laurie (1997), SIAM J. Numer. Anal. 34(3), 1098-1107.
@@ -96,12 +96,12 @@ const G7_WEIGHTS_IN_GK15: [f64; 15] = [
     0.0,
 ];
 
-// ─── Bessel functions for real non-negative argument ───────────────────────
+// --- Bessel functions for real non-negative argument -----------------------
 
-/// J₀(x) — zeroth-order Bessel function of the first kind.
+/// J0(x) -- zeroth-order Bessel function of the first kind.
 ///
 /// Uses rational approximations from Numerical Recipes (Press et al. 3rd ed.),
-/// accurate to ~machine precision for all x ≥ 0.
+/// accurate to ~machine precision for all x >= 0.
 fn j0(x: f64) -> f64 {
     let ax = x.abs();
     if ax < 8.0 {
@@ -124,7 +124,7 @@ fn j0(x: f64) -> f64 {
     }
 }
 
-/// J₁(x) — first-order Bessel function of the first kind.
+/// J1(x) -- first-order Bessel function of the first kind.
 ///
 /// Uses rational approximations from Numerical Recipes, accurate to ~machine precision.
 fn j1(x: f64) -> f64 {
@@ -150,40 +150,40 @@ fn j1(x: f64) -> f64 {
     if x < 0.0 { -val } else { val }
 }
 
-/// J₂(x) = (2/x) J₁(x) − J₀(x)
+/// J2(x) = (2/x) J1(x) - J0(x)
 /// Stable for x > 0; returns 0 for x = 0.
 fn j2(x: f64) -> f64 {
     if x.abs() < 1e-15 { return 0.0; }
     (2.0 / x) * j1(x) - j0(x)
 }
 
-// ─── Complex branch cuts ────────────────────────────────────────────────────
+// --- Complex branch cuts ----------------------------------------------------
 
-/// Complex square root with Im(result) ≥ 0 convention (outgoing wave / decaying).
+/// Complex square root with Im(result) >= 0 convention (outgoing wave / decaying).
 ///
-/// For the vertical wavenumber k_z = √(k² − k∥²):
+/// For the vertical wavenumber k_z = sqrt(k^2 - k||^2):
 /// - propagating wave: k_z purely real (> 0)
-/// - evanescent wave: k_z purely imaginary (> 0·i)
+/// - evanescent wave: k_z purely imaginary (> 0*i)
 fn csqrt_pos_im(z: Complex64) -> Complex64 {
     let s = z.sqrt();
     if s.im < 0.0 { -s } else { s }
 }
 
-// ─── Intermediate integral accumulators ────────────────────────────────────
+// --- Intermediate integral accumulators ------------------------------------
 
-/// The five independent Sommerfeld integrals needed to build the 3×3 tensor.
+/// The five independent Sommerfeld integrals needed to build the 3x3 tensor.
 ///
-/// All are of the form ∫ f(k∥) dk∥ along the real k∥ axis.
+/// All are of the form integral f(k||) dk|| along the real k|| axis.
 struct Integrals {
-    /// ∫ r_s · J₀(k∥ρ) · exp(ik_z Δz) · (k∥/k_z) dk∥
+    /// integral r_s * J0(k||rho) * exp(ik_z Deltaz) * (k||/k_z) dk||
     i_s_j0: Complex64,
-    /// ∫ r_p · (k_z/k)² · J₀(k∥ρ) · exp(ik_z Δz) · (k∥/k_z) dk∥
+    /// integral r_p * (k_z/k)^2 * J0(k||rho) * exp(ik_z Deltaz) * (k||/k_z) dk||
     i_p_j0: Complex64,
-    /// ∫ r_p · (k∥/k)² · J₀(k∥ρ) · exp(ik_z Δz) · (k∥/k_z) dk∏  [for G_zz]
+    /// integral r_p * (k||/k)^2 * J0(k||rho) * exp(ik_z Deltaz) * (k||/k_z) dkprod  [for G_zz]
     i_zz: Complex64,
-    /// ∫ r_p · (k∥/k) · (k_z/k) · J₁(k∥ρ) · exp(ik_z Δz) dk∥  [for G_xz]
+    /// integral r_p * (k||/k) * (k_z/k) * J1(k||rho) * exp(ik_z Deltaz) dk||  [for G_xz]
     i_xz: Complex64,
-    /// ∫ r_p · (k_z/k)² · J₂(k∥ρ) · exp(ik_z Δz) · (k∥/k_z) dk∥  [G_xx/G_yy split]
+    /// integral r_p * (k_z/k)^2 * J2(k||rho) * exp(ik_z Deltaz) * (k||/k_z) dk||  [G_xx/G_yy split]
     i_j2: Complex64,
 }
 
@@ -202,7 +202,7 @@ impl Integrals {
     }
 }
 
-// ─── SommerfeldGreens ────────────────────────────────────────────────────────
+// --- SommerfeldGreens --------------------------------------------------------
 
 /// Reflected Green's dyadic computed via the Sommerfeld integral.
 ///
@@ -213,16 +213,16 @@ impl Integrals {
 /// shared across Rayon threads without locking.
 #[derive(Debug, Clone)]
 pub struct SommerfeldGreens {
-    /// Wavenumber in the environment: k_env = 2π n_env / λ (nm⁻¹)
+    /// Wavenumber in the environment: k_env = 2*pi*n_env/lambda (nm^-1)
     pub k_env: f64,
-    /// Substrate wavenumber k_sub = csqrt(ε_sub) · 2π/λ (nm⁻¹, Im ≥ 0)
+    /// Substrate wavenumber k_sub = csqrt(eps_sub) * 2pi/lambda (nm^-1, Im >= 0)
     pub k_sub: Complex64,
     /// Substrate dielectric function at this wavelength
     pub eps_sub: Complex64,
-    /// Environment dielectric constant ε_env = n_env²
+    /// Environment dielectric constant eps_env = n_env^2
     pub eps_env: f64,
-    /// Number of quadrature segments for the oscillatory real-k∥ integral.
-    /// Each segment uses 15 Gauss–Kronrod nodes. Default: 1 (one segment each).
+    /// Number of quadrature segments for the oscillatory real-k|| integral.
+    /// Each segment uses 15 Gauss-Kronrod nodes. Default: 1 (one segment each).
     pub n_subdiv: usize,
 }
 
@@ -230,9 +230,9 @@ impl SommerfeldGreens {
     /// Construct for a given wavelength and substrate material.
     ///
     /// # Arguments
-    /// * `wavelength_nm` — Free-space wavelength in nm.
-    /// * `eps_sub`       — Substrate ε at this wavelength.
-    /// * `eps_env`       — Environment ε = n_env².
+    /// * `wavelength_nm` -- Free-space wavelength in nm.
+    /// * `eps_sub`       -- Substrate eps at this wavelength.
+    /// * `eps_env`       -- Environment eps = n_env^2.
     pub fn new(wavelength_nm: f64, eps_sub: Complex64, eps_env: f64) -> Self {
         let k0 = 2.0 * std::f64::consts::PI / wavelength_nm;
         let k_env = k0 * eps_env.sqrt();
@@ -240,13 +240,13 @@ impl SommerfeldGreens {
         Self { k_env, k_sub, eps_sub, eps_env, n_subdiv: 1 }
     }
 
-    /// Evaluate the 3×3 reflected Green's tensor **G**_refl(**r**_i, **r**_j).
+    /// Evaluate the 3x3 reflected Green's tensor **G**_refl(**r**_i, **r**_j).
     ///
     /// Both **r**_i and **r**_j must satisfy z > z_interface.
     ///
     /// # Convention
     ///
-    /// The result matches the `k² exp(ikR)/(4πR)` prefactor convention of the
+    /// The result matches the `k^2 exp(ikR)/(4piR)` prefactor convention of the
     /// free-space Green's function in `greens.rs`. For a substrate with the same
     /// dielectric constant as the environment, all components are zero.
     pub fn evaluate(
@@ -258,10 +258,10 @@ impl SommerfeldGreens {
         // Heights above interface
         let zi = ri[2] - z_interface;
         let zj = rj[2] - z_interface;
-        // Δz = (z_i − z₀) + (z_j − z₀) — always positive if both above substrate.
+        // Deltaz = (z_i - z0) + (z_j - z0) -- always positive if both above substrate.
         let dz = zi + zj;
         if dz <= 0.0 {
-            // Degenerate or below-substrate — return zero rather than panic.
+            // Degenerate or below-substrate -- return zero rather than panic.
             return [[Complex64::new(0.0, 0.0); 3]; 3];
         }
 
@@ -272,14 +272,14 @@ impl SommerfeldGreens {
         let phi = dy.atan2(dx);
         let cos_phi = phi.cos();
         let sin_phi = phi.sin();
-        let cos2phi = 2.0 * cos_phi * cos_phi - 1.0; // cos(2φ)
-        let sin2phi = 2.0 * sin_phi * cos_phi;        // sin(2φ)
+        let cos2phi = 2.0 * cos_phi * cos_phi - 1.0; // cos(2phi)
+        let sin2phi = 2.0 * sin_phi * cos_phi;        // sin(2phi)
 
         let integ = self.integrate(rho, dz);
 
-        // ── Build tensor from integrals ───────────────────────────────────
-        // Prefactor: i/(8π) — matches the k²e^{ikR}/(4πR) convention after
-        // accounting for the 1/(2π) from the azimuthal integration.
+        // -- Build tensor from integrals -----------------------------------
+        // Prefactor: i/(8pi) -- matches the k^2e^{ikR}/(4piR) convention after
+        // accounting for the 1/(2pi) from the azimuthal integration.
         let pre = Complex64::new(0.0, 1.0 / (8.0 * std::f64::consts::PI));
 
         // Diagonal and off-diagonal components
@@ -297,7 +297,7 @@ impl SommerfeldGreens {
         ]
     }
 
-    /// Compute the five independent integrals over k∥ ∈ [0, k_max].
+    /// Compute the five independent integrals over k|| in [0, k_max].
     ///
     /// The integration range is split into three physical segments:
     ///
@@ -305,7 +305,7 @@ impl SommerfeldGreens {
     ///    Integrand oscillates as exp(ik_z dz).
     /// 2. **[k_env, Re(k_sub)]**: k_z purely imaginary (evanescent in env).
     ///    Integrand decays as exp(-|k_z| dz).
-    ///    (Skipped when Re(k_sub) ≤ k_env, e.g. for metallic substrates.)
+    ///    (Skipped when Re(k_sub) <= k_env, e.g. for metallic substrates.)
     /// 3. **[Re(k_sub_real), k_max]**: both evanescent.
     ///    exp(-|k_z| dz) decay; integrate to adaptive k_max.
     fn integrate(&self, rho: f64, dz: f64) -> Integrals {
@@ -313,8 +313,8 @@ impl SommerfeldGreens {
         let k_sub_real = self.k_sub.re.max(k_env); // ensure segment 2 is non-empty only when k_sub.re > k_env
         let has_seg2 = self.k_sub.re > k_env * 1.001; // 0.1% margin
 
-        // Upper limit for evanescent segment: where exp(-kz·dz) < 1e-10.
-        // kz ≈ k∥ for large k∥, so k_max ≈ (10 ln 10) / dz.
+        // Upper limit for evanescent segment: where exp(-kz*dz) < 1e-10.
+        // kz ~= k|| for large k||, so k_max ~= (10 ln 10) / dz.
         let k_max = if dz > 1e-6 {
             (10.0 * std::f64::consts::LN_10 / dz).max(k_env * 5.0)
         } else {
@@ -323,17 +323,17 @@ impl SommerfeldGreens {
 
         let mut total = Integrals::zero();
 
-        // Segment 1: [0, k_env] — propagating (possibly oscillatory)
+        // Segment 1: [0, k_env] -- propagating (possibly oscillatory)
         let seg1 = self.integrate_segment(0.0, k_env, rho, dz);
         total.add(&seg1);
 
-        // Segment 2: [k_env, Re(k_sub)] — evanescent in env, may be propagating in sub
+        // Segment 2: [k_env, Re(k_sub)] -- evanescent in env, may be propagating in sub
         if has_seg2 {
             let seg2 = self.integrate_segment(k_env, k_sub_real, rho, dz);
             total.add(&seg2);
         }
 
-        // Segment 3: [max(k_env, Re(k_sub)), k_max] — both evanescent
+        // Segment 3: [max(k_env, Re(k_sub)), k_max] -- both evanescent
         let seg3_lo = if has_seg2 { k_sub_real } else { k_env };
         if k_max > seg3_lo * 1.001 {
             let seg3 = self.integrate_segment(seg3_lo, k_max, rho, dz);
@@ -343,7 +343,7 @@ impl SommerfeldGreens {
         total
     }
 
-    /// Apply 15-point Gauss–Kronrod on [a, b].
+    /// Apply 15-point Gauss-Kronrod on [a, b].
     fn integrate_segment(&self, a: f64, b: f64, rho: f64, dz: f64) -> Integrals {
         let mid = 0.5 * (a + b);
         let half = 0.5 * (b - a);
@@ -362,12 +362,12 @@ impl SommerfeldGreens {
         acc
     }
 
-    /// Evaluate all five integrand kernels at a single k∥ value.
+    /// Evaluate all five integrand kernels at a single k|| value.
     fn integrand(&self, kpar: f64, rho: f64, dz: f64) -> Integrals {
         let k = self.k_env; // k in environment (k_env)
         let k2 = k * k;
 
-        // Vertical wavenumbers (Im ≥ 0 convention)
+        // Vertical wavenumbers (Im >= 0 convention)
         let kz_env  = csqrt_pos_im(Complex64::new(k2 - kpar * kpar, 0.0));
         let kz_sub  = csqrt_pos_im(self.eps_sub * Complex64::new(k2 / self.eps_env, 0.0) - Complex64::new(kpar * kpar, 0.0));
 
@@ -376,10 +376,10 @@ impl SommerfeldGreens {
         let r_p = (self.eps_sub * kz_env - Complex64::new(self.eps_env, 0.0) * kz_sub)
                 / (self.eps_sub * kz_env + Complex64::new(self.eps_env, 0.0) * kz_sub);
 
-        // Phase factor: exp(i k_z Δz)
+        // Phase factor: exp(i k_z Deltaz)
         let phase = (Complex64::new(0.0, 1.0) * kz_env * dz).exp();
 
-        // Bessel functions at k∥ ρ
+        // Bessel functions at k|| rho
         let arg = kpar * rho;
         let j0v = Complex64::new(j0(arg), 0.0);
         let j1v = Complex64::new(j1(arg), 0.0);
@@ -388,7 +388,7 @@ impl SommerfeldGreens {
         // Weights for each polarisation contribution
         let kpar_c = Complex64::new(kpar, 0.0);
         let k2_c   = Complex64::new(k2, 0.0);
-        let kz_factor = kpar_c / kz_env; // k∥ / k_z
+        let kz_factor = kpar_c / kz_env; // k|| / k_z
 
         let i_s_j0 = r_s * j0v * phase * kz_factor;
         let i_p_j0 = r_p * (kz_env * kz_env / k2_c) * j0v * phase * kz_factor;
@@ -400,7 +400,7 @@ impl SommerfeldGreens {
     }
 }
 
-// ─── Tests ────────────────────────────────────────────────────────────────────
+// --- Tests --------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -408,51 +408,51 @@ mod tests {
 
     const TOL: f64 = 1e-6;
 
-    // ── Bessel function tests ────────────────────────────────────────────────
+    // -- Bessel function tests ------------------------------------------------
 
     #[test]
     fn test_j0_at_zero() {
-        assert!((j0(0.0) - 1.0).abs() < TOL, "J₀(0) = 1");
+        assert!((j0(0.0) - 1.0).abs() < TOL, "J0(0) = 1");
     }
 
     #[test]
     fn test_j0_first_root() {
-        // First zero of J₀ ≈ 2.4048
+        // First zero of J0 ~= 2.4048
         let val = j0(2.404_825_557);
-        assert!(val.abs() < 1e-5, "J₀(2.4048) ≈ 0, got {val:.2e}");
+        assert!(val.abs() < 1e-5, "J0(2.4048) ~= 0, got {val:.2e}");
     }
 
     #[test]
     fn test_j1_at_zero() {
-        assert!(j1(0.0).abs() < TOL, "J₁(0) = 0");
+        assert!(j1(0.0).abs() < TOL, "J1(0) = 0");
     }
 
     #[test]
     fn test_j1_first_root() {
-        // First positive zero of J₁ ≈ 3.8317
+        // First positive zero of J1 ~= 3.8317
         let val = j1(3.831_705_97);
-        assert!(val.abs() < 1e-5, "J₁(3.8317) ≈ 0, got {val:.2e}");
+        assert!(val.abs() < 1e-5, "J1(3.8317) ~= 0, got {val:.2e}");
     }
 
     #[test]
     fn test_j2_at_zero() {
-        assert!(j2(0.0).abs() < TOL, "J₂(0) = 0");
+        assert!(j2(0.0).abs() < TOL, "J2(0) = 0");
     }
 
     #[test]
     fn test_j2_recurrence() {
-        // J₂(x) = (2/x) J₁(x) − J₀(x) — verify at x = 3
+        // J2(x) = (2/x) J1(x) - J0(x) -- verify at x = 3
         let x = 3.0_f64;
         let j2_direct = j2(x);
         let j2_recur = (2.0 / x) * j1(x) - j0(x);
-        assert!((j2_direct - j2_recur).abs() < TOL, "J₂ recurrence mismatch");
+        assert!((j2_direct - j2_recur).abs() < TOL, "J2 recurrence mismatch");
     }
 
-    // ── No-substrate limit ───────────────────────────────────────────────────
+    // -- No-substrate limit ---------------------------------------------------
 
     #[test]
     fn test_no_substrate_zero_tensor() {
-        // When eps_sub == eps_env, r_s = r_p = 0 everywhere → G_refl = 0.
+        // When eps_sub == eps_env, r_s = r_p = 0 everywhere -> G_refl = 0.
         let eps_env = 2.25_f64; // n = 1.5
         let eps_sub = Complex64::new(eps_env, 0.0);
         let sg = SommerfeldGreens::new(500.0, eps_sub, eps_env);
@@ -471,7 +471,7 @@ mod tests {
         }
     }
 
-    // ── Symmetry tests ───────────────────────────────────────────────────────
+    // -- Symmetry tests -------------------------------------------------------
 
     #[test]
     fn test_tensor_symmetry_reciprocity() {
@@ -488,24 +488,24 @@ mod tests {
 
     #[test]
     fn test_xz_zero_for_zero_rho() {
-        // ρ = 0 (ri and rj directly above each other) → G_xz = G_yz = G_xy = 0
+        // rho = 0 (ri and rj directly above each other) -> G_xz = G_yz = G_xy = 0
         let sg = SommerfeldGreens::new(600.0, Complex64::new(2.25, 0.0), 1.0);
         let ri = [0.0, 0.0, 12.0];
         let rj = [0.0, 0.0, 8.0];
         let g = sg.evaluate(ri, rj, 0.0);
 
-        assert!(g[0][2].norm() < 1e-8, "G_xz = 0 at ρ=0, got {:.2e}", g[0][2].norm());
-        assert!(g[1][2].norm() < 1e-8, "G_yz = 0 at ρ=0, got {:.2e}", g[1][2].norm());
-        assert!(g[0][1].norm() < 1e-8, "G_xy = 0 at ρ=0, got {:.2e}", g[0][1].norm());
+        assert!(g[0][2].norm() < 1e-8, "G_xz = 0 at rho=0, got {:.2e}", g[0][2].norm());
+        assert!(g[1][2].norm() < 1e-8, "G_yz = 0 at rho=0, got {:.2e}", g[1][2].norm());
+        assert!(g[0][1].norm() < 1e-8, "G_xy = 0 at rho=0, got {:.2e}", g[0][1].norm());
     }
 
-    // ── Far-field decay ──────────────────────────────────────────────────────
+    // -- Far-field decay ------------------------------------------------------
 
     #[test]
     fn test_far_field_decay() {
-        // For dz >> λ, G_refl should be very small (exponential decay of evanescent parts).
+        // For dz >> lambda, G_refl should be very small (exponential decay of evanescent parts).
         let sg = SommerfeldGreens::new(500.0, Complex64::new(2.25, 0.0), 1.0);
-        // dz = 10 λ = 5000 nm — deep far-field
+        // dz = 10 lambda = 5000 nm -- deep far-field
         let ri = [0.0, 0.0, 2502.5];
         let rj = [0.0, 0.0, 2497.5]; // dz = 5000 nm
         let g = sg.evaluate(ri, rj, 0.0);
@@ -519,32 +519,32 @@ mod tests {
         }
     }
 
-    // ── Physical limit: retarded Fresnel agreement ───────────────────────────
+    // -- Physical limit: retarded Fresnel agreement ---------------------------
 
     #[test]
     fn test_sommerfeld_matches_fresnel_on_axis_large_dz() {
-        // For ρ = 0 and dz >> λ, the Sommerfeld integral is dominated by the
-        // k∥ ≈ 0 contribution. G_refl ≈ r_Fresnel × G_free(ri, rj_image).
+        // For rho = 0 and dz >> lambda, the Sommerfeld integral is dominated by the
+        // k|| ~= 0 contribution. G_refl ~= r_Fresnel x G_free(ri, rj_image).
         //
         // Here we check that the diagonal components have the right sign pattern:
-        // G_xx ≈ G_yy (equal by symmetry at ρ=0) and G_zz has opposite sign.
+        // G_xx ~= G_yy (equal by symmetry at rho=0) and G_zz has opposite sign.
         let eps_sub = Complex64::new(2.25, 0.0); // glass
         let eps_env = 1.0_f64;                   // air
         let lambda = 600.0_f64;
 
         let sg = SommerfeldGreens::new(lambda, eps_sub, eps_env);
 
-        // Moderate dz = 2λ to keep the integral tractable but still test the physics
+        // Moderate dz = 2lambda to keep the integral tractable but still test the physics
         let dz = 2.0 * lambda;
         let ri = [0.0, 0.0, dz * 0.6];
         let rj = [0.0, 0.0, dz * 0.4];
         let z_interface = 0.0;
         let g = sg.evaluate(ri, rj, z_interface);
 
-        // At ρ=0: G_xx = G_yy by symmetry
+        // At rho=0: G_xx = G_yy by symmetry
         assert!(
             (g[0][0] - g[1][1]).norm() < 1e-8 * g[0][0].norm().max(1e-20),
-            "G_xx ≠ G_yy at ρ=0: {:.4e} vs {:.4e}", g[0][0], g[1][1]
+            "G_xx != G_yy at rho=0: {:.4e} vs {:.4e}", g[0][0], g[1][1]
         );
 
         // All components should be finite

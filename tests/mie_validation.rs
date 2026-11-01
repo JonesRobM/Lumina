@@ -11,7 +11,7 @@
 //! particles where $|\epsilon_1| \gg \epsilon_2$. This is a well-known
 //! limitation of the discrete dipole approximation at coarse discretisation
 //! (few dipoles per wavelength of the surface plasmon). For gold, the CDA
-//! is most accurate near the interband region (400–520 nm) where $\epsilon_2$
+//! is most accurate near the interband region (400-520 nm) where $\epsilon_2$
 //! is large. At longer wavelengths (>550 nm), the error increases
 //! significantly and finer discretisation is required.
 
@@ -29,7 +29,7 @@ use lumina_materials::provider::MaterialProvider;
 #[test]
 fn test_cda_vs_mie_gold_sphere() {
     let radius = 10.0; // nm
-    let spacing = 3.0; // nm — coarse for test speed
+    let spacing = 3.0; // nm -- coarse for test speed
     let n_medium = 1.0;
     let epsilon_m = n_medium * n_medium;
 
@@ -51,8 +51,8 @@ fn test_cda_vs_mie_gold_sphere() {
         ..Default::default()
     };
 
-    // Test at wavelengths in the interband region (400–520 nm) where CDA
-    // is well-behaved for gold (ε₂ is large, |ε₁|/ε₂ is moderate).
+    // Test at wavelengths in the interband region (400-520 nm) where CDA
+    // is well-behaved for gold (eps2 is large, |eps1|/eps2 is moderate).
     let wavelengths = [420.0, 450.0, 480.0, 510.0];
 
     for &wl in &wavelengths {
@@ -79,7 +79,7 @@ fn test_cda_vs_mie_gold_sphere() {
         let rel_err_ext = (cda.extinction - mie_ext).abs() / mie_ext;
 
         eprintln!(
-            "λ={:.0} nm: ε=({:.2},{:.2}), CDA={:.2e}, Mie={:.2e}, err={:.1}%, N={}",
+            "lambda={:.0} nm: eps=({:.2},{:.2}), CDA={:.2e}, Mie={:.2e}, err={:.1}%, N={}",
             wl, epsilon.re, epsilon.im,
             cda.extinction, mie_ext,
             rel_err_ext * 100.0, dipoles.len()
@@ -87,7 +87,7 @@ fn test_cda_vs_mie_gold_sphere() {
 
         assert!(
             rel_err_ext < 0.30,
-            "CDA ({:.2e}) differs from Mie ({:.2e}) by {:.1}% at λ={:.0} nm (max 30%)",
+            "CDA ({:.2e}) differs from Mie ({:.2e}) by {:.1}% at lambda={:.0} nm (max 30%)",
             cda.extinction, mie_ext, rel_err_ext * 100.0, wl
         );
 
@@ -118,7 +118,7 @@ fn test_cda_vs_mie_dielectric_sphere() {
         ..Default::default()
     };
 
-    // Test several dielectric constants (avoid very low ε where the
+    // Test several dielectric constants (avoid very low eps where the
     // cross-sections are tiny and relative errors are inflated).
     let test_cases: &[(num_complex::Complex64, &str)] = &[
         (num_complex::Complex64::new(4.0, 0.0), "TiO2-like n=2"),
@@ -148,15 +148,15 @@ fn test_cda_vs_mie_dielectric_sphere() {
             let rel_err = (cda.extinction - mie_ext).abs() / mie_ext;
 
             eprintln!(
-                "{:24} λ={:.0}: CDA={:.2e}, Mie={:.2e}, err={:.1}%, N={}",
+                "{:24} lambda={:.0}: CDA={:.2e}, Mie={:.2e}, err={:.1}%, N={}",
                 label, wl, cda.extinction, mie_ext, rel_err * 100.0, dipoles.len()
             );
 
             // 30% tolerance for d=3nm in a R=10nm sphere is reasonable.
-            // Finer discretisation (d≤2nm) gives <5% for dielectrics.
+            // Finer discretisation (d<=2nm) gives <5% for dielectrics.
             assert!(
                 rel_err < 0.30,
-                "{}: CDA ({:.2e}) differs from Mie ({:.2e}) by {:.1}% at λ={:.0} nm",
+                "{}: CDA ({:.2e}) differs from Mie ({:.2e}) by {:.1}% at lambda={:.0} nm",
                 label, cda.extinction, mie_ext, rel_err * 100.0, wl
             );
         }

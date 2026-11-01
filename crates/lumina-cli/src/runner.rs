@@ -9,13 +9,13 @@ use num_complex::Complex64;
 use rayon::prelude::*;
 
 use lumina_compute::ComputeBackend;
+use lumina_core::build_dipoles;
 use lumina_core::nonlinear::{compute_shg_response, compute_thg_response};
 use lumina_core::solver::cda::CdaSolver;
 use lumina_core::solver::substrate::SubstrateRuntime;
 use lumina_core::solver::{NearFieldPlane, OpticalSolver, SolverError};
 use lumina_core::types::{
-    clausius_mossotti, ellipsoid_polarisability_tensor, radiative_correction, Chi2Tensor,
-    Chi3Tensor, CrossSections, Dipole, NearFieldMap, SimulationParams,
+    Chi2Tensor, Chi3Tensor, CrossSections, NearFieldMap, SimulationParams,
 };
 use lumina_materials::johnson_christy::JohnsonChristyMaterial;
 use lumina_materials::palik::PalikMaterial;
@@ -28,9 +28,9 @@ use crate::config::{JobConfig, NonlinearConfig, WavelengthSpec};
 pub struct ShgPoint {
     /// Fundamental wavelength (nm).
     pub fundamental_nm: f64,
-    /// Second-harmonic wavelength λ/2 (nm).
+    /// Second-harmonic wavelength lambda/2 (nm).
     pub harmonic_nm: f64,
-    /// Total SHG intensity ∝ Σᵢ |p_i(2ω)|² (nm⁶, unnormalised).
+    /// Total SHG intensity prop to sum_i |p_i(2omega)|^2 (nm^6, unnormalised).
     pub shg_intensity: f64,
 }
 
@@ -39,9 +39,9 @@ pub struct ShgPoint {
 pub struct ThgPoint {
     /// Fundamental wavelength (nm).
     pub fundamental_nm: f64,
-    /// Third-harmonic wavelength λ/3 (nm).
+    /// Third-harmonic wavelength lambda/3 (nm).
     pub harmonic_nm: f64,
-    /// Total THG intensity ∝ Σᵢ |p_i(3ω)|² (nm⁹, unnormalised).
+    /// Total THG intensity prop to sum_i |p_i(3omega)|^2 (nm^9, unnormalised).
     pub thg_intensity: f64,
 }
 
@@ -50,10 +50,10 @@ pub struct SimulationOutput {
     pub spectra: Vec<CrossSections>,
     pub near_field: Option<NearFieldMap>,
     /// SHG spectrum, one point per fundamental wavelength. Empty if SHG was
-    /// not requested or every wavelength failed material resolution at 2ω.
+    /// not requested or every wavelength failed material resolution at 2omega.
     pub shg_spectra: Vec<ShgPoint>,
     /// THG spectrum, one point per fundamental wavelength. Empty if THG was
-    /// not requested or every wavelength failed material resolution at λ/3.
+    /// not requested or every wavelength failed material resolution at lambda/3.
     pub thg_spectra: Vec<ThgPoint>,
 }
 
@@ -97,7 +97,7 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
     let total_dipoles = geom.positions.len();
     println!("Total dipoles: {}", total_dipoles);
     if total_dipoles == 0 {
-        anyhow::bail!("No dipoles generated — check geometry configuration");
+        anyhow::bail!("No dipoles generated -- check geometry configuration");
     }
 
     // Load all material providers
@@ -115,11 +115,13 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
 
     let matrix_memory_budget = (job.simulation.matrix_memory_gib * 1024.0 * 1024.0 * 1024.0) as u64;
 
-    // Run simulation across wavelengths — parallel via Rayon.
+    // Run simulation across wavelengths -- parallel via Rayon.
     let solver = CdaSolver {
         backend,
         substrate: job.simulation.substrate.clone(),
         matrix_memory_budget,
+        use_fcd: job.simulation.use_fcd,
+        iterative_threshold: job.simulation.iterative_threshold,
         ..Default::default()
     };
 
@@ -129,7 +131,7 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
     // Cap the number of concurrent wavelength threads to avoid OOM.
     // On the CPU GMRES path, the matrix is never assembled (on-the-fly matvec),
     // so each thread uses only O(N) memory.  On the GPU path the matrix IS
-    // assembled per thread (3N×3N×16 bytes), so we limit parallelism to keep
+    // assembled per thread (3Nx3Nx16 bytes), so we limit parallelism to keep
     // peak allocation within an 8 GiB budget.
     let matrix_bytes = (3u64 * total_dipoles as u64).pow(2) * 16;
     const MEMORY_BUDGET: u64 = 8 * 1024 * 1024 * 1024; // 8 GiB
@@ -150,7 +152,6 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
     let all_spectra: Vec<CrossSections> = wl_pool.install(|| wavelengths
         .par_iter()
         .map(|&wl| {
-            let k = 2.0 * std::f64::consts::PI * params.environment_n / wl;
             let epsilon_m = params.environment_n * params.environment_n;
 
             // Resolve substrate Fresnel factor for this wavelength.
@@ -162,35 +163,16 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
                 params_wl.substrate_runtime = Some(SubstrateRuntime::from_spec(sub, eps_sub, epsilon_m, wl));
             }
 
-            let mut dipoles = Vec::with_capacity(total_dipoles);
-            for i in 0..total_dipoles {
-                let epsilon = resolve_material_epsilon(
-                    &geom.materials[i], wl, &gold, &silver, &copper, &tio2, &sio2, &al2o3, &si, &gaas,
-                )
-                .map_err(|e| anyhow::anyhow!("{}", e))?;
-                let volume = geom.spacings[i].powi(3);
-                let f = geom.fill_fractions[i];
-                let dipole = if let Some(hint) = &geom.hints[i] {
-                    // Anisotropic path: ellipsoidal depolarisation factors.
-                    let tensor = ellipsoid_polarisability_tensor(
-                        volume, hint.depol_factors, epsilon, epsilon_m, k, hint.rotation,
-                    );
-                    Dipole { position: geom.positions[i], polarisability: tensor.map(|v| v * f) }
-                } else {
-                    // Isotropic path: standard spherical CM.
-                    let alpha_cm = clausius_mossotti(volume, epsilon, epsilon_m);
-                    let alpha_rrcm = radiative_correction(alpha_cm, k);
-                    let alpha = alpha_rrcm * f;
-                    Dipole::isotropic(geom.positions[i], alpha)
-                };
-                dipoles.push(dipole);
-            }
+            let dipoles = build_dipoles(&geom, wl, params.environment_n, |mat, w| {
+                resolve_material_epsilon(mat, w, &gold, &silver, &copper, &tio2, &sio2, &al2o3, &si, &gaas)
+            })
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
 
             let cs = match solver.compute_cross_sections(&dipoles, wl, &params_wl) {
                 Ok(cs) => cs,
                 Err(SolverError::ConvergenceFailure { max_iter, residual }) => {
                     eprintln!(
-                        "  WARNING: λ={:.1} nm did not converge after {} iterations \
+                        "  WARNING: lambda={:.1} nm did not converge after {} iterations \
                          (residual: {:.2e}). Consider increasing max_iterations, \
                          refining dipole spacing, or checking the material at this wavelength.",
                         wl, max_iter, residual
@@ -203,13 +185,13 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
                         circular_dichroism: None,
                     }
                 }
-                Err(e) => return Err(anyhow::anyhow!("Solver error at λ={:.1} nm: {}", wl, e)),
+                Err(e) => return Err(anyhow::anyhow!("Solver error at lambda={:.1} nm: {}", wl, e)),
             };
 
             let done = progress.fetch_add(1, Ordering::Relaxed) + 1;
             if done.is_multiple_of(10) || done == 1 || done == n_wl {
                 println!(
-                    "  [{}/{}] λ={:.1} nm: C_ext={:.2e}, C_abs={:.2e}, C_sca={:.2e}",
+                    "  [{}/{}] lambda={:.1} nm: C_ext={:.2e}, C_abs={:.2e}, C_sca={:.2e}",
                     done, n_wl, wl, cs.extinction, cs.absorption, cs.scattering
                 );
             }
@@ -240,10 +222,9 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
 
     // Optionally compute near-field map at peak wavelength
     let near_field = if job.output.save_near_field && peak_ext > 0.0 {
-        println!("Computing near-field map at λ={:.1} nm (peak extinction)...", peak_wl);
+        println!("Computing near-field map at lambda={:.1} nm (peak extinction)...", peak_wl);
 
         // Rebuild dipoles at the peak wavelength
-        let k_peak = 2.0 * std::f64::consts::PI * params.environment_n / peak_wl;
         let epsilon_m = params.environment_n * params.environment_n;
         let mut peak_params = params.clone();
         if let Some(sub) = &job.simulation.substrate {
@@ -252,26 +233,9 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
             )?;
             peak_params.substrate_runtime = Some(SubstrateRuntime::from_spec(sub, eps_sub, epsilon_m, peak_wl));
         }
-        let mut peak_dipoles = Vec::with_capacity(total_dipoles);
-        for i in 0..total_dipoles {
-            let epsilon = resolve_material_epsilon(
-                &geom.materials[i], peak_wl, &gold, &silver, &copper, &tio2, &sio2, &al2o3, &si, &gaas,
-            )?;
-            let volume = geom.spacings[i].powi(3);
-            let f = geom.fill_fractions[i];
-            let dipole = if let Some(hint) = &geom.hints[i] {
-                let tensor = ellipsoid_polarisability_tensor(
-                    volume, hint.depol_factors, epsilon, epsilon_m, k_peak, hint.rotation,
-                );
-                Dipole { position: geom.positions[i], polarisability: tensor.map(|v| v * f) }
-            } else {
-                let alpha_cm = clausius_mossotti(volume, epsilon, epsilon_m);
-                let alpha_rrcm = radiative_correction(alpha_cm, k_peak);
-                let alpha = alpha_rrcm * f;
-                Dipole::isotropic(geom.positions[i], alpha)
-            };
-            peak_dipoles.push(dipole);
-        }
+        let peak_dipoles = build_dipoles(&geom, peak_wl, params.environment_n, |mat, w| {
+            resolve_material_epsilon(mat, w, &gold, &silver, &copper, &tio2, &sio2, &al2o3, &si, &gaas)
+        })?;
 
         match solver.solve_dipoles(&peak_dipoles, peak_wl, &peak_params) {
             Ok(response) => {
@@ -307,7 +271,7 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
         None
     };
 
-    // ── SHG sweep (optional) ──────────────────────────────────────────────────
+    // -- SHG sweep (optional) --------------------------------------------------
     let shg_spectra = if let Some(nl) = &job.nonlinear {
         if nl.enable_shg {
             run_shg_sweep(
@@ -332,7 +296,7 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
         Vec::new()
     };
 
-    // ── THG sweep (optional) ──────────────────────────────────────────────────
+    // -- THG sweep (optional) --------------------------------------------------
     let thg_spectra = if let Some(nl) = &job.nonlinear {
         if nl.enable_thg {
             run_thg_sweep(
@@ -363,12 +327,12 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
 
 /// Run the SHG sweep over all fundamental wavelengths.
 ///
-/// For each wavelength λ:
-/// 1. Build dipoles at λ (ω) and at λ/2 (2ω).
-/// 2. Solve the linear CDA system at ω to get local fields.
-/// 3. Drive the 2ω system with the χ^(2) source terms.
+/// For each wavelength lambda:
+/// 1. Build dipoles at lambda (omega) and at lambda/2 (2omega).
+/// 2. Solve the linear CDA system at omega to get local fields.
+/// 3. Drive the 2omega system with the chi^(2) source terms.
 ///
-/// Wavelengths where 2ω material resolution fails are silently skipped.
+/// Wavelengths where 2omega material resolution fails are silently skipped.
 #[allow(clippy::too_many_arguments)]
 fn run_shg_sweep(
     nl: &NonlinearConfig,
@@ -397,11 +361,9 @@ fn run_shg_sweep(
         .par_iter()
         .map(|&wl| {
             let wl_2omega = wl / 2.0;
-            let k_omega = 2.0 * std::f64::consts::PI * params.environment_n / wl;
-            let k_2omega = 2.0 * std::f64::consts::PI * params.environment_n / wl_2omega;
             let epsilon_m = params.environment_n * params.environment_n;
 
-            // Resolve substrate runtime at ω and 2ω.
+            // Resolve substrate runtime at omega and 2omega.
             let mut params_omega = params.clone();
             let mut params_2omega = params.clone();
             if let Some(sub) = &solver.substrate {
@@ -428,93 +390,23 @@ fn run_shg_sweep(
                 }
             }
 
-            // Build dipoles at ω.
-            let mut dipoles_omega = Vec::with_capacity(total_dipoles);
-            for i in 0..total_dipoles {
-                let epsilon = match resolve_material_epsilon(
-                    &geom.materials[i],
-                    wl,
-                    gold,
-                    silver,
-                    copper,
-                    tio2,
-                    sio2,
-                    al2o3,
-                    si,
-                    gaas,
-                ) {
-                    Ok(e) => e,
-                    Err(_) => return None,
-                };
-                let volume = geom.spacings[i].powi(3);
-                let f = geom.fill_fractions[i];
-                let dipole = if let Some(hint) = &geom.hints[i] {
-                    let tensor = ellipsoid_polarisability_tensor(
-                        volume,
-                        hint.depol_factors,
-                        epsilon,
-                        epsilon_m,
-                        k_omega,
-                        hint.rotation,
-                    );
-                    Dipole { position: geom.positions[i], polarisability: tensor.map(|v| v * f) }
-                } else {
-                    let alpha_rrcm = radiative_correction(
-                        clausius_mossotti(volume, epsilon, epsilon_m),
-                        k_omega,
-                    );
-                    let alpha = alpha_rrcm * f;
-                    Dipole::isotropic(geom.positions[i], alpha)
-                };
-                dipoles_omega.push(dipole);
-            }
+            // Build dipoles at omega.
+            let dipoles_omega = build_dipoles(geom, wl, params.environment_n, |mat, w| {
+                resolve_material_epsilon(mat, w, gold, silver, copper, tio2, sio2, al2o3, si, gaas)
+            })
+            .ok()?;
 
-            // Build dipoles at 2ω (material evaluated at λ/2).
-            let mut dipoles_2omega = Vec::with_capacity(total_dipoles);
-            for i in 0..total_dipoles {
-                let epsilon = match resolve_material_epsilon(
-                    &geom.materials[i],
-                    wl_2omega,
-                    gold,
-                    silver,
-                    copper,
-                    tio2,
-                    sio2,
-                    al2o3,
-                    si,
-                    gaas,
-                ) {
-                    Ok(e) => e,
-                    Err(_) => return None, // 2ω out of material range — skip
-                };
-                let volume = geom.spacings[i].powi(3);
-                let f = geom.fill_fractions[i];
-                let dipole = if let Some(hint) = &geom.hints[i] {
-                    let tensor = ellipsoid_polarisability_tensor(
-                        volume,
-                        hint.depol_factors,
-                        epsilon,
-                        epsilon_m,
-                        k_2omega,
-                        hint.rotation,
-                    );
-                    Dipole { position: geom.positions[i], polarisability: tensor.map(|v| v * f) }
-                } else {
-                    let alpha_rrcm = radiative_correction(
-                        clausius_mossotti(volume, epsilon, epsilon_m),
-                        k_2omega,
-                    );
-                    let alpha = alpha_rrcm * f;
-                    Dipole::isotropic(geom.positions[i], alpha)
-                };
-                dipoles_2omega.push(dipole);
-            }
+            // Build dipoles at 2omega (material evaluated at lambda/2).
+            let dipoles_2omega = build_dipoles(geom, wl_2omega, params.environment_n, |mat, w| {
+                resolve_material_epsilon(mat, w, gold, silver, copper, tio2, sio2, al2o3, si, gaas)
+            })
+            .ok()?;
 
-            // Linear solve at ω (need local fields for SHG sources).
+            // Linear solve at omega (need local fields for SHG sources).
             let omega_response = match solver.solve_dipoles(&dipoles_omega, wl, &params_omega) {
                 Ok(r) => r,
                 Err(e) => {
-                    eprintln!("  SHG: linear solve failed at λ={:.1} nm: {}", wl, e);
+                    eprintln!("  SHG: linear solve failed at lambda={:.1} nm: {}", wl, e);
                     return None;
                 }
             };
@@ -530,7 +422,7 @@ fn run_shg_sweep(
             ) {
                 Ok(r) => r,
                 Err(e) => {
-                    eprintln!("  SHG: harmonic solve failed at λ={:.1} nm: {}", wl, e);
+                    eprintln!("  SHG: harmonic solve failed at lambda={:.1} nm: {}", wl, e);
                     return None;
                 }
             };
@@ -538,7 +430,7 @@ fn run_shg_sweep(
             let done = progress.fetch_add(1, Ordering::Relaxed) + 1;
             if done.is_multiple_of(10) || done == 1 || done == n_wl {
                 println!(
-                    "  SHG [{}/{}] λ={:.1} nm → {:.1} nm: I_SHG={:.3e}",
+                    "  SHG [{}/{}] lambda={:.1} nm -> {:.1} nm: I_SHG={:.3e}",
                     done, n_wl, wl, shg.harmonic_nm, shg.shg_intensity
                 );
             }
@@ -581,16 +473,16 @@ pub fn write_shg_csv(shg: &[ShgPoint], path: &Path, job: &JobConfig) -> Result<(
     }
 
     let mut file = std::fs::File::create(path)?;
-    writeln!(file, "# Lumina CDA Solver — SHG Spectrum")?;
+    writeln!(file, "# Lumina CDA Solver -- SHG Spectrum")?;
     writeln!(file, "# Version: {}", env!("CARGO_PKG_VERSION"))?;
     writeln!(file, "# environment_n: {}", job.simulation.environment_n)?;
     if let Some(nl) = &job.nonlinear {
         writeln!(file, "# chi2_symmetry: {}", nl.symmetry)?;
         if let Some([r, i]) = nl.chi_zzz {
-            writeln!(file, "# chi_zzz: {} + {}i nm³", r, i)?;
+            writeln!(file, "# chi_zzz: {} + {}i nm^3", r, i)?;
         }
         if let Some([r, i]) = nl.chi_zxx {
-            writeln!(file, "# chi_zxx: {} + {}i nm³", r, i)?;
+            writeln!(file, "# chi_zxx: {} + {}i nm^3", r, i)?;
         }
     }
     writeln!(file, "#")?;
@@ -610,12 +502,12 @@ pub fn write_shg_csv(shg: &[ShgPoint], path: &Path, job: &JobConfig) -> Result<(
 
 /// Run the THG sweep over all fundamental wavelengths.
 ///
-/// For each wavelength λ:
-/// 1. Build dipoles at λ (ω) and at λ/3 (3ω).
-/// 2. Solve the linear CDA system at ω to get local fields.
-/// 3. Drive the 3ω system with the χ^(3) source terms.
+/// For each wavelength lambda:
+/// 1. Build dipoles at lambda (omega) and at lambda/3 (3omega).
+/// 2. Solve the linear CDA system at omega to get local fields.
+/// 3. Drive the 3omega system with the chi^(3) source terms.
 ///
-/// Wavelengths where 3ω material resolution fails are silently skipped.
+/// Wavelengths where 3omega material resolution fails are silently skipped.
 #[allow(clippy::too_many_arguments)]
 fn run_thg_sweep(
     nl: &NonlinearConfig,
@@ -644,11 +536,9 @@ fn run_thg_sweep(
         .par_iter()
         .map(|&wl| {
             let wl_3omega = wl / 3.0;
-            let k_omega = 2.0 * std::f64::consts::PI * params.environment_n / wl;
-            let k_3omega = 2.0 * std::f64::consts::PI * params.environment_n / wl_3omega;
             let epsilon_m = params.environment_n * params.environment_n;
 
-            // Resolve substrate runtime at ω and 3ω.
+            // Resolve substrate runtime at omega and 3omega.
             let mut params_omega = params.clone();
             let mut params_3omega = params.clone();
             if let Some(sub) = &solver.substrate {
@@ -675,93 +565,23 @@ fn run_thg_sweep(
                 }
             }
 
-            // Build dipoles at ω.
-            let mut dipoles_omega = Vec::with_capacity(total_dipoles);
-            for i in 0..total_dipoles {
-                let epsilon = match resolve_material_epsilon(
-                    &geom.materials[i],
-                    wl,
-                    gold,
-                    silver,
-                    copper,
-                    tio2,
-                    sio2,
-                    al2o3,
-                    si,
-                    gaas,
-                ) {
-                    Ok(e) => e,
-                    Err(_) => return None,
-                };
-                let volume = geom.spacings[i].powi(3);
-                let f = geom.fill_fractions[i];
-                let dipole = if let Some(hint) = &geom.hints[i] {
-                    let tensor = ellipsoid_polarisability_tensor(
-                        volume,
-                        hint.depol_factors,
-                        epsilon,
-                        epsilon_m,
-                        k_omega,
-                        hint.rotation,
-                    );
-                    Dipole { position: geom.positions[i], polarisability: tensor.map(|v| v * f) }
-                } else {
-                    let alpha_rrcm = radiative_correction(
-                        clausius_mossotti(volume, epsilon, epsilon_m),
-                        k_omega,
-                    );
-                    let alpha = alpha_rrcm * f;
-                    Dipole::isotropic(geom.positions[i], alpha)
-                };
-                dipoles_omega.push(dipole);
-            }
+            // Build dipoles at omega.
+            let dipoles_omega = build_dipoles(geom, wl, params.environment_n, |mat, w| {
+                resolve_material_epsilon(mat, w, gold, silver, copper, tio2, sio2, al2o3, si, gaas)
+            })
+            .ok()?;
 
-            // Build dipoles at 3ω (material evaluated at λ/3).
-            let mut dipoles_3omega = Vec::with_capacity(total_dipoles);
-            for i in 0..total_dipoles {
-                let epsilon = match resolve_material_epsilon(
-                    &geom.materials[i],
-                    wl_3omega,
-                    gold,
-                    silver,
-                    copper,
-                    tio2,
-                    sio2,
-                    al2o3,
-                    si,
-                    gaas,
-                ) {
-                    Ok(e) => e,
-                    Err(_) => return None, // 3ω out of material range — skip
-                };
-                let volume = geom.spacings[i].powi(3);
-                let f = geom.fill_fractions[i];
-                let dipole = if let Some(hint) = &geom.hints[i] {
-                    let tensor = ellipsoid_polarisability_tensor(
-                        volume,
-                        hint.depol_factors,
-                        epsilon,
-                        epsilon_m,
-                        k_3omega,
-                        hint.rotation,
-                    );
-                    Dipole { position: geom.positions[i], polarisability: tensor.map(|v| v * f) }
-                } else {
-                    let alpha_rrcm = radiative_correction(
-                        clausius_mossotti(volume, epsilon, epsilon_m),
-                        k_3omega,
-                    );
-                    let alpha = alpha_rrcm * f;
-                    Dipole::isotropic(geom.positions[i], alpha)
-                };
-                dipoles_3omega.push(dipole);
-            }
+            // Build dipoles at 3omega (material evaluated at lambda/3).
+            let dipoles_3omega = build_dipoles(geom, wl_3omega, params.environment_n, |mat, w| {
+                resolve_material_epsilon(mat, w, gold, silver, copper, tio2, sio2, al2o3, si, gaas)
+            })
+            .ok()?;
 
-            // Linear solve at ω (need local fields for THG sources).
+            // Linear solve at omega (need local fields for THG sources).
             let omega_response = match solver.solve_dipoles(&dipoles_omega, wl, &params_omega) {
                 Ok(r) => r,
                 Err(e) => {
-                    eprintln!("  THG: linear solve failed at λ={:.1} nm: {}", wl, e);
+                    eprintln!("  THG: linear solve failed at lambda={:.1} nm: {}", wl, e);
                     return None;
                 }
             };
@@ -777,7 +597,7 @@ fn run_thg_sweep(
             ) {
                 Ok(r) => r,
                 Err(e) => {
-                    eprintln!("  THG: harmonic solve failed at λ={:.1} nm: {}", wl, e);
+                    eprintln!("  THG: harmonic solve failed at lambda={:.1} nm: {}", wl, e);
                     return None;
                 }
             };
@@ -785,7 +605,7 @@ fn run_thg_sweep(
             let done = progress.fetch_add(1, Ordering::Relaxed) + 1;
             if done.is_multiple_of(10) || done == 1 || done == n_wl {
                 println!(
-                    "  THG [{}/{}] λ={:.1} nm → {:.1} nm: I_THG={:.3e}",
+                    "  THG [{}/{}] lambda={:.1} nm -> {:.1} nm: I_THG={:.3e}",
                     done, n_wl, wl, thg.harmonic_nm, thg.thg_intensity
                 );
             }
@@ -828,16 +648,16 @@ pub fn write_thg_csv(thg: &[ThgPoint], path: &Path, job: &JobConfig) -> Result<(
     }
 
     let mut file = std::fs::File::create(path)?;
-    writeln!(file, "# Lumina CDA Solver — THG Spectrum")?;
+    writeln!(file, "# Lumina CDA Solver -- THG Spectrum")?;
     writeln!(file, "# Version: {}", env!("CARGO_PKG_VERSION"))?;
     writeln!(file, "# environment_n: {}", job.simulation.environment_n)?;
     if let Some(nl) = &job.nonlinear {
         writeln!(file, "# chi3_symmetry: {}", nl.chi3_symmetry)?;
         if let Some([r, i]) = nl.chi3_xxxx {
-            writeln!(file, "# chi3_xxxx: {} + {}i nm⁶", r, i)?;
+            writeln!(file, "# chi3_xxxx: {} + {}i nm^6", r, i)?;
         }
         if let Some([r, i]) = nl.chi3_xxyy {
-            writeln!(file, "# chi3_xxyy: {} + {}i nm⁶", r, i)?;
+            writeln!(file, "# chi3_xxyy: {} + {}i nm^6", r, i)?;
         }
     }
     writeln!(file, "#")?;
@@ -904,7 +724,7 @@ pub fn write_spectra_csv(
     let mut file = std::fs::File::create(path)?;
 
     // Metadata header
-    writeln!(file, "# Lumina CDA Solver — Cross-Section Spectra")?;
+    writeln!(file, "# Lumina CDA Solver -- Cross-Section Spectra")?;
     writeln!(file, "# Version: {}", env!("CARGO_PKG_VERSION"))?;
     writeln!(file, "# environment_n: {}", job.simulation.environment_n)?;
 
@@ -979,7 +799,7 @@ pub fn write_near_field_csv(
     }
 
     let mut file = std::fs::File::create(path)?;
-    writeln!(file, "# Lumina CDA Solver — Near-Field Intensity Map")?;
+    writeln!(file, "# Lumina CDA Solver -- Near-Field Intensity Map")?;
     writeln!(file, "# Grid: {}x{}", near_field.nx, near_field.ny)?;
     writeln!(
         file,
@@ -1004,9 +824,9 @@ pub fn write_near_field_csv(
 
 /// Create a compute backend based on the user's preference string.
 ///
-/// - `"gpu"` — attempt GPU, fail if unavailable.
-/// - `"cpu"` — always use CPU.
-/// - `"auto"` (default) — try GPU, fall back to CPU.
+/// - `"gpu"` -- attempt GPU, fail if unavailable.
+/// - `"cpu"` -- always use CPU.
+/// - `"auto"` (default) -- try GPU, fall back to CPU.
 fn create_backend(preference: &str) -> Arc<dyn ComputeBackend> {
     match preference {
         "cpu" => {

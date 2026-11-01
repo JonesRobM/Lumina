@@ -9,23 +9,19 @@ environment_n = 1.33  # Water/Buffer
 
 [[geometry.object]]
 name = "Rod_Bottom"
-type = "cylinder"
-base_centre = [0.0, 0.0, -15.0]
-axis = [1.0, 0.0, 0.0]
-length = 60.0
-radius = 10.0
 material = "Au_JC"
 dipole_spacing = 2.0
+position = [0.0, 0.0, -15.0]
+shape = { type = "cylinder", radius = 10.0, length = 60.0, axis = [1.0, 0.0, 0.0] }
 
 [[geometry.object]]
 name = "Rod_Top"
-type = "cylinder"
-base_centre = [0.0, 0.0, 15.0]
-axis = [0.707, 0.707, 0.0]  # Rotated 45 degrees
-length = 60.0
-radius = 10.0
 material = "Au_JC"
 dipole_spacing = 2.0
+position = [0.0, 0.0, 15.0]
+# Rotated 45 degrees about z relative to the bottom rod -- this is what makes the
+# dimer chiral, and gives a non-zero circular dichroism.
+shape = { type = "cylinder", radius = 10.0, length = 60.0, axis = [0.707, 0.707, 0.0] }
 
 [output]
 directory = "./output/chiral_dimer"

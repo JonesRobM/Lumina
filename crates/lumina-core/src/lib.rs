@@ -13,14 +13,16 @@
 //!
 //! ## Modules
 //!
-//! - [`types`] — Core data structures (dipoles, parameters, results).
-//! - [`solver`] — Optical solver trait and CDA implementation.
-//! - [`fields`] — Near-field and far-field computation.
-//! - [`mie`] — Analytical Mie theory for validation.
-//! - [`nonlinear`] — SHG/THG source terms (stub).
-//! - [`solver::ewald`] — Ewald-accelerated periodic Green's function.
-//! - [`time_domain`] — Time-domain field reconstruction (stub).
+//! - [`types`] -- Core data structures (dipoles, parameters, results).
+//! - [`dipoles`] -- Builds per-wavelength dipole polarisabilities from scene geometry.
+//! - [`solver`] -- Optical solver trait and CDA implementation.
+//! - [`fields`] -- Near-field and far-field computation.
+//! - [`mie`] -- Analytical Mie theory for validation.
+//! - [`nonlinear`] -- SHG/THG source terms (stub).
+//! - [`solver::ewald`] -- Ewald-accelerated periodic Green's function.
+//! - [`time_domain`] -- Time-domain field reconstruction (stub).
 
+pub mod dipoles;
 pub mod fields;
 pub mod mie;
 pub mod nonlinear;
@@ -30,6 +32,7 @@ pub mod time_domain;
 pub mod types;
 
 // Re-export frequently used types for convenience.
+pub use dipoles::build_dipoles;
 pub use nonlinear::{compute_shg_response, compute_thg_response};
 pub use solver::ewald::EwaldGreens;
 pub use solver::substrate::SubstrateSpec;

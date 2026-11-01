@@ -13,13 +13,13 @@
 
 use num_complex::Complex64;
 
-/// Stack-allocated 3×3 complex tensor (zero heap allocation).
+/// Stack-allocated 3x3 complex tensor (zero heap allocation).
 pub type Tensor3x3 = [[Complex64; 3]; 3];
 
 /// Compute the 3x3 dyadic Green's tensor between two points.
 ///
 /// Returns a stack-allocated `[[Complex64; 3]; 3]` to avoid heap allocation
-/// in the inner assembly loop (~N² calls per wavelength).
+/// in the inner assembly loop (~N^2 calls per wavelength).
 ///
 /// # Arguments
 /// * `r1` - Position of the observation point (nm).
@@ -74,7 +74,7 @@ pub fn dyadic_greens_tensor(r1: &[f64; 3], r2: &[f64; 3], k: f64) -> Tensor3x3 {
 /// quadrature over the source cell.
 ///
 /// For near-field interactions (|r_obs - r_src| <= 2*cell_size), the point-dipole
-/// Green's function has a 1/R³ singularity that creates staircase artefacts at
+/// Green's function has a 1/R^3 singularity that creates staircase artefacts at
 /// material boundaries. The Integrated Green's Tensor (IGT) method (Yurkin &
 /// Hoekstra, JQSRT 2007) replaces G(r_obs, r_src) with the volume average:
 ///
@@ -89,7 +89,7 @@ pub fn dyadic_greens_tensor(r1: &[f64; 3], r2: &[f64; 3], k: f64) -> Tensor3x3 {
 /// # Arguments
 /// * `r_obs` - Position of the observation point (nm).
 /// * `r_src` - Centre of the source cell (nm).
-/// * `k` - Wavenumber in the medium (nm⁻¹).
+/// * `k` - Wavenumber in the medium (nm^-1).
 /// * `cell_size` - Side length of the cubic dipole cell (nm).
 pub fn dyadic_greens_tensor_filtered(
     r_obs: &[f64; 3],

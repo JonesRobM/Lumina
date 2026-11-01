@@ -144,15 +144,15 @@ fn normalise(v: &[f64; 3]) -> [f64; 3] {
 ///
 /// Samples the differential scattering intensity
 /// $\frac{dC_\text{sca}}{d\Omega} \propto |(\mathbf{I} - \hat{\mathbf{r}}\hat{\mathbf{r}}) \cdot \mathbf{F}(\hat{\mathbf{r}})|^2$
-/// at `n_theta × n_phi` directions, where
+/// at `n_theta x n_phi` directions, where
 /// $\mathbf{F}(\hat{\mathbf{r}}) = \sum_i \mathbf{p}_i e^{-ik\hat{\mathbf{r}}\cdot\mathbf{r}_i}$.
 ///
 /// # Arguments
-/// * `dipoles` — Dipole positions.
-/// * `response` — Solved dipole moments at a single wavelength.
-/// * `k` — Wavenumber in the medium (nm⁻¹).
-/// * `n_theta` — Number of polar angle samples in [0, π].
-/// * `n_phi` — Number of azimuthal angle samples in [0, 2π).
+/// * `dipoles` -- Dipole positions.
+/// * `response` -- Solved dipole moments at a single wavelength.
+/// * `k` -- Wavenumber in the medium (nm^-1).
+/// * `n_theta` -- Number of polar angle samples in [0, pi].
+/// * `n_phi` -- Number of azimuthal angle samples in [0, 2pi).
 pub fn compute_far_field(
     dipoles: &[Dipole],
     response: &DipoleResponse,
@@ -176,10 +176,10 @@ pub fn compute_far_field(
             let sin_p = phi.sin();
             let cos_p = phi.cos();
 
-            // Unit direction vector r̂
+            // Unit direction vector r_hat
             let rhat = [sin_t * cos_p, sin_t * sin_p, cos_t];
 
-            // Structure factor F(r̂) = Σᵢ pᵢ exp(-ik r̂·rᵢ)
+            // Structure factor F(r_hat) = sum_i p_i exp(-ik r_hat*r_i)
             let mut f = [Complex64::new(0.0, 0.0); 3];
             for (i, dipole) in dipoles.iter().enumerate() {
                 let kdotr = k * (
@@ -193,8 +193,8 @@ pub fn compute_far_field(
                 }
             }
 
-            // Transverse projection: (I - r̂r̂) · F
-            // (f_transverse)_a = f_a - (r̂ · f) r̂_a
+            // Transverse projection: (I - r_hatr_hat) * F
+            // (f_transverse)_a = f_a - (r_hat * f) r_hat_a
             let rdotf = rhat[0] * f[0] + rhat[1] * f[1] + rhat[2] * f[2];
             let ft = [
                 f[0] - rdotf * rhat[0],
@@ -220,7 +220,7 @@ pub fn compute_far_field(
     }
 }
 
-/// Compute the circular dichroism ΔC_ext = C_ext(LCP) − C_ext(RCP).
+/// Compute the circular dichroism DeltaC_ext = C_ext(LCP) - C_ext(RCP).
 ///
 /// Uses the two-response formula (Draine & Goodman approach extended for CD):
 /// $\Delta C_\text{ext} = \frac{k}{|E_0|^2} \sum_i
@@ -230,9 +230,9 @@ pub fn compute_far_field(
 /// field is x-polarised, and vice versa.
 ///
 /// # Arguments
-/// * `response_x` — Solved dipole moments for x-polarised incidence.
-/// * `response_y` — Solved dipole moments for y-polarised incidence.
-/// * `k` — Wavenumber in the medium (nm⁻¹).
+/// * `response_x` -- Solved dipole moments for x-polarised incidence.
+/// * `response_y` -- Solved dipole moments for y-polarised incidence.
+/// * `k` -- Wavenumber in the medium (nm^-1).
 pub fn compute_circular_dichroism(
     response_x: &DipoleResponse,
     response_y: &DipoleResponse,

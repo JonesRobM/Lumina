@@ -15,16 +15,16 @@ where \\(\chi^{(2)}\\) is the second-order susceptibility tensor and \\(\mathbf{
 
 ## Workflow
 
-1. **Linear solve at ω** — obtain the dipole moments and local fields.
-2. **Compute source terms** — contract \\(\chi^{(2)} : \mathbf{E}\mathbf{E}\\) per dipole.
-3. **Assemble A(2ω)** — interaction matrix at the harmonic wavelength λ/2.
-4. **Solve A(2ω) · p(2ω) = p_NL** — no incident field at the harmonic; the nonlinear sources drive the response.
-5. **Compute SHG intensity** — \\(I_{\text{SHG}} \propto \sum_i |\mathbf{p}_i(2\omega)|^2\\).
-6. **Optional** — compute far-field pattern at \\(2\omega\\).
+1. **Linear solve at omega** -- obtain the dipole moments and local fields.
+2. **Compute source terms** -- contract \\(\chi^{(2)} : \mathbf{E}\mathbf{E}\\) per dipole.
+3. **Assemble A(2omega)** -- interaction matrix at the harmonic wavelength lambda/2.
+4. **Solve A(2omega) * p(2omega) = p_NL** -- no incident field at the harmonic; the nonlinear sources drive the response.
+5. **Compute SHG intensity** -- \\(I_{\text{SHG}} \propto \sum_i |\mathbf{p}_i(2\omega)|^2\\).
+6. **Optional** -- compute far-field pattern at \\(2\omega\\).
 
-## χ^(2) Symmetry Classes
+## chi^(2) Symmetry Classes
 
-### Isotropic surface (C_∞v)
+### Isotropic surface (C_infv)
 
 For nanoparticles with surface-normal symmetry along **z**, the non-zero components are:
 
@@ -57,7 +57,7 @@ The SHG intensity scales as the fourth power of the local field amplitude:
 I_{\text{SHG}} \propto |\mathbf{E}_{\text{loc}}|^4
 \\]
 
-This is a key diagnostic: doubling the incident field should give 16× the SHG signal. This is verified by the `test_shg_intensity_scales_with_field` unit test.
+This is a key diagnostic: doubling the incident field should give 16x the SHG signal. This is verified by the `test_shg_intensity_scales_with_field` unit test.
 
 ## TOML Configuration (CLI)
 
@@ -65,7 +65,7 @@ This is a key diagnostic: doubling the incident field should give 16× the SHG s
 [nonlinear]
 enable_shg = true
 symmetry = "isotropic_surface"   # or "zero"
-chi_zzz = [1.0, 0.0]            # [real, imag] in nm³
+chi_zzz = [1.0, 0.0]            # [real, imag] in nm^3
 chi_zxx = [0.3, 0.0]
 far_field = false
 ```
@@ -78,7 +78,7 @@ Enable SHG in the **Simulation** panel. When checked:
 
 1. Select symmetry class from the dropdown.
 2. Adjust \\(\chi_{zzz}\\) and \\(\chi_{zxx}\\) components with the drag inputs.
-3. Click **Run Simulation** — the SHG spectrum appears as an additional tab in the results panel.
+3. Click **Run Simulation** -- the SHG spectrum appears as an additional tab in the results panel.
 
 ## Computational Cost
 
@@ -90,25 +90,25 @@ Total runtime is approximately \\(2\times\\) the linear-only cost.
 
 ## Third-Harmonic Generation
 
-For centrosymmetric materials (bulk metals, glass), the first non-vanishing nonlinear term is χ^(3). The THG source moment at \\(3\omega\\) is:
+For centrosymmetric materials (bulk metals, glass), the first non-vanishing nonlinear term is chi^(3). The THG source moment at \\(3\omega\\) is:
 
 \\[
 p^{\text{NL}}_{i,a}(3\omega) = \sum_{b,c,d} \chi^{(3)}_{abcd}\,
   E_{\text{loc},b,i}(\omega)\, E_{\text{loc},c,i}(\omega)\, E_{\text{loc},d,i}(\omega)
 \\]
 
-The workflow is identical to SHG but solves at λ/3. The THG intensity scales as |E|⁶.
+The workflow is identical to SHG but solves at lambda/3. The THG intensity scales as |E|^6.
 
-### χ^(3) Symmetry: Isotropic Bulk
+### chi^(3) Symmetry: Isotropic Bulk
 
-For an isotropic centrosymmetric medium (Kleinman symmetry), the independent components are χ_xxxx and χ_xxyy. The full tensor is:
+For an isotropic centrosymmetric medium (Kleinman symmetry), the independent components are chi_xxxx and chi_xxyy. The full tensor is:
 
 \\[
 \chi^{(3)}_{abcd} = \chi_{\text{xxyy}} (\delta_{ab}\delta_{cd} + \delta_{ac}\delta_{bd} + \delta_{ad}\delta_{bc})
 + (\chi_{\text{xxxx}} - 3\chi_{\text{xxyy}}) \delta_{ab}\delta_{bc}\delta_{cd}
 \\]
 
-This gives χ_xxxx correctly (diagonal) and χ_xxyy = χ_xyxy = χ_xyyx (off-diagonal permutations). In code:
+This gives chi_xxxx correctly (diagonal) and chi_xxyy = chi_xyxy = chi_xyyx (off-diagonal permutations). In code:
 
 ```rust
 let chi3 = Chi3Tensor::isotropic_bulk(
@@ -123,7 +123,7 @@ let chi3 = Chi3Tensor::isotropic_bulk(
 [nonlinear]
 enable_thg = true
 chi3_symmetry = "isotropic_bulk"   # or "zero"
-chi3_xxxx = [0.5, 0.0]            # [real, imag] in nm⁶
+chi3_xxxx = [0.5, 0.0]            # [real, imag] in nm^6
 chi3_xxyy = [0.1, 0.0]
 ```
 
@@ -131,7 +131,7 @@ Output: `output/thg_spectrum.csv` with columns `fundamental_nm`, `harmonic_nm`, 
 
 ## Limitations
 
-- χ^(2) and χ^(3) are uniform across all dipoles in a given object. Per-dipole or DFT-imported tensors are planned for v0.5.
-- For SHG: only isotropic surface (C_∞v) and zero symmetry classes. For THG: only isotropic bulk and zero.
-- The harmonic wavelength (λ/2 for SHG, λ/3 for THG) must lie within the material's tabulated range — points outside this range are silently skipped.
-- Note: λ/3 is often in the UV (< 300 nm) and outside most material tables. Use a long-wavelength fundamental or provide a UV-range material.
+- chi^(2) and chi^(3) are uniform across all dipoles in a given object. Per-dipole or DFT-imported tensors are planned for v0.5.
+- For SHG: only isotropic surface (C_infv) and zero symmetry classes. For THG: only isotropic bulk and zero.
+- The harmonic wavelength (lambda/2 for SHG, lambda/3 for THG) must lie within the material's tabulated range -- points outside this range are silently skipped.
+- Note: lambda/3 is often in the UV (< 300 nm) and outside most material tables. Use a long-wavelength fundamental or provide a UV-range material.
