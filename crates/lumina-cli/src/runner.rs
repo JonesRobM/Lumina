@@ -17,9 +17,7 @@ use lumina_core::types::{
     clausius_mossotti, ellipsoid_polarisability_tensor, radiative_correction, Chi2Tensor,
     Chi3Tensor, CrossSections, Dipole, NearFieldMap, SimulationParams,
 };
-use lumina_materials::johnson_christy::JohnsonChristyMaterial;
-use lumina_materials::palik::PalikMaterial;
-use lumina_materials::provider::MaterialProvider;
+use lumina_materials::library::MaterialLibrary;
 
 use crate::config::{JobConfig, NonlinearConfig, WavelengthSpec};
 
@@ -101,22 +99,28 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
     }
 
     // Load all material providers
-    let gold   = JohnsonChristyMaterial::gold();
-    let silver = JohnsonChristyMaterial::silver();
-    let copper = JohnsonChristyMaterial::copper();
-    let tio2   = PalikMaterial::tio2();
-    let sio2   = PalikMaterial::sio2();
-    let al2o3  = PalikMaterial::al2o3();
-    let si     = PalikMaterial::silicon();
-    let gaas   = PalikMaterial::gaas();
+    let materials = &MaterialLibrary::standard();
 
     // Select compute backend based on config.
     let backend: Arc<dyn ComputeBackend> = create_backend(&job.simulation.backend);
 
     let matrix_memory_budget = (job.simulation.matrix_memory_gib * 1024.0 * 1024.0 * 1024.0) as u64;
 
+    // The filtered (FCD) Green's function averages over a cubic cell whose
+    // side must equal the dipole spacing; the solver default (3 nm) is only
+    // right for 3 nm grids.
+    let (use_fcd, cell_size) = fcd_settings(&geom.spacings);
+    if !use_fcd {
+        println!(
+            "Note: objects use different dipole spacings, so the filtered (FCD) \
+             Green's function is disabled; point-dipole interactions are used."
+        );
+    }
+
     // Run simulation across wavelengths — parallel via Rayon.
     let solver = CdaSolver {
+        use_fcd,
+        cell_size,
         backend,
         substrate: job.simulation.substrate.clone(),
         matrix_memory_budget,
@@ -156,17 +160,13 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
             // Resolve substrate Fresnel factor for this wavelength.
             let mut params_wl = params.clone();
             if let Some(sub) = &job.simulation.substrate {
-                let eps_sub = resolve_material_epsilon(
-                    &sub.material, wl, &gold, &silver, &copper, &tio2, &sio2, &al2o3, &si, &gaas,
-                ).map_err(|e| anyhow::anyhow!("{}", e))?;
+                let eps_sub = resolve_material_epsilon(materials, &sub.material, wl).map_err(|e| anyhow::anyhow!("{}", e))?;
                 params_wl.substrate_runtime = Some(SubstrateRuntime::from_spec(sub, eps_sub, epsilon_m, wl));
             }
 
             let mut dipoles = Vec::with_capacity(total_dipoles);
             for i in 0..total_dipoles {
-                let epsilon = resolve_material_epsilon(
-                    &geom.materials[i], wl, &gold, &silver, &copper, &tio2, &sio2, &al2o3, &si, &gaas,
-                )
+                let epsilon = resolve_material_epsilon(materials, &geom.materials[i], wl)
                 .map_err(|e| anyhow::anyhow!("{}", e))?;
                 let volume = geom.spacings[i].powi(3);
                 let f = geom.fill_fractions[i];
@@ -247,16 +247,12 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
         let epsilon_m = params.environment_n * params.environment_n;
         let mut peak_params = params.clone();
         if let Some(sub) = &job.simulation.substrate {
-            let eps_sub = resolve_material_epsilon(
-                &sub.material, peak_wl, &gold, &silver, &copper, &tio2, &sio2, &al2o3, &si, &gaas,
-            )?;
+            let eps_sub = resolve_material_epsilon(materials, &sub.material, peak_wl)?;
             peak_params.substrate_runtime = Some(SubstrateRuntime::from_spec(sub, eps_sub, epsilon_m, peak_wl));
         }
         let mut peak_dipoles = Vec::with_capacity(total_dipoles);
         for i in 0..total_dipoles {
-            let epsilon = resolve_material_epsilon(
-                &geom.materials[i], peak_wl, &gold, &silver, &copper, &tio2, &sio2, &al2o3, &si, &gaas,
-            )?;
+            let epsilon = resolve_material_epsilon(materials, &geom.materials[i], peak_wl)?;
             let volume = geom.spacings[i].powi(3);
             let f = geom.fill_fractions[i];
             let dipole = if let Some(hint) = &geom.hints[i] {
@@ -310,21 +306,7 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
     // ── SHG sweep (optional) ──────────────────────────────────────────────────
     let shg_spectra = if let Some(nl) = &job.nonlinear {
         if nl.enable_shg {
-            run_shg_sweep(
-                nl,
-                &wavelengths,
-                &geom,
-                &params,
-                &solver,
-                &gold,
-                &silver,
-                &copper,
-                &tio2,
-                &sio2,
-                &al2o3,
-                &si,
-                &gaas,
-            )
+            run_shg_sweep(nl, &wavelengths, &geom, &params, &solver, materials)
         } else {
             Vec::new()
         }
@@ -335,21 +317,7 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
     // ── THG sweep (optional) ──────────────────────────────────────────────────
     let thg_spectra = if let Some(nl) = &job.nonlinear {
         if nl.enable_thg {
-            run_thg_sweep(
-                nl,
-                &wavelengths,
-                &geom,
-                &params,
-                &solver,
-                &gold,
-                &silver,
-                &copper,
-                &tio2,
-                &sio2,
-                &al2o3,
-                &si,
-                &gaas,
-            )
+            run_thg_sweep(nl, &wavelengths, &geom, &params, &solver, materials)
         } else {
             Vec::new()
         }
@@ -361,6 +329,18 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
 }
 
 
+/// Choose the FCD configuration for a scene from its per-dipole spacings.
+///
+/// FCD needs one cell size for every source dipole, so it is enabled only
+/// when all dipoles share the same spacing; that spacing is the cell size.
+fn fcd_settings(spacings: &[f64]) -> (bool, f64) {
+    let first = spacings.first().copied().unwrap_or(0.0);
+    let uniform = spacings
+        .iter()
+        .all(|&d| (d - first).abs() <= 1e-12 * first.abs());
+    (uniform, first)
+}
+
 /// Run the SHG sweep over all fundamental wavelengths.
 ///
 /// For each wavelength λ:
@@ -369,21 +349,13 @@ pub fn run_simulation(job: &JobConfig) -> Result<SimulationOutput> {
 /// 3. Drive the 2ω system with the χ^(2) source terms.
 ///
 /// Wavelengths where 2ω material resolution fails are silently skipped.
-#[allow(clippy::too_many_arguments)]
 fn run_shg_sweep(
     nl: &NonlinearConfig,
     wavelengths: &[f64],
     geom: &lumina_geometry::scene::SceneDipoles,
     params: &SimulationParams,
     solver: &CdaSolver,
-    gold: &lumina_materials::johnson_christy::JohnsonChristyMaterial,
-    silver: &lumina_materials::johnson_christy::JohnsonChristyMaterial,
-    copper: &lumina_materials::johnson_christy::JohnsonChristyMaterial,
-    tio2: &lumina_materials::palik::PalikMaterial,
-    sio2: &lumina_materials::palik::PalikMaterial,
-    al2o3: &lumina_materials::palik::PalikMaterial,
-    si: &lumina_materials::palik::PalikMaterial,
-    gaas: &lumina_materials::palik::PalikMaterial,
+    materials: &MaterialLibrary,
 ) -> Vec<ShgPoint> {
     let chi2 = build_chi2_tensor(nl);
     let total_dipoles = geom.positions.len();
@@ -405,44 +377,21 @@ fn run_shg_sweep(
             let mut params_omega = params.clone();
             let mut params_2omega = params.clone();
             if let Some(sub) = &solver.substrate {
-                if let Ok(eps_sub) =
-                    resolve_material_epsilon(&sub.material, wl, gold, silver, copper, tio2, sio2, al2o3, si, gaas)
-                {
+                if let Ok(eps_sub) = resolve_material_epsilon(materials, &sub.material, wl) {
                     params_omega.substrate_runtime =
                         Some(SubstrateRuntime::from_spec(sub, eps_sub, epsilon_m, wl));
                 }
-                if let Ok(eps_sub) = resolve_material_epsilon(
-                    &sub.material,
-                    wl_2omega,
-                    gold,
-                    silver,
-                    copper,
-                    tio2,
-                    sio2,
-                    al2o3,
-                    si,
-                    gaas,
-                ) {
-                    params_2omega.substrate_runtime =
-                        Some(SubstrateRuntime::from_spec(sub, eps_sub, epsilon_m, wl_2omega));
+                if let Ok(eps_sub) = resolve_material_epsilon(materials, &sub.material, wl_2omega) {
+                    params_2omega.substrate_runtime = Some(SubstrateRuntime::from_spec(
+                        sub, eps_sub, epsilon_m, wl_2omega,
+                    ));
                 }
             }
 
             // Build dipoles at ω.
             let mut dipoles_omega = Vec::with_capacity(total_dipoles);
             for i in 0..total_dipoles {
-                let epsilon = match resolve_material_epsilon(
-                    &geom.materials[i],
-                    wl,
-                    gold,
-                    silver,
-                    copper,
-                    tio2,
-                    sio2,
-                    al2o3,
-                    si,
-                    gaas,
-                ) {
+                let epsilon = match resolve_material_epsilon(materials, &geom.materials[i], wl) {
                     Ok(e) => e,
                     Err(_) => return None,
                 };
@@ -472,21 +421,11 @@ fn run_shg_sweep(
             // Build dipoles at 2ω (material evaluated at λ/2).
             let mut dipoles_2omega = Vec::with_capacity(total_dipoles);
             for i in 0..total_dipoles {
-                let epsilon = match resolve_material_epsilon(
-                    &geom.materials[i],
-                    wl_2omega,
-                    gold,
-                    silver,
-                    copper,
-                    tio2,
-                    sio2,
-                    al2o3,
-                    si,
-                    gaas,
-                ) {
-                    Ok(e) => e,
-                    Err(_) => return None, // 2ω out of material range — skip
-                };
+                let epsilon =
+                    match resolve_material_epsilon(materials, &geom.materials[i], wl_2omega) {
+                        Ok(e) => e,
+                        Err(_) => return None, // 2ω out of material range — skip
+                    };
                 let volume = geom.spacings[i].powi(3);
                 let f = geom.fill_fractions[i];
                 let dipole = if let Some(hint) = &geom.hints[i] {
@@ -616,21 +555,13 @@ pub fn write_shg_csv(shg: &[ShgPoint], path: &Path, job: &JobConfig) -> Result<(
 /// 3. Drive the 3ω system with the χ^(3) source terms.
 ///
 /// Wavelengths where 3ω material resolution fails are silently skipped.
-#[allow(clippy::too_many_arguments)]
 fn run_thg_sweep(
     nl: &NonlinearConfig,
     wavelengths: &[f64],
     geom: &lumina_geometry::scene::SceneDipoles,
     params: &SimulationParams,
     solver: &CdaSolver,
-    gold: &lumina_materials::johnson_christy::JohnsonChristyMaterial,
-    silver: &lumina_materials::johnson_christy::JohnsonChristyMaterial,
-    copper: &lumina_materials::johnson_christy::JohnsonChristyMaterial,
-    tio2: &lumina_materials::palik::PalikMaterial,
-    sio2: &lumina_materials::palik::PalikMaterial,
-    al2o3: &lumina_materials::palik::PalikMaterial,
-    si: &lumina_materials::palik::PalikMaterial,
-    gaas: &lumina_materials::palik::PalikMaterial,
+    materials: &MaterialLibrary,
 ) -> Vec<ThgPoint> {
     let chi3 = build_chi3_tensor(nl);
     let total_dipoles = geom.positions.len();
@@ -652,44 +583,21 @@ fn run_thg_sweep(
             let mut params_omega = params.clone();
             let mut params_3omega = params.clone();
             if let Some(sub) = &solver.substrate {
-                if let Ok(eps_sub) =
-                    resolve_material_epsilon(&sub.material, wl, gold, silver, copper, tio2, sio2, al2o3, si, gaas)
-                {
+                if let Ok(eps_sub) = resolve_material_epsilon(materials, &sub.material, wl) {
                     params_omega.substrate_runtime =
                         Some(SubstrateRuntime::from_spec(sub, eps_sub, epsilon_m, wl));
                 }
-                if let Ok(eps_sub) = resolve_material_epsilon(
-                    &sub.material,
-                    wl_3omega,
-                    gold,
-                    silver,
-                    copper,
-                    tio2,
-                    sio2,
-                    al2o3,
-                    si,
-                    gaas,
-                ) {
-                    params_3omega.substrate_runtime =
-                        Some(SubstrateRuntime::from_spec(sub, eps_sub, epsilon_m, wl_3omega));
+                if let Ok(eps_sub) = resolve_material_epsilon(materials, &sub.material, wl_3omega) {
+                    params_3omega.substrate_runtime = Some(SubstrateRuntime::from_spec(
+                        sub, eps_sub, epsilon_m, wl_3omega,
+                    ));
                 }
             }
 
             // Build dipoles at ω.
             let mut dipoles_omega = Vec::with_capacity(total_dipoles);
             for i in 0..total_dipoles {
-                let epsilon = match resolve_material_epsilon(
-                    &geom.materials[i],
-                    wl,
-                    gold,
-                    silver,
-                    copper,
-                    tio2,
-                    sio2,
-                    al2o3,
-                    si,
-                    gaas,
-                ) {
+                let epsilon = match resolve_material_epsilon(materials, &geom.materials[i], wl) {
                     Ok(e) => e,
                     Err(_) => return None,
                 };
@@ -719,21 +627,11 @@ fn run_thg_sweep(
             // Build dipoles at 3ω (material evaluated at λ/3).
             let mut dipoles_3omega = Vec::with_capacity(total_dipoles);
             for i in 0..total_dipoles {
-                let epsilon = match resolve_material_epsilon(
-                    &geom.materials[i],
-                    wl_3omega,
-                    gold,
-                    silver,
-                    copper,
-                    tio2,
-                    sio2,
-                    al2o3,
-                    si,
-                    gaas,
-                ) {
-                    Ok(e) => e,
-                    Err(_) => return None, // 3ω out of material range — skip
-                };
+                let epsilon =
+                    match resolve_material_epsilon(materials, &geom.materials[i], wl_3omega) {
+                        Ok(e) => e,
+                        Err(_) => return None, // 3ω out of material range — skip
+                    };
                 let volume = geom.spacings[i].powi(3);
                 let f = geom.fill_fractions[i];
                 let dipole = if let Some(hint) = &geom.hints[i] {
@@ -856,36 +754,13 @@ pub fn write_thg_csv(thg: &[ThgPoint], path: &Path, job: &JobConfig) -> Result<(
 }
 
 /// Resolve the dielectric function for a material identifier at a given wavelength.
-#[allow(clippy::too_many_arguments)]
 fn resolve_material_epsilon(
+    materials: &MaterialLibrary,
     material_id: &str,
     wavelength_nm: f64,
-    gold: &JohnsonChristyMaterial,
-    silver: &JohnsonChristyMaterial,
-    copper: &JohnsonChristyMaterial,
-    tio2: &PalikMaterial,
-    sio2: &PalikMaterial,
-    al2o3: &PalikMaterial,
-    si: &PalikMaterial,
-    gaas: &PalikMaterial,
 ) -> Result<Complex64> {
-    let provider: &dyn MaterialProvider = match material_id {
-        "Au_JC"        => gold,
-        "Ag_JC"        => silver,
-        "Cu_JC"        => copper,
-        "TiO2_Palik"   => tio2,
-        "SiO2_Palik"   => sio2,
-        "Al2O3_Palik"  => al2o3,
-        "Si_Palik"     => si,
-        "GaAs_Palik"   => gaas,
-        _ => anyhow::bail!(
-            "Unknown material '{}'. Valid: Au_JC, Ag_JC, Cu_JC, \
-             TiO2_Palik, SiO2_Palik, Al2O3_Palik, Si_Palik, GaAs_Palik",
-            material_id
-        ),
-    };
-    provider
-        .dielectric_function(wavelength_nm)
+    materials
+        .dielectric_function(material_id, wavelength_nm)
         .map_err(|e| anyhow::anyhow!("Material '{}' at {:.1} nm: {}", material_id, wavelength_nm, e))
 }
 
@@ -1049,5 +924,90 @@ fn create_backend(preference: &str) -> Arc<dyn ComputeBackend> {
             }
             Arc::new(lumina_compute::CpuBackend::new())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lumina_core::mie::mie_cross_sections;
+
+    const ICOSAHEDRON: &str =
+        concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/au_icosahedron_k6.xyz");
+
+    /// Job for the 923-atom Au icosahedron at bulk volume per atom.
+    fn icosahedron_job(wavelength_nm: f64, species_map: &str) -> JobConfig {
+        let text = format!(
+            r#"
+            [simulation]
+            wavelengths = {{ values = [{wavelength_nm}] }}
+            backend = "cpu"
+
+            [[geometry.object]]
+            name = "Au923"
+            material = "Au_JC"
+            dipole_spacing = 0.2569
+
+            [geometry.object.shape]
+            type = "file"
+            path = "{ICOSAHEDRON}"
+
+            [geometry.object.species_map]
+            {species_map}
+            "#
+        );
+        toml::from_str(&text).expect("test job should parse")
+    }
+
+    #[test]
+    fn fcd_cell_follows_uniform_spacing() {
+        assert_eq!(fcd_settings(&[0.2569; 4]), (true, 0.2569));
+        let (use_fcd, _) = fcd_settings(&[0.2569, 0.2569, 2.0]);
+        assert!(!use_fcd, "mixed spacings must disable FCD");
+    }
+
+    /// Before the FCD cell size followed `dipole_spacing`, this cluster
+    /// absorbed ~0.28 nm² at 500 nm against ~0.48 nm² from Mie theory for
+    /// the equal-volume sphere (the 3 nm default cell smeared every
+    /// interaction in the 3 nm cluster).
+    #[test]
+    fn atomistic_gold_cluster_absorption_near_mie() {
+        let wl = 500.0;
+        let out = run_simulation(&icosahedron_job(wl, "")).expect("run");
+        let c_abs = out.spectra[0].absorption;
+
+        let volume = 923.0 * 0.2569_f64.powi(3);
+        let r_eq = (3.0 * volume / (4.0 * std::f64::consts::PI)).cbrt();
+        let eps = MaterialLibrary::standard()
+            .dielectric_function("Au_JC", wl)
+            .expect("Au_JC at 500 nm");
+        let (_, _, mie_abs) = mie_cross_sections(r_eq, wl, eps, 1.0);
+        let err = (c_abs - mie_abs).abs() / mie_abs;
+        assert!(
+            err < 0.2,
+            "C_abs = {c_abs:.4} nm², Mie {mie_abs:.4} nm² ({:.0}%)",
+            err * 100.0
+        );
+    }
+
+    #[test]
+    fn species_map_accepts_lorentz_drude_materials() {
+        let wl = 500.0;
+        let au = run_simulation(&icosahedron_job(wl, "")).expect("Au run");
+        let pt = run_simulation(&icosahedron_job(wl, r#"Au = "Pt_LD""#)).expect("Pt_LD run");
+        let (a, p) = (au.spectra[0].absorption, pt.spectra[0].absorption);
+        assert!(p > 0.0 && (p - a).abs() > 0.05 * a, "Au {a}, Pt_LD {p}");
+    }
+
+    #[test]
+    fn lorentz_drude_range_is_enforced() {
+        let err = run_simulation(&icosahedron_job(200.0, r#"Au = "Pt_LD""#))
+            .err()
+            .expect("200 nm is outside the Pt_LD fit")
+            .to_string();
+        assert!(
+            err.contains("Pt_LD") && err.contains("outside the data range"),
+            "{err}"
+        );
     }
 }

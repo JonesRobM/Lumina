@@ -52,6 +52,15 @@ pub enum SceneError {
 
     #[error("Scene contains no objects")]
     EmptyScene,
+
+    #[error(
+        "Object '{name}': dipole_spacing must be a positive length in nm (got {spacing}). \
+         Each dipole stands for a cube of volume dipole_spacing³. For an atomistic .xyz \
+         import use the bulk volume per atom, dipole_spacing = V_atom^(1/3); for an fcc \
+         metal with lattice constant a that is a/4^(1/3) (Au 0.2569 nm, Ag 0.2574 nm, \
+         Cu 0.2277 nm)"
+    )]
+    InvalidSpacing { name: String, spacing: f64 },
 }
 
 // ─── Shape specification ─────────────────────────────────────────────────────
@@ -168,6 +177,15 @@ impl ShapeSpec {
         spacing: f64,
         obj_name: &str,
     ) -> Result<(Vec<[f64; 3]>, Vec<Option<String>>, Vec<f64>), SceneError> {
+        // The spacing sets each dipole's volume (spacing³) for every shape,
+        // including file imports, so zero, negative or NaN would silently
+        // give zero or meaningless polarisabilities.
+        if !(spacing > 0.0 && spacing.is_finite()) {
+            return Err(SceneError::InvalidSpacing {
+                name: obj_name.to_string(),
+                spacing,
+            });
+        }
         match self {
             ShapeSpec::CoreShell { base, core_material, shells } => {
                 let outer = core_shell_outer_primitive(base, shells);
@@ -1037,6 +1055,64 @@ mod tests {
         let geom = sphere_scene(10.0, 2.0).build_geometry().unwrap();
         let has_partial = geom.fill_fractions.iter().any(|&f| f < 1.0);
         assert!(has_partial, "Expected surface dipoles with fill_fraction < 1");
+    }
+
+    fn icosahedron_object(spacing: f64) -> ObjectSpec {
+        ObjectSpec {
+            name: "Au923".to_string(),
+            shape: ShapeSpec::File {
+                path: concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../examples/au_icosahedron_k6.xyz"
+                )
+                .to_string(),
+            },
+            material: "Au_JC".to_string(),
+            dipole_spacing: spacing,
+            transform: ObjectTransform::default(),
+            species_map: HashMap::new(),
+        }
+    }
+
+    /// A zero, negative or NaN spacing must be refused, with advice on what to use.
+    #[test]
+    fn test_non_positive_spacing_is_rejected() {
+        for bad in [0.0, -0.25, f64::NAN] {
+            let scene = SceneSpec {
+                objects: vec![icosahedron_object(bad)],
+            };
+            match scene.build_geometry() {
+                Err(e @ SceneError::InvalidSpacing { .. }) => {
+                    let msg = e.to_string();
+                    assert!(msg.contains("Au923") && msg.contains("0.2569"), "{msg}");
+                }
+                Err(e) => panic!("spacing {bad}: unexpected error {e}"),
+                Ok(_) => panic!("spacing {bad} should be rejected"),
+            }
+        }
+        let sphere = SceneSpec {
+            objects: vec![ObjectSpec {
+                dipole_spacing: 0.0,
+                ..ObjectSpec::default_sphere()
+            }],
+        };
+        assert!(matches!(
+            sphere.build_geometry(),
+            Err(SceneError::InvalidSpacing { .. })
+        ));
+    }
+
+    /// XYZ import: one dipole per atom, each carrying the object's spacing.
+    #[test]
+    fn test_xyz_import_one_dipole_per_atom() {
+        let geom = SceneSpec {
+            objects: vec![icosahedron_object(0.2569)],
+        }
+        .build_geometry()
+        .expect("example icosahedron should load");
+        assert_eq!(geom.positions.len(), 923);
+        assert!(geom.spacings.iter().all(|&d| d == 0.2569));
+        assert!(geom.fill_fractions.iter().all(|&f| f == 1.0));
     }
 
     /// Species map must correctly assign different materials to different labels.
