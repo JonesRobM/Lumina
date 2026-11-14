@@ -152,7 +152,7 @@ impl CdaSolver {
                 }
             }
             let p_sq: f64 = (0..3).map(|c| response.moments[[i, c]].norm_sqr()).sum();
-            c_abs += pa_inv_alpha_conj_p.im - (2.0 / 3.0) * k3 * p_sq;
+            c_abs += pa_inv_alpha_conj_p.im - k3 / (6.0 * std::f64::consts::PI) * p_sq;
         }
         c_abs *= k / e0_sq;
 
@@ -196,8 +196,10 @@ impl OpticalSolver for CdaSolver {
         }
         c_ext *= k / e0_sq;
 
-        // Absorption: C_abs = (k / |E0|^2) * Sum_i [ Im(p_i . (alpha_i^{-1})* . p_i*) - (2/3)k^3 |p_i|^2 ]
-        // Same 4π convention as extinction (absorbed into Green's function).
+        // Absorption: C_abs = (k / |E0|^2) * Sum_i [ Im(p_i . (alpha_i^{-1})* . p_i*) - k^3/(6π) |p_i|^2 ]
+        // Draine's (2/3)k³ term is for Gaussian α; with α in SI/ε₀ units
+        // (α = 4π α_Gauss) the radiative-reaction term becomes k³/(6π), the
+        // same constant as in `radiative_correction`.
         let mut c_abs = 0.0;
         let k3 = k.powi(3);
         for i in 0..n {
@@ -220,7 +222,7 @@ impl OpticalSolver for CdaSolver {
                 .map(|c| response.moments[[i, c]].norm_sqr())
                 .sum();
 
-            c_abs += pa_inv_alpha_conj_p.im - (2.0 / 3.0) * k3 * p_sq;
+            c_abs += pa_inv_alpha_conj_p.im - k3 / (6.0 * std::f64::consts::PI) * p_sq;
         }
         c_abs *= k / e0_sq;
 

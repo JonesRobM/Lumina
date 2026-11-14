@@ -96,16 +96,12 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Commands::Materials => {
-            println!("Available materials:");
+            println!("Available materials (use the identifier in `material` or `species_map`):");
             println!();
-            println!("  Johnson & Christy (1972) metals:");
-            println!("    Au_JC      — Gold,   188–892 nm");
-            println!("    Ag_JC      — Silver, 188–892 nm");
-            println!("    Cu_JC      — Copper, 188–892 nm");
-            println!();
-            println!("  Palik Handbook dielectrics:");
-            println!("    TiO2_Palik — Rutile TiO₂, 300–1000 nm");
-            println!("    SiO2_Palik — Fused silica SiO₂, 300–1000 nm");
+            for (id, provider) in lumina_materials::library::MaterialLibrary::standard().iter() {
+                let (lo, hi) = provider.wavelength_range();
+                println!("  {id:<12} {:<36} {lo:.0}–{hi:.0} nm", provider.name());
+            }
             Ok(())
         }
     }

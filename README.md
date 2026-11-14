@@ -72,15 +72,16 @@ Lumina is a Rust framework for computing the linear and nonlinear optical respon
 
 ### Materials
 
-- Johnson & Christy (1972): Au, Ag, Cu — 43 data points, 188–892 nm
-- Palik handbook: TiO₂, SiO₂, Al₂O₃, Si (400–1100 nm), GaAs (300–1000 nm)
-- Cubic spline interpolation for smooth ε(λ)
+- Johnson & Christy (1972): Au, Ag, Cu — 43 data points, 188–892 nm (`Au_JC`, `Ag_JC`, `Cu_JC`)
+- Palik handbook: TiO₂, SiO₂, Al₂O₃ (300–1000 nm), Si (400–1100 nm), GaAs (300–1000 nm) (`TiO2_Palik`, …)
+- Rakić et al. (1998) Lorentz–Drude models for Ag, Al, Au, Be, Cr, Cu, Ni, Pd, Pt, Ti, W (`Ag_LD`, …, `W_LD`), analytic, valid over each fit's range (207–12 398 nm at most; see `lumina-cli materials`)
+- Cubic spline interpolation for smooth ε(λ) from tabulated data; wavelengths outside a material's range are refused
 
 ### Geometry
 
 - Primitives: sphere, cylinder, cuboid, ellipsoid, helix
 - CoreShell: sphere/cylinder/cuboid/ellipsoid core with any number of shell layers
-- `.xyz` import — treat each atom as a dipole (Å→nm auto-conversion, nearest-neighbour auto-detection)
+- `.xyz` import — treat each atom as a dipole (Å→nm conversion; `dipole_spacing` sets the volume per atom)
 - `.obj` mesh import — volume-filling dipole lattice via ray-casting
 - Multi-object scenes: independent position, rotation (Euler XYZ), and scale per object
 - Supplied example: Au Mackay icosahedron (k=6, 923 atoms, `examples/au_icosahedron_k6.xyz`)
@@ -153,15 +154,17 @@ Save as `gold_sphere.toml`:
 
 ```toml
 [simulation]
-wavelengths = { range = [400.0, 900.0], points = 100 }
+wavelengths = { range = [400.0, 850.0], points = 91 }
 environment_n = 1.0
 
 [[geometry.object]]
 name = "Au_sphere"
-type = "sphere"
-radius = 20.0
 material = "Au_JC"
-dipole_spacing = 2.0
+dipole_spacing = 2.0          # nm; each dipole is a cube of this side
+
+[geometry.object.shape]
+type = "sphere"
+radius = 20.0                 # nm
 
 [output]
 directory = "./output"
@@ -172,156 +175,158 @@ Run:
 
 ```bash
 cargo run --release -p lumina-cli -- run gold_sphere.toml
+cargo run --release -p lumina-cli -- validate gold_sphere.toml   # parse and check only
+cargo run --release -p lumina-cli -- materials                   # material identifiers and ranges
 ```
 
-Output in `./output/spectra.csv`:
+Output in `./output/spectra.csv` (cross-sections in nm²):
 
 ```
-# Lumina v0.4.1 | object: Au_sphere | material: Au_JC | spacing: 2.0 nm
+# Lumina CDA Solver — Cross-Section Spectra
+# Version: 0.3.0
+# environment_n: 1
+# object 'Au_sphere': material=Au_JC, dipole_spacing=2 nm
+#
 wavelength_nm,extinction_nm2,absorption_nm2,scattering_nm2
-400.0,3.21e2,2.87e2,3.40e1
-...
-520.0,1.19e2,1.02e2,1.73e1
-...
+400.00,...
 ```
 
----
+### Job file reference
 
-## Worked Example: Au–SiO₂ Core-Shell on a Glass Substrate
+| Table / key | Meaning |
+|---|---|
+| `[simulation]` `wavelengths` | `{ range = [start, end], points = n }` or `{ values = [...] }`, in nm |
+| `environment_n` | Refractive index of the surrounding medium (default 1.0) |
+| `solver_tolerance`, `max_iterations` | GMRES settings (used for N > 1000 dipoles) |
+| `backend` | `"auto"` (default), `"cpu"` or `"gpu"` |
+| `matrix_memory_gib` | Budget for caching the interaction matrix (default 2.0) |
+| `[simulation.substrate]` | Optional: `material`, `z_interface` (nm), `use_retarded` (default true), `use_sommerfeld` |
+| `[[geometry.object]]` | One per object: `name`, `material`, `dipole_spacing` (nm, must be > 0), optional `position` (nm), `rotation_deg`, `scale` |
+| `[geometry.object.shape]` | `type` = `sphere` \| `cylinder` \| `cuboid` \| `ellipsoid` \| `helix` \| `coreshell` \| `file`, plus that shape's keys |
+| `[geometry.object.species_map]` | For `.xyz` imports: element label → material identifier |
+| `[output]` | `directory`, `save_spectra`, `save_json`, `save_near_field` |
+| `[nonlinear]` | Optional SHG/THG settings (below) |
 
-This example demonstrates CoreShell geometry, the retarded substrate correction, and the parallel wavelength sweep.
+Points worth knowing:
 
-Save as `coreshell_on_substrate.toml`:
+- **Placement keys sit directly on the object** (`position = [x, y, z]`,
+  `rotation_deg = [rx, ry, rz]`, `scale = 1.0`); there is no `transform`
+  subtable. The transform is scale → rotate → translate, with
+  R = Rz(rz)·Ry(ry)·Rx(rx) in degrees. Every shape is centred on the origin
+  before the transform.
+- **Unknown keys are ignored**, not rejected, so a misspelt or misplaced key
+  silently has no effect. `lumina-cli validate` only checks that the file parses.
+- **`dipole_spacing` is a volume, not just a grid step.** Each dipole's
+  Clausius–Mossotti polarisability uses the volume `dipole_spacing³`, and the
+  filtered Green's function (FCD) uses the same value as its cell size. Zero,
+  negative or NaN spacings are rejected. `scale` moves dipoles but does not
+  change their volume.
+- **Incident field is fixed in the CLI**: a plane wave travelling along +z,
+  polarised along x. To probe other directions, rotate the object instead
+  (see *Orientation averaging* below). The GUI additionally offers y and
+  circular polarisation.
+- **Materials**: `lumina-cli materials` lists every identifier with its valid
+  wavelength range. Asking for a wavelength outside that range is an error,
+  never an extrapolation.
+- Periodic lattices (Ewald sums) are available through the library API
+  (`CdaSolver::lattice`), not from CLI job files.
+
+### Core-shell particle on a glass substrate
 
 ```toml
 [simulation]
-wavelengths = { range = [400.0, 900.0], points = 150 }
-environment_n = 1.33   # water
+wavelengths = { range = [400.0, 850.0], points = 150 }
+environment_n = 1.33          # water
 
 [simulation.substrate]
 material = "SiO2_Palik"
-z_interface = -22.0    # nm — structure sits just above the glass surface
+z_interface = -22.0           # nm — just below the particle
 
 [[geometry.object]]
 name = "Au-SiO2_core-shell"
-type = "coreshell"
+material = "Au_JC"            # required; the shape's own materials take precedence
 dipole_spacing = 2.0
 
-[geometry.object.core_shape]
-type = "sphere"
-radius = 15.0          # nm Au core
-
+[geometry.object.shape]
+type = "coreshell"
 core_material = "Au_JC"
 
-[[geometry.object.shells]]
-thickness = 5.0        # nm SiO2 shell
-material = "SiO2_Palik"
+[geometry.object.shape.base]
+type = "sphere"
+radius = 15.0                 # nm Au core
 
-[geometry.object.transform]
-position = [0.0, 0.0, 0.0]
+[[geometry.object.shape.shells]]
+thickness = 5.0               # nm SiO2 shell
+material = "SiO2_Palik"
 
 [output]
 directory = "./output/coreshell"
-save_spectra = true
 save_near_field = true
 ```
 
-Run:
+The SiO₂ data stop at 1000 nm, and the substrate material is evaluated at every
+wavelength, so keep the sweep inside both materials' ranges.
 
-```bash
-cargo run --release -p lumina-cli -- run coreshell_on_substrate.toml
-```
+### Anisotropic ellipsoids
 
-The simulation will:
-1. Discretise a 15 nm Au sphere surrounded by a 5 nm SiO₂ shell (dipole spacing 2 nm → ~2800 dipoles)
-2. Add the SiO₂ substrate image-dipole correction at z = −22 nm
-3. Solve 150 wavelengths in parallel across all CPU cores
-4. Write `spectra.csv` and a near-field heatmap at peak extinction
-
----
-
-## Advanced Features
-
-### Anisotropic Ellipsoids
-
-Ellipsoidal objects automatically use a per-dipole 3×3 polarisability tensor. Set semi-axes and an Euler rotation to orient the particle in the lab frame:
+Ellipsoidal objects automatically use a per-dipole 3×3 polarisability tensor:
 
 ```toml
 [[geometry.object]]
 name = "Au_nanorod"
+material = "Au_JC"
+dipole_spacing = 2.0
+rotation_deg = [0.0, 45.0, 0.0]   # tilt 45° about y
+
+[geometry.object.shape]
 type = "ellipsoid"
-semi_axes = [30.0, 8.0, 8.0]   # prolate: long axis along x
-material = "Au_JC"
-dipole_spacing = 2.0
-
-[geometry.object.transform]
-rotation_deg = [0.0, 45.0, 0.0]   # tilt 45° around y
+semi_axes = [30.0, 8.0, 8.0]      # prolate: long axis along x before rotation
 ```
 
-Depolarisation factors L_x, L_y, L_z are computed analytically via 16-point Gauss–Legendre quadrature (exact for spheres, ~1 ppm accuracy for aspect ratios up to 20:1).
+Depolarisation factors L_x, L_y, L_z are computed via 16-point Gauss–Legendre quadrature (exact for spheres, ~1 ppm for aspect ratios up to 20:1).
 
-### Periodic Structures
-
-Model a 1D grating or 2D metasurface using lattice sums with Bloch boundary conditions:
-
-```toml
-[simulation]
-wavelengths = { range = [400.0, 900.0], points = 100 }
-k_bloch = [0.005, 0.0, 0.0]   # nm⁻¹, oblique incidence
-
-[lattice]
-type = "planar"
-a1 = [50.0, 0.0, 0.0]   # nm
-a2 = [0.0, 50.0, 0.0]
-
-[[geometry.object]]
-name = "Au_disk"
-type = "cylinder"
-length = 20.0
-radius = 15.0
-material = "Au_JC"
-dipole_spacing = 2.0
-```
-
-### Multi-Object Dimers
-
-Assemble a dimer with precise inter-particle separation:
+### Multi-object dimers
 
 ```toml
 [[geometry.object]]
 name = "particle_A"
-type = "sphere"
-radius = 15.0
 material = "Au_JC"
 dipole_spacing = 2.0
-[geometry.object.transform]
 position = [-20.0, 0.0, 0.0]
+
+[geometry.object.shape]
+type = "sphere"
+radius = 15.0
 
 [[geometry.object]]
 name = "particle_B"
-type = "sphere"
-radius = 15.0
 material = "Au_JC"
 dipole_spacing = 2.0
-[geometry.object.transform]
 position = [20.0, 0.0, 0.0]
+
+[geometry.object.shape]
+type = "sphere"
+radius = 15.0
 ```
 
-### SHG & THG (Nonlinear Optics)
+Give every object the same `dipole_spacing`: the filtered Green's function
+needs a single cell size, so the CLI falls back to plain point-dipole
+interactions (and says so) when spacings differ.
 
-Compute SHG and THG spectra from a structure with broken inversion symmetry:
+### SHG & THG (nonlinear optics)
 
 ```toml
 [simulation]
-wavelengths = { range = [400.0, 900.0], points = 100 }
-environment_n = 1.0
+wavelengths = { range = [500.0, 850.0], points = 71 }
 
 [[geometry.object]]
 name = "Au_sphere"
-type = "sphere"
-radius = 20.0
 material = "Au_JC"
 dipole_spacing = 2.0
+
+[geometry.object.shape]
+type = "sphere"
+radius = 20.0
 
 [nonlinear]
 enable_shg = true
@@ -333,27 +338,74 @@ enable_thg = true
 chi3_symmetry = "isotropic_bulk"
 chi3_xxxx = [0.5, 0.0]   # nm⁶
 chi3_xxyy = [0.1, 0.0]
-
-[output]
-directory = "./output"
-save_spectra = true
 ```
 
 Outputs: `spectra.csv`, `shg_spectrum.csv` (intensity in nm⁶), `thg_spectrum.csv` (intensity in nm⁹).
+The material must also cover λ/2 (SHG) and λ/3 (THG); wavelengths where it does not are skipped.
 
-### XYZ Atomistic Import
+### Atomistic import (`.xyz`)
 
 ```toml
 [[geometry.object]]
 name = "Au_icosahedron"
-type = "file"
-path = "examples/au_icosahedron_k6.xyz"
-material = "Au_JC"
-dipole_spacing = 0.0   # 0 = auto-detect nearest-neighbour distance
+material = "Au_JC"            # used for any element not in species_map
+dipole_spacing = 0.2569       # nm = (bulk volume per Au atom)^(1/3)
 
-[species_map]
+[geometry.object.shape]
+type = "file"
+path = "examples/au_icosahedron_k6.xyz"   # relative to the directory you run from
+
+[geometry.object.species_map]
 Au = "Au_JC"
 ```
+
+- `type = "file"` accepts `.xyz` (atomistic: one dipole per atom) and `.obj`
+  (a closed mesh, filled with a cubic dipole lattice at `dipole_spacing`).
+  Any other extension is an error.
+- `.xyz` coordinates are read in ångström and converted to nm; the structure is
+  re-centred on its centroid.
+- `species_map` is a subtable of the object, keyed by the element label in the
+  `.xyz` file. Unmapped labels use the object's `material`.
+- **Choose `dipole_spacing` so that `dipole_spacing³` is the volume per atom.**
+  There is no auto-detection. For an fcc metal with lattice constant *a* the
+  volume per atom is *a*³/4, so `dipole_spacing = a / 4^(1/3)`:
+
+  | Metal | a (Å) | `dipole_spacing` (nm) |
+  |---|---|---|
+  | Au | 4.078 | 0.2569 |
+  | Ag | 4.085 | 0.2574 |
+  | Cu | 3.615 | 0.2277 |
+  | Al | 4.050 | 0.2551 |
+  | Pt | 3.924 | 0.2472 |
+  | Pd | 3.891 | 0.2451 |
+  | Ni | 3.524 | 0.2220 |
+
+- Treating each atom as a Clausius–Mossotti sphere with bulk ε is an
+  approximation. For gold clusters of ~1000 atoms it reproduces Mie theory
+  near the plasmon to ~10%, but it puts a few per cent of the oscillator
+  strength into discrete modes red of the plasmon, so absorption beyond
+  ~600 nm comes out several times larger than Mie and can wiggle or rise
+  towards the near-infrared. Do not read physics into that tail without a
+  convergence check.
+
+### Orientation averaging
+
+The CLI always illuminates along +z with x polarisation, so the spectrum
+reports the response to a field along the object's lab-frame x axis. For a
+particle much smaller than the wavelength, the orientation-averaged
+extinction and absorption are the mean of three runs that put each of the
+object's own axes along x:
+
+| Run | `rotation_deg` | Object axis along the field |
+|---|---|---|
+| 1 | `[0.0, 0.0, 0.0]` | x |
+| 2 | `[0.0, 0.0, 90.0]` | y |
+| 3 | `[0.0, 90.0, 0.0]` | z |
+
+C_avg = (C₁ + C₂ + C₃)/3. This is exact in the dipole (quasi-static) limit,
+where the response is the trace of a polarisability tensor. For larger
+particles, average over many orientations (e.g. random or Lebedev-quadrature
+Euler angles, including a rotation about z to sample the polarisation).
 
 ---
 
